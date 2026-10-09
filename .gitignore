@@ -1,0 +1,24 @@
+# Build / test artefacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Daemon runtime state
+*.db
+*.sqlite
+*.sqlite3
+pulse.toml
+
+# Presto device files (never commit credentials)
+presto/secrets.py
+presto/config.py
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

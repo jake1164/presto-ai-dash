@@ -1,0 +1,51 @@
+{
+  "app": "presto-ai-pulse",
+  "version": "0.1.0",
+  "updated_at": "2026-10-09T11:00:00-04:00",
+  "overall_status": "ok",
+  "cards": [
+    {
+      "id": "pulse",
+      "title": "AI Pulse",
+      "status": "ok",
+      "primary": "128k tokens today",
+      "secondary": "Ollama active · LiteLLM OK",
+      "detail": [
+        "LiteLLM: 42 requests today",
+        "Ollama: 38 tok/s last run",
+        "Alerts: none"
+      ],
+      "accent": "green",
+      "alert": null
+    },
+    {
+      "id": "ollama",
+      "title": "Ollama",
+      "status": "active",
+      "primary": "38 tok/s",
+      "secondary": "qwen model · last run 2m ago",
+      "detail": [
+        "Reachable: yes",
+        "Prompt tokens: 812",
+        "Output tokens: 1944",
+        "Duration: 51s"
+      ],
+      "accent": "blue",
+      "alert": null
+    },
+    {
+      "id": "litellm",
+      "title": "LiteLLM",
+      "status": "ok",
+      "primary": "42 requests",
+      "secondary": "128k tokens today",
+      "detail": [
+        "Spend today: unavailable",
+        "Top model: unavailable",
+        "Errors: 0"
+      ],
+      "accent": "green",
+      "alert": null
+    }
+  ]
+}

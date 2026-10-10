@@ -37,6 +37,62 @@ It must not grow into a second full UI.
 | Configurable polling interval | Already in config; expose it on the device. |
 | Simple web preview | Render the same status JSON in a browser for debugging. |
 
+## Application usage monitoring
+
+Planned as a separate checkpoint after M5, outside the current v0 milestones.
+This does not expand M3 or require application-specific storage now.
+
+Monitor multiple configured applications, independently of which model or
+provider they use. A book app that verifies titles and recommends books is one
+example, not a special case in the daemon or UI.
+
+- Each application has a stable `app_id` and configurable display name.
+  Provider/model changes and credential rotation must preserve its identity
+  and history. Adding another application requires configuration and telemetry
+  attribution setup, not new application-specific code.
+- Collection adapters map measured usage to that identity. Start with several
+  applications routed through LiteLLM, using a dedicated virtual key per app.
+  Optional operation labels such as `book-verify` and `book-recommend` describe
+  work within an app; they do not replace the app identity.
+- A later direct-call adapter can read summaries exported by an app wrapper
+  for Ollama or another provider. It feeds the same normalized application
+  metrics. Health polling alone cannot reconstruct direct-call usage.
+- Keep provider/gateway totals and application views distinct. An app's usage
+  is a subset of the gateway total; never add those two together. A request
+  matched by both a key and a tag counts once. Proxy and direct reporting of
+  the same request require an explicit ownership/deduplication rule.
+- Provider credentials and attribution configuration stay on the daemon.
+  Keys or prompts must not appear in the Presto payload; request contents are
+  unnecessary for this display.
+
+Reusable metrics are request count, input/output tokens, reported spend when
+available, errors, latency, last activity, and current/recent model. Show
+unavailable values honestly; missing telemetry is not zero usage. Collection
+freshness is separate from last application activity.
+
+Optional daily/weekly application budgets can drive the stacked usage bars.
+Label these as app-defined budgets, with a configured metric/unit, period and
+reset/timezone convention; they are not provider account quotas. Weekly totals
+need a complete seven-day upstream window or retained daily aggregates. M3's
+72-hour snapshot retention alone cannot support them. Never sum successive
+cumulative counter snapshots as if they were individual requests.
+
+The future Presto view uses a scrolling Apps summary and one reusable detail
+renderer for any configured app. It should cope with more rows than fit on
+screen and preserve horizontal card navigation. API/config shapes and any
+additional storage are to be specified in that checkpoint's readiness review.
+
+First checkpoint acceptance: at least two configured apps have isolated usage
+and shared rendering; adding a third needs no code changes; key rotation and
+provider changes retain app identity; unknown metrics and duplicate attribution
+are tested. Direct-call reporting is a later adapter, not a prerequisite.
+
+Before implementation, verify the installed LiteLLM version, database-backed
+usage availability, reporting permissions, time windows, and supported filters.
+The intended approach follows its official [virtual-key documentation](https://docs.litellm.ai/docs/proxy/virtual_keys),
+[request tags](https://docs.litellm.ai/docs/proxy/request_tags), and
+[cost tracking](https://docs.litellm.ai/docs/proxy/cost_tracking).
+
 ## Providers and messaging (unscheduled)
 
 | Item | Notes |
@@ -63,7 +119,8 @@ It must not grow into a second full UI.
 
 - Provider logo packs, mascots, fonts or artwork in the core repository.
 - A plugin marketplace or external package system.
-- Per-project billing breakdown.
+- Invoice generation, billing reconciliation, and chargeback accounting.
+  Configured application usage summaries above are a bounded display feature.
 - A cloud-hosted dashboard or user accounts.
 - Claude Code / Codex telemetry via credential scraping or reverse-engineering
   private CLI state. Only official or user-exported paths.

@@ -7,7 +7,7 @@ Status of each milestone in `presto_ai_dash_project_plan.md` §16.
 | 0 | Repo skeleton | **done** | Repo shell, MIT licence, README, docs, config format, sample status JSON. |
 | 1 | Static Presto demo | **done** | Three cards from static sample data, swipe/tap/long-press, LED colours, offline screen. |
 | 2 | Daemon with fake source | **done** | Runnable stdlib daemon, authenticated `/api/v1/status`, fake source, logging, TOML config, minimal snapshot insert/read; 29 M2 tests. |
-| 3 | SQLite snapshots | not started | Snapshots, alerts, retention cleanup, last-updated time. |
+| 3 | SQLite history and retention | not started; readiness complete | [Luna handoff](m3-readiness.md): bounded history, alert observations, 72-hour cleanup, UTC migration, safe shutdown. |
 | 4 | Ollama source | not started | Reachability, model/status data, optional measured stats, tokens/sec. |
 | 5 | LiteLLM source | not started | Request/token/spend data, online/offline, warning state. |
 | 6 | Alert polish | not started | Severity mapping, LED animation, quiet sound, mute/long-press, config docs. |
@@ -97,7 +97,7 @@ tests and the on-device clipped-layout/navigation checks pass.
   strings are decoded with `datetime.fromisoformat` before rendering.
 - Import/compile checks, all 142 host tests, and a separate-process localhost
   smoke check pass: missing/wrong auth returns 401, valid auth returns 200.
-- Real-source modules are uncommitted drafts with no imports or registration
+- Real-source modules are disabled drafts with no imports or registration
   in M2. Config cannot enable them. Retention, alert history, thresholds and
   trends remain deferred; M3 is not complete.
 
@@ -110,11 +110,23 @@ python -m unittest discover -s tests -v
 
 ## Planned checkpoints beyond M2
 
+The [M3 readiness review](m3-readiness.md) is complete against `93f1a46`.
+All 170 baseline tests pass. Four gaps were verified: mixed-offset ordering,
+import-time fake alert timestamps, fabricated freshness without data, and
+active request reads surviving API shutdown. The handoff defines fixes and
+acceptance checks. This review does not authorize implementation; M3 remains
+not started.
+
 - **Device polling integration:** explicitly authorize and verify Wi-Fi plus
   authenticated daemon fake-data polling before real providers. This is a
   separate checkpoint; M2 does not claim it is complete.
 - **M3–M5:** history/retention, then Ollama and LiteLLM integrations. v0 sources
   stay limited to `fake`, `ollama`, and `litellm`.
+- **Application monitoring (after M5):** a separate future checkpoint for
+  multiple configured apps with stable identities, LiteLLM attribution first,
+  reusable summary/detail views, and optional app-defined budgets. Direct-call
+  reporting follows later. See [the design and acceptance outline](future.md#application-usage-monitoring).
+  No book-app special cases or M3 application schema are required.
 - **Deployment targets:** v0 direct Python/pip/pipx; v0.1 optional Docker;
   v0.2 optional separate tray runner; v1 binaries/installers if useful.
   These targets are plans, not delivered features. The planned daemon command

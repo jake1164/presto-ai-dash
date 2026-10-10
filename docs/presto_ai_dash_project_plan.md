@@ -120,7 +120,8 @@ These are future placeholders, not part of the first build:
 - Ollama Cloud support
 - OpenCode status support
 - advanced analytics
-- per-project billing breakdown
+- application usage monitoring (separate future checkpoint after M5)
+- invoice generation, billing reconciliation, and chargeback accounting
 - complex alert rule engine
 - cloud-hosted dashboard
 - user accounts
@@ -705,6 +706,9 @@ fake-data polling before real provider integration. M1 remains device-only.
 
 ### Milestone 3: SQLite snapshots
 
+Detailed scope and acceptance contract: [M3 readiness / Luna handoff](m3-readiness.md).
+Readiness is complete; implementation still requires explicit approval.
+
 Goal:
 
 Persist simple history.
@@ -720,8 +724,15 @@ Tasks:
 Acceptance criteria:
 
 ```text
-Daemon stores and serves recent source snapshots.
+Existing M2 databases upgrade without data loss and use correct UTC ordering.
+Bounded internal snapshot/alert history survives restart.
+72-hour retention removes expired snapshots and dependent alert observations.
+Status reports the persisted update time, or null when no data remains.
+Concurrent reads/writes/cleanup and active-request shutdown tests pass.
 ```
+
+History is internal in M3; no new HTTP endpoint, trend calculation, settings
+table, incident engine, provider integration, or Presto changes are required.
 
 ### Milestone 4: Ollama source
 
@@ -823,6 +834,25 @@ later macOS polish, not a requirement. Future commands are
 
 Keep the menu tiny: status, open dashboard/status endpoint, open config folder,
 copy Presto endpoint URL, restart daemon, stop daemon, and about.
+
+### Application usage monitoring (after M5)
+
+A separate future checkpoint will monitor multiple configured applications,
+such as a book app, regardless of their provider/model. Stable application IDs,
+configurable attribution, normalized metrics, and a shared scrolling summary
+and detail renderer make new apps a configuration change rather than new code.
+
+Start with dedicated LiteLLM virtual keys per application and optional operation
+labels. A later direct-call reporting adapter uses the same application identity
+and metrics. App usage is a filtered view of gateway usage, so overlapping totals
+and attribution must not count requests twice. Optional daily/weekly app budgets
+are distinct from provider quotas; full weekly coverage needs upstream history
+or daily aggregates beyond M3's 72-hour snapshots.
+
+See [the application monitoring design](future.md#application-usage-monitoring)
+for boundaries and multi-app acceptance checks. This is planned work, not an
+implemented integration, and does not change M3 or the current v0 milestones.
+Billing reconciliation and invoice generation remain outside the project.
 
 ### Other future features (unscheduled)
 

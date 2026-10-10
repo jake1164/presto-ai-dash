@@ -10,6 +10,12 @@ M2 implements only the fake source and minimal snapshot insert/read; real
 sources, retention, alert history, and trends are deferred. Implementation
 status is tracked in `milestones.md`.
 
+The focused [M3 readiness and Luna handoff](m3-readiness.md) supersedes the
+older storage/settings/trend sketches for the M3 implementation boundary.
+It defines internal history queries, alert observations, retention, migration,
+and shutdown checks. Trends and a settings table remain deferred. The M3
+review is complete; implementation has not started.
+
 **The original readiness pass found no blockers for Milestones 0–2.** All three external contracts
 (Presto MicroPython, LiteLLM, Ollama) were checked against official sources
 at that review. The historical contract notes below were not reverified in

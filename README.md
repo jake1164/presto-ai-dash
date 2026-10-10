@@ -44,11 +44,16 @@ Out of scope for v0, and deliberately so:
 - MQTT, multi-daemon federation, Prometheus/Grafana export
 - OpenAI / Codex / Claude / Ollama Cloud / OpenCode direct usage sources
 - Provider logo packs, plugin package system, provider marketplace
-- Per-project billing breakdown, advanced analytics, alert rule engine
+- Billing reconciliation/invoices, advanced analytics, alert rule engine
 - Cloud-hosted dashboard, user accounts, desktop browser opener
 
 See [Future Features](docs/future.md) for where those live. The optional tray,
 Docker image, and binary installers are also outside v0.
+
+[Application usage monitoring](docs/future.md#application-usage-monitoring) is
+planned as a separate checkpoint after M5: multiple configured apps, reusable
+views, LiteLLM attribution first, and optional daily/weekly app budgets. A book
+app is one example; the design is independent of any single app or provider.
 
 ## Topology and Telemetry Limits
 

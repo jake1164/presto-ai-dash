@@ -2,7 +2,8 @@
 
 M2 enables only `fake`. The Ollama and LiteLLM sections below describe future
 M4/M5 contracts, not working integrations. Their draft modules are disabled
-and uncommitted. Cloud names on the static Home preview are labelled demo
+and tracked as drafts, with no runtime registration. Cloud names on the static
+Home preview are labelled demo
 values, not additional daemon sources.
 
 A source is anything that can answer "what is the state of this thing right

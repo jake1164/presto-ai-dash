@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "presto-ai-pulse-daemon"
+name = "presto-ai-dash-daemon"
 version = "0.1.0"
 description = "Small local daemon that collects AI usage/status and serves it to a Pimoroni Presto display."
 readme = "README.md"
@@ -16,7 +16,7 @@ dependencies = []
 dev = []
 
 [project.scripts]
-presto-ai-pulse = "presto_ai_pulse.app:main"
+presto-ai-dash = "presto_ai_dash.app:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,4 +1,4 @@
-# Presto AI Pulse - example Presto configuration
+# Presto AI Dash - example Presto configuration
 #
 # Copy to `config.py` on the Presto (next to main.py) and edit.
 # Wi-Fi credentials live in `secrets.py`, which is NOT committed - see

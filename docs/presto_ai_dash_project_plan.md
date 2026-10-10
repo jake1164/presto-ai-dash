@@ -1,8 +1,8 @@
-# Presto AI Pulse - Project Plan
+# Presto AI Dash - Project Plan
 
 ## 1. Project summary
 
-**Presto AI Pulse** is a small physical AI-usage/status display for the Pimoroni Presto.
+**Presto AI Dash** is a small physical AI-usage/status display for the Pimoroni Presto.
 
 It shows whether local and routed AI usage is normal, active, expensive, rate-limited, or broken. It is not trying to be a full analytics platform. The first version should be a useful desk demo that proves the Presto can act as a touch-enabled AI companion display.
 
@@ -59,7 +59,7 @@ Recommended v0 deployment:
 ```text
 Pimoroni Presto
     ↓ polls HTTP
-Presto AI Pulse daemon on toontown-int-srv1
+Presto AI Dash daemon on toontown-int-srv1
     ↓ reads
 LiteLLM on toontown-int-srv1
     ↓ routes to
@@ -295,14 +295,14 @@ Returns current dashboard state.
 
 ```json
 {
-  "app": "presto-ai-pulse",
+  "app": "presto-ai-dash",
   "version": "0.1.0",
   "updated_at": "2026-10-09T11:00:00-04:00",
   "overall_status": "ok",
   "cards": [
     {
-      "id": "pulse",
-      "title": "AI Pulse",
+      "id": "dash",
+      "title": "AI Dash",
       "status": "ok",
       "primary": "128k tokens today",
       "secondary": "Ollama active · LiteLLM OK",
@@ -411,7 +411,7 @@ No complex charting in v0.
 
 ## 12. Presto UI plan
 
-### Screen 1: AI Pulse
+### Screen 1: AI Dash
 
 Purpose:
 
@@ -535,7 +535,7 @@ Authorization: Bearer <shared-local-token>
 Single repo:
 
 ```text
-presto-ai-pulse/
+presto-ai-dash/
   README.md
   LICENSE
   docs/
@@ -546,7 +546,7 @@ presto-ai-pulse/
     future.md
   daemon/
     pyproject.toml
-    src/presto_ai_pulse/
+    src/presto_ai_dash/
       app.py
       config.py
       db.py
@@ -612,7 +612,7 @@ Tasks:
 Acceptance criteria:
 
 ```text
-Presto shows AI Pulse, Ollama, and LiteLLM cards using fake data.
+Presto shows AI Dash, Ollama, and LiteLLM cards using fake data.
 ```
 
 ### Milestone 2: Daemon with fake source

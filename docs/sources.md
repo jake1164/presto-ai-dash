@@ -14,7 +14,7 @@ class SourceSnapshot:
     cards: list          # usually empty; the daemon builds cards
 ```
 
-Adding a source means adding one module under `daemon/src/presto_ai_pulse/sources/`
+Adding a source means adding one module under `daemon/src/presto_ai_dash/sources/`
 and registering it. There is no plugin loader, no entry points, and no package
 system in v0. That is deliberate.
 

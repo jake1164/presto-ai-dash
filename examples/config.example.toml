@@ -1,7 +1,7 @@
-# Presto AI Pulse - example daemon configuration
+# Presto AI Dash - example daemon configuration
 #
-# Copy to `pulse.toml` next to wherever you run the daemon, or pass
-# `--config /path/to/pulse.toml`. Every key below is optional; the values
+# Copy to `dash.toml` next to wherever you run the daemon, or pass
+# `--config /path/to/dash.toml`. Every key below is optional; the values
 # shown are the defaults.
 #
 # The daemon has no third-party dependencies. Config is TOML because Python's
@@ -21,7 +21,7 @@ shared_token = ""
 poll_interval = 15
 
 # SQLite file for snapshot history.
-database = "pulse.db"
+database = "dash.db"
 
 # Hours of snapshot history to keep.
 retention_hours = 72
@@ -58,7 +58,7 @@ enabled = false
 # LiteLLM proxy base URL.
 base_url = "http://toontown-int-srv1:4000"
 # A LiteLLM virtual key. Read-only usage reporting is enough; the daemon never
-# makes model calls. Prefer the PULSE_LITELLM_API_KEY environment variable so
+# makes model calls. Prefer the DASH_LITELLM_API_KEY environment variable so
 # the key is not written to disk.
 api_key = ""
 # Request timeout in seconds.

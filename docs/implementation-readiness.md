@@ -1,6 +1,6 @@
 # Implementation Readiness
 
-Status of the readiness pass against `presto_ai_pulse_project_plan.md`.
+Status of the readiness pass against `presto_ai_dash_project_plan.md`.
 Written before Milestone 0 code. Records what was verified, what was decided,
 and what is genuinely blocked.
 
@@ -25,7 +25,7 @@ and each is recorded here with its rationale so it can be challenged.
 | Python floor | 3.11 | Required for `tomllib`. |
 | Presto resolution | `Presto()` default (240×240 framebuffer) | Verified: `Presto()` defaults to `full_res=False`, giving a 240×240 PicoGraphics surface on the 480×480 panel. Faster, and ample for a status card. `full_res=True` remains available. |
 | Status vocabulary | canonical `ok`, alias `normal` | See contradiction C1. |
-| Card ids / order | `pulse`, `ollama`, `litellm` | Matches the plan's example response and §12 screen order. |
+| Card ids / order | `dash`, `ollama`, `litellm` | Matches the plan's example response and §12 screen order. |
 | Daemon scheduling | one background thread per source | Simplest thing that satisfies "source collection". No cron, no async framework. |
 | Shared token when unset | generate at startup, log once, warn | Fail-closed on security (token always required) without blocking a first run. |
 
@@ -35,7 +35,7 @@ and each is recorded here with its rationale so it can be challenged.
 
 ### Safe to decide during implementation (internal, no external dependency)
 
-- Module layout inside `daemon/src/presto_ai_pulse/`
+- Module layout inside `daemon/src/presto_ai_dash/`
 - SQLite column types and indices
 - Log format
 - Exact trend comparison window and "insufficient data" wording
@@ -124,7 +124,7 @@ Verified from `ollama/ollama` `docs/api.md`.
 ```text
 daemon/                          Python 3.11+, stdlib only, zero runtime deps
   pyproject.toml
-  src/presto_ai_pulse/
+  src/presto_ai_dash/
     __init__.py
     config.py                    TOML load, defaults, env overrides, validation
     models.py                    Status, SourceSnapshot, Card, Alert

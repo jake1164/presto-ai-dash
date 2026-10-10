@@ -1,12 +1,12 @@
 {
-  "app": "presto-ai-pulse",
+  "app": "presto-ai-dash",
   "version": "0.1.0",
   "updated_at": "2026-10-09T11:00:00-04:00",
   "overall_status": "ok",
   "cards": [
     {
-      "id": "pulse",
-      "title": "AI Pulse",
+      "id": "dash",
+      "title": "AI Dash",
       "status": "ok",
       "primary": "128k tokens today",
       "secondary": "Ollama active · LiteLLM OK",

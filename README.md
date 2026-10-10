@@ -1,4 +1,4 @@
-# Presto AI Pulse
+# Presto AI Dash
 
 A small physical AI-usage/status display for the **Pimoroni Presto**.
 
@@ -17,7 +17,7 @@ not a dashboard replacement.
 Pimoroni Presto
     | polls HTTP every ~15s
     v
-Presto AI Pulse daemon  (Python, stdlib only, on your LAN)
+Presto AI Dash daemon  (Python, stdlib only, on your LAN)
     | reads
     v
 LiteLLM  --->  Ollama
@@ -46,7 +46,7 @@ See `docs/future.md` for where those live.
 
 Three sources (`fake`, `ollama`, `litellm`) feed one daemon. The daemon serves
 `GET /api/v1/status` behind a shared bearer token. The Presto polls it, shows
-three cards (AI Pulse, Ollama, LiteLLM), colours its LEDs by status, and can
+three cards (AI Dash, Ollama, LiteLLM), colours its LEDs by status, and can
 chirp on a warning. Snapshots are kept in SQLite for 72 hours so simple
 up/down trends can be shown. Nothing else.
 
@@ -57,8 +57,8 @@ up/down trends can be shown. Nothing else.
 cd daemon
 python -m venv .venv && . .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -e .
-cp ../examples/config.example.toml pulse.toml
-python -m presto_ai_pulse.app --config pulse.toml
+cp ../examples/config.example.toml dash.toml
+python -m presto_ai_dash.app --config dash.toml
 
 # Presto
 # Copy presto/*.py to the Presto, add your Wi-Fi details to secrets.py,
@@ -70,7 +70,7 @@ Full instructions: [`docs/setup.md`](docs/setup.md).
 ## Repository layout
 
 ```text
-presto-ai-pulse/
+presto-ai-dash/
   README.md
   LICENSE
   docs/
@@ -82,7 +82,7 @@ presto-ai-pulse/
     implementation-readiness.md the pre-build readiness pass
   daemon/
     pyproject.toml
-    src/presto_ai_pulse/        Python daemon, stdlib only
+    src/presto_ai_dash/        Python daemon, stdlib only
   presto/
     main.py                     MicroPython app (only file touching hardware)
     config.example.py

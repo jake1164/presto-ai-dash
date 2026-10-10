@@ -24,23 +24,23 @@ pip install -e .
 Create a config file:
 
 ```bash
-cp ../examples/config.example.toml pulse.toml
+cp ../examples/config.example.toml dash.toml
 ```
 
-Edit `pulse.toml`. At minimum set `daemon.shared_token` to something long and
+Edit `dash.toml`. At minimum set `daemon.shared_token` to something long and
 random. If you leave it empty the daemon generates one at startup and prints it
 once to the log.
 
 Run it:
 
 ```bash
-python -m presto_ai_pulse.app --config pulse.toml
+python -m presto_ai_dash.app --config dash.toml
 ```
 
 Or, if you installed the console script:
 
 ```bash
-presto-ai-pulse --config pulse.toml
+presto-ai-dash --config dash.toml
 ```
 
 Check it works:
@@ -56,11 +56,11 @@ You should get JSON with three cards, all driven by the `fake` source.
 
 | Variable | Overrides |
 | --- | --- |
-| `PULSE_SHARED_TOKEN` | `daemon.shared_token` |
-| `PULSE_LITELLM_API_KEY` | `sources.litellm.api_key` |
-| `PULSE_OLLAMA_BASE_URL` | `sources.ollama.base_url` |
-| `PULSE_LITELLM_BASE_URL` | `sources.litellm.base_url` |
-| `PULSE_LOG_LEVEL` | `logging.level` |
+| `DASH_SHARED_TOKEN` | `daemon.shared_token` |
+| `DASH_LITELLM_API_KEY` | `sources.litellm.api_key` |
+| `DASH_OLLAMA_BASE_URL` | `sources.ollama.base_url` |
+| `DASH_LITELLM_BASE_URL` | `sources.litellm.base_url` |
+| `DASH_LOG_LEVEL` | `logging.level` |
 
 Prefer these for anything secret so it never lands in a file.
 
@@ -101,7 +101,7 @@ three cards.
 
 ## 3. Enable a real source
 
-Edit `pulse.toml` and flip `enabled = true` for the source you want, then
+Edit `dash.toml` and flip `enabled = true` for the source you want, then
 restart the daemon. See `docs/sources.md` for what each source needs and what
 it can honestly report.
 

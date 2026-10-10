@@ -44,6 +44,11 @@ See `docs/future.md` for where those live.
 
 ## v0 in one paragraph
 
+**Current milestone: M2 is implemented and tested with the fake source only.**
+The three cards show labelled demo data. SQLite supports snapshot insert/read;
+retention, trends, alert history, and real sources remain future milestones.
+The paragraph below describes the planned v0.
+
 Three sources (`fake`, `ollama`, `litellm`) feed one daemon. The daemon serves
 `GET /api/v1/status` behind a shared bearer token. The Presto polls it, shows
 three cards (AI Dash, Ollama, LiteLLM), colours its LEDs by status, and can
@@ -111,7 +116,7 @@ cd daemon
 python -m unittest discover -s tests -v
 ```
 
-The daemon suite is pure CPython and needs no network. The Presto logic suite
+The daemon suite is pure CPython and uses localhost HTTP only. The Presto logic suite
 runs on the host too; only the thin hardware layer in `presto/main.py` needs a
 real device. See `docs/limitations.md` for what cannot be automated.
 

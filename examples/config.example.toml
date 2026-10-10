@@ -20,61 +20,18 @@ shared_token = ""
 # Seconds between source collections.
 poll_interval = 15
 
-# SQLite file for snapshot history.
+# SQLite file for snapshots. M2 supports insert/read only; retention is M3.
 database = "dash.db"
 
-# Hours of snapshot history to keep.
-retention_hours = 72
-
-# How often to run the retention sweep, in seconds.
-retention_sweep_interval = 900
-
 [logging]
-# One of: DEBUG, INFO, WARNING, ERROR
+# One of: DEBUG, INFO, WARNING, ERROR, CRITICAL
 level = "INFO"
 
 # --- Sources ---------------------------------------------------------------
-# Enable/disable each source. `fake` is on by default so the device has
-# something to show before real integrations are configured.
+# M2 supports only `fake`. All three cards explicitly show demo data.
+# Real Ollama and LiteLLM sources belong to M4/M5 and cannot be enabled yet.
 
 [sources.fake]
 enabled = true
 # Seconds each demo scenario is held before advancing.
 scenario_interval = 20
-
-[sources.ollama]
-enabled = false
-# Ollama's HTTP API base URL.
-base_url = "http://jake-desktop:11434"
-# Request timeout in seconds.
-timeout = 5
-# Optional JSON file written by a collector/shim holding the last *measured*
-# request. Ollama itself exposes no request history - see docs/limitations.md.
-# Leave empty to show "last measured: unavailable".
-samples_file = ""
-
-[sources.litellm]
-enabled = false
-# LiteLLM proxy base URL.
-base_url = "http://toontown-int-srv1:4000"
-# A LiteLLM virtual key. Read-only usage reporting is enough; the daemon never
-# makes model calls. Prefer the DASH_LITELLM_API_KEY environment variable so
-# the key is not written to disk.
-api_key = ""
-# Request timeout in seconds.
-timeout = 5
-
-# --- Alerts ----------------------------------------------------------------
-# Thresholds are advisory: they decide when a card escalates to `warning` or
-# `critical`. They are not a rule engine.
-
-[alerts]
-# Warn when LiteLLM daily spend reaches this many dollars. 0 disables.
-litellm_daily_spend_warn = 0
-litellm_daily_spend_critical = 0
-# Warn when LiteLLM daily requests reach this count. 0 disables.
-litellm_daily_requests_warn = 0
-litellm_daily_requests_critical = 0
-# Warn when LiteLLM reports this many failed requests today. 0 disables.
-litellm_daily_errors_warn = 0
-litellm_daily_errors_critical = 0

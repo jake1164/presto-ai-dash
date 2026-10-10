@@ -1,8 +1,8 @@
 """Presto AI Dash daemon.
 
-A small, dependency-free Python daemon that polls local AI sources (fake,
-Ollama, LiteLLM), normalises them into a single status payload, stores recent
-snapshots in SQLite, and serves them to a Pimoroni Presto over HTTP.
+A small, dependency-free Python daemon that collects fake demo snapshots,
+stores them in SQLite, and serves an authenticated status payload over HTTP.
+Real Ollama and LiteLLM sources are future milestones.
 
 See ``docs/architecture.md`` for the shape of the system.
 """

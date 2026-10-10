@@ -12,6 +12,7 @@ venv/
 *.sqlite
 *.sqlite3
 dash.toml
+.local-backups/
 
 # Presto device files (never commit credentials)
 presto/secrets.py

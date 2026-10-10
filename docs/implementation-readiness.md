@@ -4,6 +4,12 @@ Status of the readiness pass against `presto_ai_dash_project_plan.md`.
 Written before Milestone 0 code. Records what was verified, what was decided,
 and what is genuinely blocked.
 
+This is the design/readiness record, not an implementation status report.
+The architecture and real-source test strategy below describe future targets.
+M2 implements only the fake source and minimal snapshot insert/read; real
+sources, retention, alert history, and trends are deferred. Implementation
+status is tracked in `milestones.md`.
+
 **Bottom line: nothing blocks Milestones 0–2.** All three external contracts
 (Presto MicroPython, LiteLLM, Ollama) were verified against current official
 sources. Two plan-internal contradictions were found and resolved below.
@@ -245,8 +251,8 @@ Ollama exposes no request history. §6.3 already says this.
 `/api/tags`, `/api/ps`) plus, *if* an optional samples file exists, the last
 measured request. The samples file is the same "helper writes JSON → daemon
 reads JSON" pattern the plan already endorses for OpenCode in §7.4. The tok/s
-arithmetic is implemented and tested against a recorded `/api/generate` fixture
-now, so it is ready for the v0.2 collector without further design work. Until a
+arithmetic is planned for the Ollama milestone and is not implemented or tested
+in M2. Until a
 collector exists the card honestly reads "last measured: unavailable".
 
 ### G2 — `settings` table is listed but never specified (resolved)

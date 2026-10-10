@@ -51,16 +51,23 @@ curl -H "Authorization: Bearer your-token-here" \
 ```
 
 You should get JSON with three cards, all driven by the `fake` source.
+Without the bearer token, or with a wrong token, this endpoint returns 401.
+Validate config without starting the daemon with `presto-ai-dash --check --config dash.toml`.
+Stop the daemon with Ctrl+C.
+
+M2 stores snapshots in SQLite, but does not yet implement retention, history
+queries, trends, or alert thresholds. Delete the database while the daemon is
+stopped to reset demo history.
 
 ### Environment variables
 
 | Variable | Overrides |
 | --- | --- |
 | `DASH_SHARED_TOKEN` | `daemon.shared_token` |
-| `DASH_LITELLM_API_KEY` | `sources.litellm.api_key` |
-| `DASH_OLLAMA_BASE_URL` | `sources.ollama.base_url` |
-| `DASH_LITELLM_BASE_URL` | `sources.litellm.base_url` |
 | `DASH_LOG_LEVEL` | `logging.level` |
+| `DASH_HOST` | `daemon.host` |
+| `DASH_PORT` | `daemon.port` |
+| `DASH_DATABASE` | `daemon.database` |
 
 Prefer these for anything secret so it never lands in a file.
 
@@ -96,14 +103,16 @@ WIFI_PASSWORD = "your-password"
 Edit `config.py` and set `DAEMON_HOST`, `DAEMON_PORT` and `SHARED_TOKEN` to
 match the daemon.
 
-Press **RESET**. The Presto connects to Wi-Fi, polls the daemon, and shows the
-three cards.
+Press **RESET** to run the current M1 static demo. The current `presto/main.py`
+loads sample data; live daemon polling is not wired into the device loop yet.
+M2 verifies the daemon API independently on localhost. Keep the daemon settings
+above for the future device polling integration.
 
-## 3. Enable a real source
+## 3. Future real sources
 
-Edit `dash.toml` and flip `enabled = true` for the source you want, then
-restart the daemon. See `docs/sources.md` for what each source needs and what
-it can honestly report.
+Ollama and LiteLLM integration are deferred to M4 and M5. M2 rejects config
+that enables a real source. The cards named Ollama and LiteLLM use fake demo
+metrics only. See `docs/sources.md` for the planned source contracts.
 
 ## Troubleshooting
 
@@ -123,5 +132,5 @@ cd daemon
 python -m unittest discover -s tests -v
 ```
 
-No network access is required; every external response is a recorded fixture
-taken from official documentation.
+No external services are required. The M2 suite exercises a real HTTP server
+on localhost and temporary SQLite databases; Presto tests run on the host.

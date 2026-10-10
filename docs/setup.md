@@ -4,7 +4,7 @@
 
 | Component | Requirement |
 | --- | --- |
-| Daemon | Python 3.11 or newer (for `tomllib`). No third-party packages. |
+| Daemon | Python 3.11 or newer; install the project to obtain `cryptography` for encrypted keys. |
 | Presto | Pimoroni Presto with the current MicroPython firmware and launcher |
 | Network | Presto and daemon on the same LAN |
 
@@ -14,6 +14,51 @@ Windows 10/11, macOS, and Linux; see [Deployment Model](architecture.md#deployme
 for the future direct Python/pipx, optional Docker, tray, and binary targets.
 
 ## 1. Run the daemon
+
+### VS Code run and debug
+
+Open the repository root in VS Code. The checked-in **Daemon + configuration**
+launch profile uses a virtual environment at the repository root and a private
+root `dash.toml`. On this Windows workspace the environment is already installed
+and the config has been copied from the example. For a fresh Windows checkout:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e .\daemon
+if (!(Test-Path dash.toml)) { Copy-Item examples/config.example.toml dash.toml }
+```
+
+Install the recommended Microsoft Python and Python Debugger extensions if they
+are missing. Open **Run and Debug** (`Ctrl+Shift+D`) and select
+**Daemon + configuration**. Press **F5** to debug with breakpoints, or
+**Ctrl+F5** to run without debugging. Logs and generated tokens appear in the
+integrated terminal. These controls follow the
+[VS Code Python debugging workflow](https://code.visualstudio.com/docs/python/debugging).
+
+Open **http://127.0.0.1:8788** and unlock with the **admin** token from the log.
+The status endpoint is **http://127.0.0.1:8787/api/v1/status** and requires the
+separate shared token. These are the default ports; `dash.toml` can change them.
+Stop the daemon with **Ctrl+C** in its terminal. During debugging, place a
+breakpoint in `Daemon.start()` or `SourceConfiguration.save()` to inspect startup
+or browser configuration changes.
+
+The profile uses the repository root as its working directory, keeping the
+default `dash.db` and its protected key file there. Source settings in SQLite
+remain authoritative after the first admin start. The local TOML, database,
+key file, and other VS Code settings are ignored by Git. See
+[configuration.md](configuration.md) for key recovery and account editing.
+
+The equivalent Windows terminal command, from the repository root, is:
+
+```powershell
+.\.venv\Scripts\python.exe -m presto_ai_dash.app --config dash.toml --admin
+```
+
+For macOS/Linux, create the same root `.venv`, install with
+`.venv/bin/python -m pip install -e daemon`, and copy the example to root
+`dash.toml` before using the profile.
+
+### Terminal setup
 
 ```bash
 cd daemon
@@ -64,9 +109,10 @@ Without the bearer token, or with a wrong token, this endpoint returns 401.
 Validate config without starting the daemon with `presto-ai-dash --check --config dash.toml`.
 Stop the daemon with Ctrl+C.
 
-M2 stores snapshots in SQLite, but does not yet implement retention, history
-queries, trends, or alert thresholds. Delete the database while the daemon is
-stopped to reset demo history.
+M3 stores UTC-normalized snapshots and alert observations in SQLite and removes
+records older than the configured retention period (72 hours by default).
+History queries are internal; the status endpoint remains unchanged. Delete the
+database while the daemon is stopped to reset demo history.
 
 ### Environment variables
 
@@ -132,15 +178,77 @@ Home remembers its scroll position when returning from another card.
 Long-press should toggle the MUTED indicator. Press **RESET**
 to return to the firmware carousel.
 
-Live daemon polling is not wired into the device loop yet. M2 verifies the
-daemon API independently on localhost. Keep the daemon settings in `config.py`
-for the future polling integration; they are unused by this static demo.
+### Connect the Presto to the daemon
 
-## 3. Future real sources
+The app supports both modes. Set `STATIC_DEMO = False` in
+`/ai_dash_files/config.py` for authenticated daemon polling. `True` keeps the
+static cloud quota design preview.
 
-Ollama and LiteLLM integration are deferred to M4 and M5. M2 rejects config
-that enables a real source. The cards named Ollama and LiteLLM use fake demo
-metrics only. See `docs/sources.md` for the planned source contracts.
+1. Start the daemon using the VS Code profile or terminal command above.
+   Give `daemon.shared_token` a persistent value in private `dash.toml`.
+2. Put the daemon machine's **LAN IPv4 address** in `DAEMON_HOST`, its status
+   port (default 8787) in `DAEMON_PORT`, and the same device shared token in
+   `SHARED_TOKEN`. The admin token/port are for browser configuration.
+3. Fill in `WIFI_SSID` and `WIFI_PASSWORD` in private `presto/secrets.py` and
+   copy it to **`/secrets.py`** on the device. The firmware uses this root file
+   for Wi-Fi; credentials are never sent to the daemon. Use a 2.4 GHz network.
+4. Deploy the modules in the table above, using your edited private
+   `presto/config.py` in place of the example. Preserve the firmware `/main.py`
+   launcher. Press RESET and select AI Dash.
+
+Local `presto/config.py` and `presto/secrets.py` are ignored by Git. Never put
+provider API keys on the device. For this Windows workspace, the private
+device config points to `192.168.1.240:8787`, and the shared token has been saved
+in both local configs. If the computer's address changes, update `DAEMON_HOST`.
+
+From the repository root, with `mpremote` installed in your active Python
+environment, copy the private settings with:
+
+```powershell
+python -m mpremote connect COM3 fs cp presto/config.py :/ai_dash_files/config.py
+python -m mpremote connect COM3 fs cp presto/secrets.py :/secrets.py
+```
+
+COM3 is the current device; use `python -m mpremote connect list` to find it on
+another computer. The firmware connection API is documented in
+[Pimoroni's Presto guide](https://github.com/pimoroni/presto/blob/main/docs/presto.md).
+
+Live Home lists enabled source instances and measured request/token counts or
+loaded-model information. Multiple gateways remain separate; unknown usage
+shows **Usage unavailable**. Fake daemon data is labelled **FAKE**, while real
+instances are labelled **LIVE**. The illustrative daily/weekly cloud bars are
+available in static mode only. Swipe left/right for Ollama and LiteLLM; Home
+scrolls when enough instances are configured.
+
+Polling runs every `POLL_INTERVAL` seconds (default 15). Wi-Fi and HTTP waits
+yield to the touch/render loop. Failed requests retry every `RETRY_INTERVAL`
+(default 12); each Wi-Fi attempt is bounded by `WIFI_TIMEOUT` (default 10) and
+HTTP by `HTTP_TIMEOUT` (default 8). Hostname lookup can block on MicroPython,
+so a LAN IP is preferred. See [MicroPython asyncio](https://docs.micropython.org/en/latest/library/asyncio.html).
+
+After losing the daemon, the last good display is marked **STALE - retrying**
+for up to `OFFLINE_AFTER_S` (default 30), then shows the offline screen. First
+boot without a connection, a rejected token, and bad data show a clear error
+immediately. Successful polling restores the selected card automatically;
+live mode never substitutes static demo values.
+
+If Windows asks about the daemon's network access, allow your trusted private
+LAN so the Presto can reach the status port. The admin page remains loopback-only.
+
+## 3. Enable a real source
+
+For browser-based configuration, start with `--admin` and open
+`http://127.0.0.1:8788`. Use the separate admin token from the startup log.
+Sources and encrypted keys are then managed in SQLite. See
+[configuration.md](configuration.md) for account editing and key recovery.
+
+The example config runs the fake source by default. To use Ollama or LiteLLM,
+set `sources.fake.enabled = false`, then set the desired source's `enabled`
+to `true` and configure its `base_url`. The config rejects mixing fake and live
+sources. LiteLLM can read its key from `LITELLM_API_KEY`; Ollama's optional
+`samples_file` only reads observations supplied by an external collector.
+Neither source sends prompts. See `docs/sources.md` for measured fields and
+limits.
 
 ## Troubleshooting
 

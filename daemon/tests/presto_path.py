@@ -12,4 +12,5 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 PRESTO_DIR = os.path.join(REPO_ROOT, "presto")
 
 if PRESTO_DIR not in sys.path:
-    sys.path.insert(0, PRESTO_DIR)
+    # Device secrets.py must never shadow CPython's stdlib secrets module.
+    sys.path.append(PRESTO_DIR)

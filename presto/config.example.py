@@ -1,10 +1,12 @@
 # Presto AI Dash - example Presto configuration
 #
-# Copy to `config.py` on the Presto (next to main.py) and edit.
+# Copy to `/ai_dash_files/config.py` on the Presto and edit.
 # Wi-Fi credentials live in `secrets.py`, which is NOT committed - see
 # .gitignore. Never put provider API keys on the Presto.
 
 # --- Daemon ----------------------------------------------------------------
+# False polls the daemon; True keeps the offline static quota design preview.
+STATIC_DEMO = True
 DAEMON_HOST = "toontown-int-srv1"
 DAEMON_PORT = 8787
 
@@ -20,6 +22,8 @@ RETRY_INTERVAL = 12
 
 # HTTP timeout for a single poll, in seconds.
 HTTP_TIMEOUT = 8
+# One bounded Wi-Fi association attempt per retry, using /secrets.py.
+WIFI_TIMEOUT = 10
 
 # --- Display ---------------------------------------------------------------
 # Presto() defaults to a 240x240 framebuffer on the 480x480 panel. Set True for

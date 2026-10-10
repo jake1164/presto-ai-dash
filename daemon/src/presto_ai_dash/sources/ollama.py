@@ -17,10 +17,9 @@ arithmetic is implemented and tested now so it is ready for the v0.2 collector.
 
 import json
 import logging
-import os
 
 from ..http_client import HttpError, HttpUnreachable, get_json, join_url
-from ..models import Alert, SourceSnapshot
+from ..models import SourceSnapshot
 from . import Source, register
 
 log = logging.getLogger(__name__)
@@ -80,6 +79,13 @@ class OllamaSource(Source):
 
     id = "ollama"
     name = "Ollama"
+    config_fields = (
+        {"key": "base_url", "label": "Ollama URL", "type": "url",
+         "default": "http://localhost:11434"},
+        {"key": "timeout", "label": "Request timeout (seconds)", "type": "int",
+         "default": 5, "minimum": 1, "maximum": 60},
+        {"key": "samples_file", "label": "Optional sample file", "type": "str", "default": ""},
+    )
 
     def __init__(self, config=None):
         super().__init__(config)

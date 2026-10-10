@@ -62,7 +62,10 @@ class ConfigTests(unittest.TestCase):
                  '[daemon]\nport = 1.5', '[daemon]\nshared_token = 42',
                  '[daemon]\nshared_token = "bad token"', '[daemon]\ndatabase = ""',
                  '[logging]\nlevel = "nope"', '[sources.fake]\nenabled = "false"',
-                 '[sources.fake]\nscenario_interval = 0', '[sources]\nfake = false']
+                 '[sources.fake]\nscenario_interval = 0', '[sources]\nfake = false',
+                 '[sources.ollama]\nbase_url = "localhost:11434"',
+                 '[sources.ollama]\nbase_url = "http://[invalid"',
+                 '[sources.litellm]\napi_key_env = "bad=name"']
         for text in cases:
             with self.subTest(text=text), self.assertRaises(ConfigError):
                 self.load(text)
@@ -75,10 +78,21 @@ class ConfigTests(unittest.TestCase):
         with patch.dict(os.environ, {"DASH_PORT": "oops"}), self.assertRaises(ConfigError):
             load_config()
 
-    def test_future_sources_cannot_be_enabled(self):
-        for name in ("ollama", "litellm"):
-            with self.subTest(name=name), self.assertRaisesRegex(ConfigError, "unavailable in M2"):
-                self.load('[sources.%s]\nenabled = true' % name)
+    def test_live_sources_require_fake_to_be_disabled(self):
+        with self.assertRaisesRegex(ConfigError, "disable sources.fake"):
+            self.load('[sources.ollama]\nenabled = true')
+        config = self.load('[sources.fake]\nenabled = false\n'
+                           '[sources.ollama]\nenabled = true\n'
+                           '[sources.litellm]\nenabled = true')
+        self.assertEqual([source.id for source in build_sources(config)],
+                         ["ollama", "litellm"])
+
+    def test_litellm_key_environment_override(self):
+        with patch.dict(os.environ, {"LITELLM_API_KEY": "env-key"}):
+            config = self.load('[sources.fake]\nenabled = false\n'
+                               '[sources.litellm]\nenabled = true\n'
+                               'api_key = "file-key"')
+        self.assertEqual(config["sources"]["litellm"]["api_key"], "env-key")
 
     def test_generated_token_is_reused(self):
         config = load_config()
@@ -118,12 +132,11 @@ class FakeTests(unittest.TestCase):
         with patch.object(source, "current_scenario", return_value="warning"):
             self.assertEqual(source.collect().alerts[0]["severity"], "warning")
 
-    def test_only_fake_is_registered_and_imported(self):
-        self.assertEqual(available_sources(), ["fake"])
-        for name in ("ollama", "litellm"):
-            self.assertNotIn("presto_ai_dash.sources." + name, sys.modules)
-        config = {"sources": {"fake": {"enabled": True}, "ollama": {"enabled": True}}}
-        self.assertEqual([source.id for source in build_sources(config)], ["fake"])
+    def test_sources_are_registered_and_disabled_sources_do_not_probe(self):
+        self.assertEqual(available_sources(), ["fake", "ollama", "litellm"])
+        config = load_config()
+        sources = build_sources(config)
+        self.assertEqual([source.id for source in sources], ["fake"])
 
     def test_source_failure_becomes_offline(self):
         source = Source()
@@ -212,6 +225,7 @@ class DashboardTests(unittest.TestCase):
     def test_empty_response_is_offline(self):
         payload = build_status_payload({})
         self.assertEqual(payload["overall_status"], "offline")
+        self.assertIsNone(payload["updated_at"])
         self.assertTrue(all(card["status"] == "offline" for card in payload["cards"]))
         self.assertIn("unavailable", payload["cards"][0]["primary"])
 
@@ -280,6 +294,22 @@ class ApiTests(unittest.TestCase):
                 status, _, payload = self.request("Bearer test-token")
         self.assertEqual(status, 500)
         self.assertEqual(payload, {"error": "internal_error"})
+
+    def test_api_filters_history_to_configured_sources(self):
+        self.storage.save_snapshot(SourceSnapshot("ollama", "active", metrics={
+            "loaded_model": "llama3"}))
+        api = ApiServer("127.0.0.1", 0, self.storage, "test-token",
+                        source_ids=["ollama"])
+        api.start()
+        try:
+            url = "http://127.0.0.1:%d/api/v1/status" % api.actual_port
+            request = Request(url, headers={"Authorization": "Bearer test-token"})
+            with self.opener.open(request, timeout=3) as response:
+                payload = json.load(response)
+            self.assertEqual(payload["overall_status"], "active")
+            self.assertEqual(payload["cards"][1]["primary"], "llama3")
+        finally:
+            api.stop()
 
 
 class DaemonTests(unittest.TestCase):

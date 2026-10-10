@@ -57,6 +57,33 @@ def get_json(url, timeout=5, headers=None, transport=None):
     return _decode(raw)
 
 
+def get_text(url, timeout=5, headers=None, transport=None):
+    """GET a successful response as UTF-8 text without requiring JSON."""
+    if transport is not None:
+        return transport(url, timeout, headers or {})
+
+    request = urllib.request.Request(url, method="GET")
+    for key, value in (headers or {}).items():
+        request.add_header(key, value)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            status = getattr(response, "status", None) or response.getcode()
+            raw = response.read()
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read().decode("utf-8", "replace")
+        except Exception:  # pragma: no cover - defensive
+            body = ""
+        raise HttpError(exc.code, body)
+    except urllib.error.URLError as exc:
+        raise HttpUnreachable(str(exc.reason))
+    except OSError as exc:
+        raise HttpUnreachable(str(exc))
+    if not 200 <= status < 300:
+        raise HttpError(status, raw.decode("utf-8", "replace"))
+    return raw.decode("utf-8", "replace")
+
+
 def post_json(url, payload, timeout=5, headers=None, transport=None):
     """POST a JSON body and parse the JSON response."""
     if transport is not None:

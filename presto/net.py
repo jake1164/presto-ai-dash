@@ -1,8 +1,8 @@
 """HTTP client for the Presto app.
 
-Wraps MicroPython's ``requests`` module. The wrapper exists so the rest of the
-app never touches the network directly, and so tests can substitute a fake
-transport without a network.
+The live app uses bounded asyncio streams so touch/rendering can continue
+during network waits. The synchronous requests wrapper is retained for smoke
+checks and existing transport tests. Both send the same shared bearer token.
 
 MicroPython's ``requests`` supports custom headers (verified in
 micropython-lib ``python-ecosys/requests``), which is what lets the Presto send
@@ -102,29 +102,103 @@ class StatusClient(object):
         except Exception as exc:  # MicroPython raises bare Exception sometimes
             raise NetworkUnavailable("request failed: {}".format(exc))
 
-        status_code = getattr(response, "status_code", None)
-        if status_code is None:
-            raise StatusError("response had no status code")
-
-        if status_code == 401:
-            raise Unauthorised("daemon rejected the shared token")
-        if status_code != 200:
-            raise StatusError("daemon returned HTTP {}".format(status_code))
-
         try:
-            text = response.text
-        except Exception as exc:
-            raise StatusError("could not read response body: {}".format(exc))
-
-        # Free the socket promptly; MicroPython has very little RAM.
-        close = getattr(response, "close", None)
-        if close is not None:
+            status_code = getattr(response, "status_code", None)
+            if status_code is None:
+                raise StatusError("response had no status code")
+            if status_code == 401:
+                raise Unauthorised("daemon rejected the shared token")
+            if status_code != 200:
+                raise StatusError("daemon returned HTTP {}".format(status_code))
             try:
-                close()
-            except Exception:
-                pass
+                text = response.text
+            except Exception as exc:
+                raise StatusError("could not read response body: {}".format(exc))
+            return parse_payload(text)
+        finally:
+            close = getattr(response, "close", None)
+            if close is not None:
+                try:
+                    close()
+                except Exception:
+                    pass
 
-        return parse_payload(text)
+    async def fetch_async(self):
+        """Bounded HTTP GET using asyncio streams, keeping touch input responsive.
+
+        This speaks the daemon's Content-Length JSON contract. Redirects and
+        chunked responses are rejected; credentials are never forwarded.
+        """
+        import asyncio
+        try:
+            return await asyncio.wait_for(self._fetch_stream(), self.timeout)
+        except (Unauthorised, StatusError):
+            raise
+        except Exception:
+            raise NetworkUnavailable("cannot reach daemon")
+
+    async def _fetch_stream(self):
+        import asyncio
+        writer = None
+        try:
+            path = self.path if self.path.startswith("/") else "/" + self.path
+            if any(char in str(value) for value in (self.host, self.token, path)
+                   for char in ("\r", "\n")):
+                raise StatusError("invalid connection settings")
+            reader, writer = await asyncio.open_connection(self.host, self.port)
+            request = ("GET %s HTTP/1.1\r\nHost: %s:%s\r\n"
+                       "Authorization: Bearer %s\r\nConnection: close\r\n\r\n" %
+                       (path, self.host, self.port, self.token or ""))
+            writer.write(request.encode("utf-8"))
+            await writer.drain()
+
+            header = b""
+            while b"\r\n\r\n" not in header:
+                chunk = await reader.read(256)
+                if not chunk:
+                    raise StatusError("incomplete HTTP response")
+                header += chunk
+                if len(header) > 4096:
+                    raise StatusError("response headers too large")
+            header, body = header.split(b"\r\n\r\n", 1)
+            lines = header.split(b"\r\n")
+            try:
+                status = int(lines[0].split()[1])
+                headers = {}
+                for line in lines[1:]:
+                    key, value = line.split(b":", 1)
+                    key = key.strip().lower()
+                    if key in headers:
+                        raise ValueError
+                    headers[key] = value.strip()
+                length = int(headers.get(b"content-length", b"-1"))
+            except (ValueError, IndexError):
+                raise StatusError("invalid HTTP response")
+            if status == 401:
+                raise Unauthorised("daemon rejected the shared token")
+            if status != 200:
+                raise StatusError("daemon returned HTTP %s" % status)
+            if not 0 <= length <= 65536 or b"transfer-encoding" in headers:
+                raise StatusError("unsupported response size or framing")
+            while len(body) < length:
+                chunk = await reader.read(min(1024, length - len(body)))
+                if not chunk:
+                    raise StatusError("incomplete response body")
+                body += chunk
+            if len(body) != length:
+                raise StatusError("invalid response length")
+            try:
+                text = body.decode("utf-8")
+            except UnicodeError:
+                raise StatusError("response was not UTF-8")
+            return parse_payload(text)
+        finally:
+            if writer is not None:
+                try:
+                    writer.close()
+                    await writer.wait_closed()
+                except OSError:
+                    pass
 
 
 def load_static_payload(path):

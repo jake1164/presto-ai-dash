@@ -7,9 +7,9 @@ The original M3 description was too vague: M2 already stores snapshots and
 serves the latest one. This brief defines the additional behaviour rather than
 asking the implementation agent to invent a history platform.
 
-This is a readiness deliverable only. Implementation is not authorized by this
-review. M3 remains not started. No runtime code, provider integrations, or
-device files were changed or deployed during the review.
+At review time this was a readiness deliverable only: implementation was not
+authorized and M3 had not started. The implementation result is recorded at
+the end of this document. The review itself changed no runtime or device files.
 
 ## Verified starting point
 
@@ -201,7 +201,7 @@ a broader migration system.
 
 ## Handoff prompt for the next authorized implementation
 
-> Implement M3 only using `docs/m3-readiness.md` as the contract. First verify
+> Historical handoff prompt: implement M3 only using `docs/m3-readiness.md` as the contract. First verify
 > the current baseline and preserve any unrelated working-tree changes. Keep
 > the daemon fake-only and follow the four-step sequence. Prove migration,
 > history, alert observations, retention, lifecycle, and status/auth behaviour
@@ -209,3 +209,22 @@ a broader migration system.
 > actual results. Do not modify the Presto, enable draft integrations, add
 > unrelated features, commit, or deploy. Stop with a reviewable diff and test
 > summary; explain any deviation from the contract.
+
+## Implementation result — 2026-10-10
+
+M3 is implemented. The runtime remains fake-source only, with no Presto or
+provider integration changes. SQLite now migrates M2 rows transactionally to
+fixed-width UTC, stores per-snapshot deduplicated alert observations atomically,
+provides bounded internal history queries, and prunes expired snapshots with
+cascading alert deletion. Cleanup runs before the API becomes ready and on a
+stoppable maintenance worker. Status timestamps now reflect stored data and
+are `null` when no snapshot exists. API shutdown drains active requests and
+uses a three-second accepted-socket timeout.
+
+The 15 new M3 tests cover migration and rollback, UTC ordering and range limits,
+alert history and atomicity, retention boundaries, configuration, concurrent
+storage use, startup cleanup and failure, periodic retry after failure,
+active-request and partial-header shutdown, plus a separate-process
+authenticated start/stop and same-database restart smoke. All 185 host tests
+pass on Windows / Python 3.13. Daemon compilation and Markdown link checks pass;
+see [milestones.md](milestones.md) for the recorded result.

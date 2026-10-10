@@ -1,0 +1,31 @@
+:root { color-scheme: dark; font-family: system-ui, sans-serif; background: #0c1422; color: #e3edf8; }
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { max-width: 1160px; margin: auto; padding: 28px; }
+header, .section-title, .source-head, .actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+h1 { font-size: clamp(1.6rem, 4vw, 2.2rem); margin: 0; }
+h2 { margin: 0 0 14px; font-size: 1.2rem; }
+p { color: #b1c2d7; line-height: 1.5; }
+.eyebrow { font-size: .7rem; letter-spacing: .18em; color: #7ce6da; margin: 0 0 8px; }
+main { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 20px; }
+.panel { background: #152034; border: 1px solid #2a3b53; border-radius: 14px; padding: 24px; }
+#login-panel { max-width: 560px; margin-top: 28px; }
+label { display: block; margin-top: 18px; margin-bottom: 7px; font-weight: 600; }
+input, select, button { font: inherit; }
+input:not([type=checkbox]), select { width: 100%; background: #0c1422; border: 1px solid #627894; border-radius: 7px; color: #e3edf8; padding: 11px; }
+input:focus, select:focus, button:focus-visible { outline: 2px solid #7ce6da; outline-offset: 3px; }
+button { background: #7ce6da; color: #0c1422; border: none; border-radius: 7px; font-weight: 650; padding: 11px 16px; cursor: pointer; }
+button:disabled { opacity: .55; cursor: wait; }
+.danger { background: #382437; color: #ffc0ca; border: 1px solid #ac6273; }
+.check { display: flex; align-items: center; gap: 9px; font-weight: 400; }
+input[type=checkbox] { accent-color: #7ce6da; width: 18px; height: 18px; }
+.note { font-size: .85rem; color: #b1c2d7; }
+.actions { justify-content: flex-start; margin-top: 24px; flex-wrap: wrap; }
+#login-form button { margin-top: 20px; }
+.source { padding: 16px 0; border-bottom: 1px solid #2a3b53; }
+.source strong { overflow-wrap: anywhere; }
+.source p { margin: 7px 0 0; font-size: .9rem; }
+.badge { color: #7ce6da; font-size: .85rem; }
+#message { min-height: 1.5em; margin: 18px 0 0; color: #7ce6da; }
+#message.error { color: #ffb8c8; }
+@media (max-width: 760px) { main { grid-template-columns: 1fr; } body { padding: 18px; } header { align-items: flex-start; } }

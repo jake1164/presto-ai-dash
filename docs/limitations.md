@@ -1,7 +1,11 @@
 # Limitations
 
-Current M2 uses fake data only; source behaviour described below is the
-planned v0 behaviour for M4/M5. Retention and trends are also deferred.
+The daemon supports fake data, Ollama health, and LiteLLM routed usage. The
+Presto app supports authenticated daemon polling and a separate static preview
+mode. On-device Wi-Fi, authenticated polling, and recovery are verified in
+`milestones.md`. Trends and provider-specific quota limits are deferred.
+Live Home shows source instances
+and measured usage; the cloud quota bars are static demo values only.
 
 Things this project honestly cannot do, and why. If a number on the Presto
 looks wrong or missing, it is probably here.
@@ -19,7 +23,7 @@ token history, no duration history. The API exposes:
 So "tokens used today against Ollama directly" is not reconstructable from
 Ollama alone. The project plan says this in §6.3 and it is correct.
 
-**What v0 is planned to show:** reachability, version, loaded model, available model count,
+**What the daemon shows:** reachability, version, loaded model, available model count,
 and — only if a collector has written a samples file — the last measured
 request with a computed tokens/sec.
 
@@ -28,8 +32,8 @@ card reads "last measured: unavailable".
 
 **A future fix:** a desktop collector, local Ollama shim, wrapper, or voluntary
 reporter that observes requests and supplies samples the daemon can read.
-Tokens/sec arithmetic and real-source tests belong to M4; they are not
-implemented in M2. The collector is future work without a release assignment.
+Tokens/sec arithmetic is implemented in M4 and uses the sample's nanosecond
+duration. The collector is future work without a release assignment.
 
 ## LiteLLM sees only routed traffic
 
@@ -40,7 +44,8 @@ only the first path. They must never be presented as complete desktop usage.
 ## LiteLLM spend may be permanently unavailable
 
 LiteLLM spend tracking requires a database. If the proxy runs without
-`DATABASE_URL`, there is nothing to report.
+`DATABASE_URL`, there is nothing to report. The source shows spend as
+unavailable when LiteLLM does not return it.
 
 The card shows **"unavailable"**, not `$0.00`. Zero spend and unknown spend are
 different facts and conflating them would be dishonest.

@@ -127,9 +127,11 @@ class TestStatusClient(unittest.TestCase):
         self.assertTrue(response.closed)
 
     def test_401_raises_unauthorised(self):
-        client, _ = self._client(FakeResponse(401, "{}"))
+        response = FakeResponse(401, "{}")
+        client, _ = self._client(response)
         with self.assertRaises(Unauthorised):
             client.fetch()
+        self.assertTrue(response.closed)
 
     def test_500_raises_status_error(self):
         client, _ = self._client(FakeResponse(500, "oops"))
@@ -157,9 +159,11 @@ class TestStatusClient(unittest.TestCase):
             client.fetch()
 
     def test_bad_body_raises_status_error(self):
-        client, _ = self._client(FakeResponse(200, "garbage"))
+        response = FakeResponse(200, "garbage")
+        client, _ = self._client(response)
         with self.assertRaises(StatusError):
             client.fetch()
+        self.assertTrue(response.closed)
 
 
 class TestLoadStaticPayload(unittest.TestCase):

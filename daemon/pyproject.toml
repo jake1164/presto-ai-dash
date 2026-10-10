@@ -9,8 +9,11 @@ description = "Small local daemon that collects AI usage/status and serves it to
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-# Deliberately empty. The daemon uses only the standard library.
-dependencies = []
+# Authenticated encryption for database-backed provider credentials.
+dependencies = ["cryptography>=46.0.0"]
+
+[tool.setuptools.package-data]
+presto_ai_dash = ["web/*.html", "web/*.js", "web/*.css"]
 
 [project.optional-dependencies]
 dev = []

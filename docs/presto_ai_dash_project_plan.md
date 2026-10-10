@@ -4,9 +4,9 @@
 
 **Presto AI Dash** (`presto-ai-dash`): A tiny AI usage dashboard for Pimoroni Presto with support for local and cloud AI providers.
 
-Local integrations are planned for v0; direct cloud sources are future work.
-Current delivery: M1 static device demo and M2 fake-source daemon. The Home
-design preview shows labelled, fixed cloud quotas; it is not cloud telemetry.
+The daemon supports fake, Ollama, and LiteLLM sources; direct cloud sources are
+future work. Current delivery: M1 static device demo and M2–M5 daemon work.
+The Home design preview shows labelled, fixed cloud quotas; it is not cloud telemetry.
 See [milestones.md](milestones.md) for implementation status.
 
 It shows whether local and routed AI usage is normal, active, expensive, rate-limited, or broken. It is not trying to be a full analytics platform. The first version should be a useful desk demo that proves the Presto can act as a touch-enabled AI companion display.
@@ -401,6 +401,8 @@ For v0, keep sources internal but structured.
 class Source:
     id: str
     name: str
+    config_fields: tuple  # keys, labels, types, defaults, bounds
+    secret_field: str | None
 
     def collect(self) -> SourceSnapshot:
         ...
@@ -420,6 +422,11 @@ class SourceSnapshot:
 
 v0 should avoid a complex plugin loader. The goal is to make adding a source obvious, not to support third-party plugins yet.
 
+The configuration checkpoint discovers trusted registered modules in `sources/`
+at startup. It uses these field descriptors to validate and render settings.
+Connector type IDs and configured instance IDs are separate: multiple gateways
+or accounts can share a type while retaining separate history and credentials.
+
 ## 11. Storage
 
 Use SQLite.
@@ -429,7 +436,8 @@ Use SQLite.
 ```text
 snapshots
 alerts
-settings
+source_instances
+configuration_meta
 ```
 
 ### Snapshot retention
@@ -574,7 +582,10 @@ no repeating alarm unless configured
 - no provider API calls from Presto
 - daemon binds to LAN only by default
 - dashboard API uses a simple shared token
-- provider secrets live in daemon config or environment variables
+- managed provider secrets are encrypted in SQLite; the master key lives
+  outside it, protected with Windows DPAPI or an owner-only Unix file, or
+  supplied through the environment
+- local configuration uses a loopback-only listener and a separate admin token
 - do not expose the daemon publicly
 - do not run paid test prompts unless explicitly enabled
 
@@ -610,8 +621,8 @@ presto-ai-dash/
       sources/
         __init__.py
         fake.py
-        litellm.py               future M5 draft; disabled in M2
-        ollama.py                future M4 draft; disabled in M2
+        litellm.py               routed daily activity source (M5)
+        ollama.py                local health and sample source (M4)
       alerts.py                  future draft; disabled in M2
       storage.py
   presto/
@@ -707,7 +718,8 @@ fake-data polling before real provider integration. M1 remains device-only.
 ### Milestone 3: SQLite snapshots
 
 Detailed scope and acceptance contract: [M3 readiness / Luna handoff](m3-readiness.md).
-Readiness is complete; implementation still requires explicit approval.
+Readiness and implementation are complete; see the implementation result in
+the handoff for the final verification record.
 
 Goal:
 
@@ -834,6 +846,18 @@ later macOS polish, not a requirement. Future commands are
 
 Keep the menu tiny: status, open dashboard/status endpoint, open config folder,
 copy Presto endpoint URL, restart daemon, stop daemon, and about.
+
+### Local source configuration checkpoint (after M5)
+
+Approved and implemented separately from alert polish: a local web page adds,
+edits, disables, and deletes reusable source instances. Provider keys are
+authenticated ciphertext in SQLite, with the master key outside the database.
+The first admin start imports TOML source settings once; subsequent changes
+apply without restarting and preserve instance history. Separate admin and
+device tokens keep editing off the device-facing API. No direct cloud usage
+connectors or application attribution are implied by this checkpoint.
+
+See [setup, encryption, and recovery](configuration.md).
 
 ### Application usage monitoring (after M5)
 

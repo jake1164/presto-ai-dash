@@ -1,11 +1,13 @@
 """Source interface and registry.
 
-v0 keeps sources internal but structured: adding one means adding a module and
-registering it here. There is no plugin loader, no entry points and no package
-system, which is deliberate.
+v0 keeps sources internal but structured: trusted modules in this directory
+are discovered at startup and register their classes. There are no external
+entry points, package installation, or browser uploads.
 """
 
 import logging
+import importlib
+import pkgutil
 
 from ..models import SourceSnapshot, normalise_status
 
@@ -23,6 +25,8 @@ class Source(object):
 
     id = "base"
     name = "Base"
+    config_fields = ()
+    secret_field = None
 
     def __init__(self, config=None):
         self.config = config or {}
@@ -45,6 +49,7 @@ class Source(object):
 
     def offline(self, message):
         """An offline snapshot carrying an error message."""
+        message = self._redact(message)
         log.warning("source %s offline: %s", self.id, message)
         return self.snapshot("offline", error=message)
 
@@ -56,6 +61,10 @@ class Source(object):
         try:
             snapshot = self.collect()
         except Exception as exc:  # noqa: BLE001 - a source must never kill the daemon
+            # Exceptions from external services can contain reflected credentials.
+            if self.secret_field and self.config.get(self.secret_field):
+                log.error("source %s collection failed (%s)", self.id, type(exc).__name__)
+                return self.offline("source collection failed (%s)" % type(exc).__name__)
             log.exception("source %s raised during collect()", self.id)
             return self.offline("%s: %s" % (type(exc).__name__, exc))
 
@@ -66,7 +75,24 @@ class Source(object):
 
         # Normalise defensively: a source must not be able to invent a status.
         snapshot.status = normalise_status(snapshot.status)
+        snapshot.source_id = self.id
+        snapshot.metrics = self._redact(snapshot.metrics)
+        snapshot.alerts = self._redact(snapshot.alerts)
+        snapshot.cards = self._redact(snapshot.cards)
+        snapshot.error = self._redact(snapshot.error)
         return snapshot
+
+    def _redact(self, value):
+        secret = self.config.get(self.secret_field) if self.secret_field else None
+        if not secret:
+            return value
+        if isinstance(value, str):
+            return value.replace(secret, "[redacted]")
+        if isinstance(value, list):
+            return [self._redact(item) for item in value]
+        if isinstance(value, dict):
+            return {self._redact(key): self._redact(item) for key, item in value.items()}
+        return value
 
 
 _REGISTRY = {}
@@ -81,6 +107,16 @@ def register(source_class):
 def available_sources():
     """The registered source ids, in registration order."""
     return list(_REGISTRY.keys())
+
+
+def source_type(type_id):
+    return _REGISTRY[type_id]
+
+
+def source_catalog():
+    return [{"id": cls.id, "name": cls.name,
+             "fields": list(cls.config_fields), "has_secret": bool(cls.secret_field)}
+            for cls in _REGISTRY.values()]
 
 
 def build_sources(config):
@@ -108,4 +144,14 @@ def build_sources(config):
 # Importing the modules registers their classes. Keep this at the bottom to
 # avoid a circular import.
 from . import fake  # noqa: E402,F401
-# Real integrations are future milestone drafts and have no M2 runtime path.
+from . import ollama  # noqa: E402,F401
+from . import litellm  # noqa: E402,F401
+
+# Developer-installed source modules are trusted code. Discovery happens at
+# startup, never from an upload or a web request.
+for _module in sorted(pkgutil.iter_modules(__path__), key=lambda item: item.name):
+    if not _module.name.startswith("_") and _module.name not in ("fake", "ollama", "litellm"):
+        try:
+            importlib.import_module("." + _module.name, __name__)
+        except Exception:
+            log.error("source module %s could not be loaded", _module.name)

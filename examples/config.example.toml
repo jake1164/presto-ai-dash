@@ -4,8 +4,8 @@
 # `--config /path/to/dash.toml`. Every key below is optional; the values
 # shown are the defaults.
 #
-# The daemon has no third-party dependencies. Config is TOML because Python's
-# standard library can read it (tomllib, Python 3.11+).
+# TOML holds bootstrap settings. The cryptography package encrypts saved keys.
+# After first --admin startup, SQLite owns the source/account configuration.
 
 [daemon]
 # Bind address. Defaults to all interfaces so the Presto can reach it on the
@@ -20,18 +20,49 @@ shared_token = ""
 # Seconds between source collections.
 poll_interval = 15
 
-# SQLite file for snapshots. M2 supports insert/read only; retention is M3.
+# SQLite file for snapshots and alert observations.
 database = "dash.db"
+
+# Keep snapshot and alert history for 72 hours. Cleanup runs every 300 seconds.
+retention_hours = 72
+cleanup_interval = 300
 
 [logging]
 # One of: DEBUG, INFO, WARNING, ERROR, CRITICAL
 level = "INFO"
 
+[admin]
+# Enable here or run with --admin. The configuration page binds only to
+# 127.0.0.1; the device's status endpoint continues using daemon.host.
+enabled = false
+port = 8788
+# Separate from shared_token. DASH_ADMIN_TOKEN overrides this value.
+# Empty generates a temporary token and prints it to the startup log.
+token = ""
+# Empty uses <database>.key outside SQLite. DASH_KEY_FILE overrides it.
+# DASH_ENCRYPTION_KEY can instead supply a Fernet master key.
+key_file = ""
+
 # --- Sources ---------------------------------------------------------------
-# M2 supports only `fake`. All three cards explicitly show demo data.
-# Real Ollama and LiteLLM sources belong to M4/M5 and cannot be enabled yet.
+# Fake data is enabled by default. Disable it before enabling a live source so
+# synthetic metrics can never be mistaken for real usage.
 
 [sources.fake]
 enabled = true
 # Seconds each demo scenario is held before advancing.
 scenario_interval = 20
+
+[sources.ollama]
+enabled = false
+base_url = "http://localhost:11434"
+timeout = 5
+# Optional JSON object or list written by a request-observing collector.
+samples_file = ""
+
+[sources.litellm]
+enabled = false
+base_url = "http://localhost:4000"
+timeout = 5
+# The environment variable overrides this value. Avoid storing secrets here.
+api_key = ""
+api_key_env = "LITELLM_API_KEY"

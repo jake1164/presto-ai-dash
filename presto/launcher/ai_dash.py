@@ -1,6 +1,6 @@
 # ICON monitoring
 # NAME AI Dash
-# DESC Static fake-data dashboard.
+# DESC Daemon status dashboard.
 
 """Pimoroni carousel entry; app modules live outside the launcher directory."""
 

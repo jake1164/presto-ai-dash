@@ -8,16 +8,22 @@ The only module in this app that imports ``presto`` or ``machine``. Everything
 else (cards, gestures, alerts, net, ui) is pure Python and is unit-tested on a
 development machine. See docs/limitations.md for what cannot be automated.
 
-Static device preview: a cloud-quota Home card using labelled demo values,
-plus the existing Ollama and LiteLLM cards. No cloud services are contacted.
+Select static preview or authenticated daemon polling with STATIC_DEMO.
+Network tasks yield to the touch/render loop. No cloud services are contacted
+directly by this device.
 """
 
 import time
+import asyncio
+import sys
 
 try:
     import config
 except ImportError:
-    import config.example as config  # type: ignore
+    class config:
+        # The launcher should always deploy config.py. A missing config safely
+        # starts the static demo, rather than crashing on a dotted filename.
+        STATIC_DEMO = True
 
 from alerts import AlertTracker, led_pattern
 from cards import error_card, offline_card, overall_status, parse_cards
@@ -28,7 +34,7 @@ from gestures import (
     TAP,
     GestureRecogniser,
 )
-from home import DEMO_QUOTAS, HomeScroll
+from home import DEMO_QUOTAS, HomeScroll, source_rows
 from net import (
     StatusClient,
     StatusError,
@@ -37,7 +43,7 @@ from net import (
     embedded_payload,
     load_static_payload,
 )
-from ui import Palette, draw_boot, draw_card, draw_home, draw_message
+from ui import Palette, draw_boot, draw_card, draw_home, draw_sources, draw_message
 
 
 # Where to look for a sample payload, in order.
@@ -87,6 +93,15 @@ class App(object):
         self.tap_debounce_ms = int(getattr(config, "TAP_DEBOUNCE_MS", 180))
 
         self.offline_after_s = int(getattr(config, "OFFLINE_AFTER_S", 30))
+        self.static_demo = bool(getattr(config, "STATIC_DEMO", True))
+        self.poll_interval = max(1, int(getattr(config, "POLL_INTERVAL", 15)))
+        self.retry_interval = max(1, int(getattr(config, "RETRY_INTERVAL", 12)))
+        self.wifi_timeout = max(1, int(getattr(config, "WIFI_TIMEOUT", 10)))
+        self.client = StatusClient(
+            getattr(config, "DAEMON_HOST", "toontown-int-srv1"),
+            int(getattr(config, "DAEMON_PORT", 8787)),
+            getattr(config, "SHARED_TOKEN", ""),
+            timeout=max(1, int(getattr(config, "HTTP_TIMEOUT", 8))))
 
         self.gestures = GestureRecogniser(
             long_press_ms=self.long_press_ms,
@@ -104,6 +119,9 @@ class App(object):
         self.detail_opened_at = 0
         self.error = None
         self.last_good_at = None
+        self.live_rows = None
+        self.connection_error = None
+        self._last_screen = None
 
         self._buzzer = None
         self._needs_redraw = True
@@ -164,9 +182,64 @@ class App(object):
         self.error = error
         if error is None:
             self.last_good_at = _now_ms()
+            if not self.static_demo:
+                self.live_rows = source_rows(payload)
+                self.home_scroll.set_count(len(self.live_rows or []))
         if self.index >= len(self.cards):
             self.index = 0
         self._needs_redraw = True
+
+    async def poll_once(self):
+        """Reconnect when needed and accept only a usable authenticated payload."""
+        try:
+            if not self.presto.wifi.isconnected():
+                # The carousel runs us from /ai_dash_files. Firmware Wi-Fi
+                # imports root /secrets.py lazily when (re)connecting.
+                if "/" not in sys.path:
+                    sys.path.append("/")
+                connected = await asyncio.wait_for(
+                    self.presto.wifi.connect(timeout=self.wifi_timeout, retries=1),
+                    self.wifi_timeout + 1)
+                if not connected:
+                    self._poll_failed("No network", "Check Wi-Fi settings")
+                    return False
+        except Exception:
+            self._poll_failed("No network", "Check /secrets.py and Wi-Fi")
+            return False
+        try:
+            payload = await self.client.fetch_async()
+            _, error = parse_cards(payload)
+            if error:
+                raise StatusError("invalid cards")
+        except Unauthorised:
+            self._poll_failed("Unauthorised", "Check shared token", immediate=True)
+            return False
+        except StatusError:
+            self._poll_failed("Bad data", "Cannot read daemon status", immediate=True)
+            return False
+        except NetworkUnavailable:
+            self._poll_failed("Daemon offline", "Check daemon and LAN address")
+            return False
+        self.connection_error = None
+        self._set_payload(payload)
+        return True
+
+    def _poll_failed(self, title, message, immediate=False):
+        self.connection_error = (title, message, immediate)
+        self._needs_redraw = True
+
+    def _connection_screen(self):
+        if self.static_demo or self.connection_error is None:
+            return None
+        if (self.connection_error[2] or self.last_good_at is None or
+                _ticks_diff(_now_ms(), self.last_good_at) >= self.offline_after_s * 1000):
+            return self.connection_error[:2]
+        return None
+
+    async def _network_loop(self):
+        while True:
+            good = await self.poll_once()
+            await asyncio.sleep(self.poll_interval if good else self.retry_interval)
 
     # -- interaction --------------------------------------------------------
 
@@ -224,7 +297,8 @@ class App(object):
             self._touch_y = touch.y
         previous_offset = self.home_scroll.offset
         self.home_scroll.update(state, self._touch_x, self._touch_y,
-                                enabled=self._current_card().id == "dash")
+                                enabled=self._current_card().id == "dash" and
+                                self._connection_screen() is None)
         if self.home_scroll.offset != previous_offset:
             self._needs_redraw = True
         # Use the final touched position on release, rather than resetting to
@@ -235,8 +309,9 @@ class App(object):
 
     def _update_leds(self):
         card = self._current_card()
+        accent = ("red" if self._connection_screen() else "grey") if self.connection_error else card.accent
         rgb = led_pattern(
-            card.accent,
+            accent,
             brightness=self.led_brightness,
             muted=self.alerts.muted,
             dim_when_muted=self.led_dim_when_muted,
@@ -246,21 +321,32 @@ class App(object):
     def _render(self):
         card = self._current_card()
 
-        if card.id == "dash":
+        screen = self._connection_screen()
+        if screen:
+            draw_message(self.display, self.palette, screen[0], screen[1],
+                         detail=["Retrying...", "RESET returns to carousel"])
+        elif card.id == "dash" and self.static_demo:
             draw_home(self.display, self.palette, DEMO_QUOTAS,
                       self.index, len(self.cards), muted=self.alerts.muted,
                       width=self.width, height=self.height,
                       scroll=self.home_scroll.offset)
+        elif card.id == "dash" and self.live_rows is not None:
+            draw_sources(self.display, self.palette, self.live_rows,
+                         self.index, len(self.cards), status=card.status,
+                         muted=self.alerts.muted, width=self.width, height=self.height,
+                         scroll=self.home_scroll.offset, stale=bool(self.connection_error))
         else:
             draw_card(
                 self.display, self.palette, card,
                 self.index, len(self.cards),
                 muted=self.alerts.muted,
                 width=self.width, height=self.height,
+                stale=bool(self.connection_error),
             )
 
         self.presto.update()
         self._needs_redraw = False
+        self._last_screen = screen
 
     def _render_offline(self, message):
         from alerts import rgb_for_accent
@@ -275,8 +361,12 @@ class App(object):
     # -- main loop ----------------------------------------------------------
 
     def run(self):
-        """Static demo loop: sample data, no daemon."""
+        """Run the selected mode; live mode never falls back to static values."""
         self._setup_buzzer()
+        if not self.static_demo:
+            self._poll_failed("Connecting...", "Joining Wi-Fi")
+            asyncio.run(self._run_live())
+            return
         self.load_static()
 
         while True:
@@ -293,6 +383,26 @@ class App(object):
                 self._render()
 
             time.sleep_ms(20)
+
+    async def _run_live(self):
+        poller = asyncio.create_task(self._network_loop())
+        try:
+            while True:
+                self._handle_gestures(self._poll_touch())
+                if self._last_screen != self._connection_screen():
+                    self._needs_redraw = True
+                if self.detail_open and _ticks_diff(_now_ms(), self.detail_opened_at) > DETAIL_TIMEOUT_MS:
+                    self._close_detail()
+                if self._needs_redraw:
+                    self._update_leds()
+                    self._render()
+                await asyncio.sleep(0.02)
+        finally:
+            poller.cancel()
+            try:
+                await poller
+            except asyncio.CancelledError:
+                pass
 
 
 def main():

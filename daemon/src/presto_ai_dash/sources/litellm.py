@@ -22,9 +22,9 @@ Notes that shaped this module:
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
-from ..http_client import HttpError, HttpUnreachable, get_json, join_url
+from ..http_client import HttpError, HttpUnreachable, get_json, get_text, join_url
 from ..models import Alert, SourceSnapshot
 from . import Source, register
 
@@ -73,6 +73,13 @@ class LiteLLMSource(Source):
 
     id = "litellm"
     name = "LiteLLM"
+    secret_field = "api_key"
+    config_fields = (
+        {"key": "base_url", "label": "LiteLLM URL", "type": "url",
+         "default": "http://localhost:4000"},
+        {"key": "timeout", "label": "Request timeout (seconds)", "type": "int",
+         "default": 5, "minimum": 1, "maximum": 60},
+    )
 
     def __init__(self, config=None):
         super().__init__(config)
@@ -89,7 +96,7 @@ class LiteLLMSource(Source):
         return {"Authorization": "Bearer %s" % self.api_key}
 
     def _liveliness(self):
-        return get_json(join_url(self.base_url, "/health/liveliness"),
+        return get_text(join_url(self.base_url, "/health/liveliness"),
                         timeout=self.timeout)
 
     def _readiness(self):
@@ -145,7 +152,7 @@ class LiteLLMSource(Source):
 
         # 3. Daily usage. Every field is optional and degrades independently.
         today = datetime.now(timezone.utc).date()
-        start = (today - timedelta(days=1)).isoformat()
+        start = today.isoformat()
         end = today.isoformat()
 
         try:
@@ -188,18 +195,15 @@ class LiteLLMSource(Source):
             return
 
         results = activity.get("results")
-        if not isinstance(results, list) or not results:
+        if not isinstance(results, list):
             metrics["usage"] = UNAVAILABLE
             return
 
-        # Sum across the days we asked for. Usually that is one or two rows.
-        totals = {
-            "spend": 0.0,
-            "total_tokens": 0,
-            "api_requests": 0,
-            "failed_requests": 0,
-        }
-        saw_spend = False
+        # The query is scoped to today; never mix yesterday into *_today fields.
+        keys = ("spend", "total_tokens", "api_requests", "failed_requests")
+        totals = {key: 0 for key in keys}
+        seen = {key: False for key in keys}
+        top = None
 
         for row in results:
             if not isinstance(row, dict):
@@ -212,35 +216,68 @@ class LiteLLMSource(Source):
             if spend is not None:
                 try:
                     totals["spend"] += float(spend)
-                    saw_spend = True
+                    seen["spend"] = True
                 except (TypeError, ValueError):
                     pass
 
-            for key in ("total_tokens", "api_requests", "failed_requests"):
+            for key in keys[1:]:
                 value = _metric(row_metrics, key)
                 if value is not None:
                     try:
                         totals[key] += int(value)
+                        seen[key] = True
+                    except (TypeError, ValueError):
+                        pass
+            if _metric(row_metrics, "total_tokens") is None:
+                prompt = _metric(row_metrics, "prompt_tokens")
+                completion = _metric(row_metrics, "completion_tokens")
+                if prompt is not None and completion is not None:
+                    try:
+                        totals["total_tokens"] += int(prompt) + int(completion)
+                        seen["total_tokens"] = True
                     except (TypeError, ValueError):
                         pass
 
-            # Top model comes from the breakdown of the most recent row.
-            top = _top_model(row.get("breakdown"))
-            if top:
-                metrics["top_model"] = top
+            top = _top_model(row.get("breakdown")) or top
 
-        metrics["requests_today"] = totals["api_requests"]
-        metrics["tokens_today"] = totals["total_tokens"]
-        metrics["errors_today"] = totals["failed_requests"]
+        metadata = activity.get("metadata")
+        metadata_fields = {
+            "spend": "total_spend",
+            "api_requests": "total_api_requests",
+        }
+        for key, metadata_key in metadata_fields.items():
+            value = _metric(metadata, metadata_key)
+            if value is not None:
+                try:
+                    totals[key] = float(value) if key == "spend" else int(value)
+                    seen[key] = True
+                except (TypeError, ValueError):
+                    pass
+        prompt_total = _metric(metadata, "total_prompt_tokens")
+        completion_total = _metric(metadata, "total_completion_tokens")
+        if prompt_total is not None and completion_total is not None:
+            try:
+                totals["total_tokens"] = int(prompt_total) + int(completion_total)
+                seen["total_tokens"] = True
+            except (TypeError, ValueError):
+                pass
 
-        if saw_spend:
+        metrics["requests_today"] = totals["api_requests"] if seen["api_requests"] else UNAVAILABLE
+        metrics["tokens_today"] = totals["total_tokens"] if seen["total_tokens"] else UNAVAILABLE
+        metrics["errors_today"] = totals["failed_requests"] if seen["failed_requests"] else UNAVAILABLE
+        if top:
+            metrics["top_model"] = top
+        else:
+            metrics["top_model"] = UNAVAILABLE
+
+        if seen["spend"]:
             metrics["spend_today"] = round(totals["spend"], 4)
         else:
             # No database configured, or no priced requests. Either way this is
             # unknown, not zero.
             metrics["spend_today"] = UNAVAILABLE
 
-        if totals["failed_requests"]:
+        if seen["failed_requests"] and totals["failed_requests"]:
             alerts.append(Alert(
                 "warning",
                 "%d failed requests today" % totals["failed_requests"]).to_dict())

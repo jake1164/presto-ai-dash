@@ -7,10 +7,13 @@ swipe/tap navigation, LEDs, optional sound, and local HTTP polling over Wi-Fi.
 The desktop/server daemon is the brain: source collection, provider secrets,
 normalization, SQLite history, and `/api/v1/status`.
 
-M1 runs static data entirely on the device. M2 runs the daemon with `fake`
-only and minimal snapshot insert/read. Live device polling, real sources,
-retention, alert history, and trends are later work; the diagram is the
-connected-runtime target.
+M1 runs static data entirely on the device. M2 added the daemon API and fake
+source; M3 added internal SQLite history, UTC ordering, alert observations,
+and 72-hour retention. M4/M5 add Ollama health and LiteLLM routed usage.
+The connected Presto app polls with cooperative asyncio tasks. On-device Wi-Fi,
+authenticated fake-data polling, and recovery are verified in `milestones.md`.
+Trend calculations remain later work. Static preview mode remains available
+through `STATIC_DEMO`.
 
 ```text
                  +-------------------+
@@ -34,12 +37,16 @@ connected-runtime target.
 
 ## Daemon responsibilities
 
-This table includes planned later modules. HTTP source clients and daemon
-alerts remain disabled drafts in M2; storage currently handles snapshots only.
+This table includes later modules. Provider HTTP clients are active for M4/M5;
+the separate daemon alert-rule module remains a draft. M3 storage records
+observations reported by active sources and does not calculate alert rules.
 
 | Responsibility | Module |
 | --- | --- |
 | Load and validate config | `config.py` |
+| Edit source instances and apply changes | `management.py` |
+| Encrypt provider credentials and protect the master key | `credentials.py` |
+| Serve the local configuration page and admin API | `admin.py`, `web/` |
 | Define the shared vocabulary | `models.py` |
 | Talk to sources over HTTP | `http_client.py` |
 | Collect from each source | `sources/` |
@@ -51,7 +58,7 @@ alerts remain disabled drafts in M2; storage currently handles snapshots only.
 
 ## Collection model
 
-One daemon thread per enabled source. Each thread loops:
+Legacy TOML mode uses one daemon thread per enabled source. Each thread loops:
 
 ```text
 sleep(poll_interval)
@@ -61,6 +68,14 @@ sleep(poll_interval)
 ```
 
 The alert-evaluation step is planned beyond M2.
+
+After the first admin start, SQLite source instances become authoritative.
+The managed collector probes enabled instances concurrently (up to four at a
+time), caches unchanged source objects, and wakes when configuration changes.
+Each observation is checked against the instance revision before storage;
+results from edited or deleted configurations are discarded. Status reads
+exclude disabled/deleted instances while retaining their history for cleanup.
+See [configuration and encryption](configuration.md).
 
 `GET /api/v1/status` never blocks on a source. It reads the most recent
 snapshot per source from SQLite and renders immediately. A slow or dead source
@@ -121,16 +136,18 @@ Unauthenticated or badly authenticated requests get `401`. Unknown paths get
 
 ## Storage
 
-M2 uses only `snapshots`. The planned history milestone extends it to:
+M3 uses `snapshots` and `alerts`:
 
 ```text
 snapshots   one row per source per collection
-alerts      one row per raised alert
-settings    daemon-owned key/value state
+alerts      one observation per snapshot and distinct severity/message pair
 ```
 
-Planned retention defaults to 72 hours and is swept on a timer, not on every
-write. M2 does not run cleanup.
+Existing M2 databases migrate transactionally. Snapshot times are stored as
+fixed-width UTC; alert observation time comes from the parent snapshot. History
+queries are bounded and internal. Retention defaults to 72 hours and is swept
+at startup and every 300 seconds. A settings table and trend endpoints are not
+part of M3.
 
 ## Deployment Model
 
@@ -171,7 +188,7 @@ Prometheus/Grafana, advanced alert rules, and installers remain future work.
 main.py     the only file that imports presto/machine
 net.py      HTTP fetch (requests wrapper, injectable for tests)
 cards.py    card model + status -> accent mapping        (pure)
-home.py     labelled static cloud quotas                 (pure)
+home.py     static quotas, live source rows, scrolling    (pure)
 gestures.py tap / swipe / long-press state machine       (pure)
 alerts.py   status -> LED colour + sound cue             (pure)
 ui.py       PicoGraphics drawing                         (hardware)
@@ -186,7 +203,12 @@ on a development machine, and the hardware layer stays a thin adapter. See
 - The daemon binds to the LAN by default and is never meant to be public.
 - `/api/v1/status` requires the shared token. If none is configured, one is
   generated at startup and logged once.
-- Provider secrets live in the daemon config or environment variables, never on
-  the Presto.
+- In managed mode, provider secrets are authenticated ciphertext in SQLite.
+  The master key is outside SQLite, protected with Windows DPAPI or an
+  owner-only Unix file; an externally managed environment key is supported.
+  Legacy TOML/environment keys are imported once. No provider secrets go to
+  the Presto, status endpoint, or admin read responses.
+- Configuration uses a separate admin bearer token and loopback-only listener,
+  with Host/Origin validation. The device token cannot edit sources.
 - The daemon never makes a paid model call. LiteLLM's `GET /health` endpoint
   *does* make test calls and costs tokens, so it is not used.

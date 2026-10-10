@@ -1,10 +1,9 @@
 # Sources
 
-M2 enables only `fake`. The Ollama and LiteLLM sections below describe future
-M4/M5 contracts, not working integrations. Their draft modules are disabled
-and tracked as drafts, with no runtime registration. Cloud names on the static
-Home preview are labelled demo
-values, not additional daemon sources.
+The daemon ships three registered sources: `fake`, `ollama`, and `litellm`.
+Fake data is enabled by default. It cannot be enabled alongside either live
+source, which avoids mixing synthetic and real measurements. Cloud names on
+the static Home preview remain labelled demo values, not daemon sources.
 
 A source is anything that can answer "what is the state of this thing right
 now". Each source returns a `SourceSnapshot`:
@@ -21,8 +20,15 @@ class SourceSnapshot:
 ```
 
 Adding a source means adding one module under `daemon/src/presto_ai_dash/sources/`
-and registering it. There is no plugin loader, no entry points, and no package
-system in v0. That is deliberate.
+and registering its class. Trusted modules in `sources/` are discovered at
+startup; there are no external entry points or package installation through the
+browser.
+
+The [configuration page](configuration.md) creates multiple instances of these
+types. A class's `id` identifies the connector type; each configured instance
+has a separate stable ID used for its snapshots and encrypted credential.
+Renaming or replacing a key preserves that identity and history. Instances of
+one type are reported separately; their usage is never automatically summed.
 
 ## Status vocabulary
 
@@ -61,16 +67,16 @@ path is identical whether the data came from `fake` or from LiteLLM.
 
 **Purpose:** local model health and performance.
 
-Planned endpoints (recorded during the original readiness pass):
+Endpoints used by the implemented source:
 
 | Endpoint | Used for |
 | --- | --- |
 | `GET /api/version` | reachability and version |
 | `GET /api/tags` | models available locally |
 | `GET /api/ps` | models currently loaded in memory |
-| `POST /api/generate` (`stream: false`) | the timing fields, when a measured sample exists |
+| (external sample file) | last observed request timing; the daemon itself sends no prompt |
 
-Reported metrics:
+Reported metrics (where returned by the configured proxy):
 
 ```text
 reachable            yes | no
@@ -87,16 +93,15 @@ prompts, token counts or durations. The project plan states this in §6.3 and it
 is correct.
 
 So `last measured tokens/sec` can only come from something that *observed* a
-request: a future collector, shim, wrapper, or voluntary reporter. This work
-is unscheduled and is not required by M2.
+request: a collector, shim, wrapper, or voluntary reporter. That observer is
+future work and is not part of these source milestones.
 
-What v0 is planned to do: if `sources.ollama.samples_file` points at a JSON file
-written by such a helper, the daemon reads the last sample and computes
-tokens/sec. That arithmetic and its fixture tests belong to M4 and have not
-been delivered in M2.
+The daemon reports reachability, version, available and loaded models. If
+`sources.ollama.samples_file` points at a JSON file written by such a helper,
+it reads the last sample and computes tokens/sec. It does not send prompts.
 
-Until then the card reads **"last measured: unavailable"**. It does not guess,
-and it does not show zero.
+When no readable sample exists the card reads **"last measured: unavailable"**.
+It does not guess, and it does not show zero.
 
 ### tokens/sec
 
@@ -115,7 +120,7 @@ LiteLLM only sees traffic routed through LiteLLM; direct `jake-desktop` calls
 to Ollama are outside those usage totals. The v0 daemon is intended to run on
 `toontown-int-srv1`; desktop direct-usage reporting is a future helper.
 
-Planned endpoints (recorded during the original readiness pass):
+Endpoints used by the implemented source:
 
 | Endpoint | Auth | Used for |
 | --- | --- | --- |
@@ -144,11 +149,9 @@ errors_today         from metrics.failed_requests
 - **Spend needs a database.** If the LiteLLM proxy has no `DATABASE_URL`,
   spend tracking does not work at all. The card shows **"unavailable"**, never
   `$0.00`, because zero and unknown are different facts.
-- **Fail-soft by design.** LiteLLM's API stability policy says only endpoints in
-  the OpenAPI spec are a public contract; everything else may change without
-  notice. So this source treats any unexpected status code, missing field or
-  404 as "that metric is unavailable" and never raises. One broken metric must
-  not take down the card.
+- **Fail-soft by design.** An unavailable endpoint or missing field makes that
+  metric unavailable and does not take down the daemon. Response metadata
+  totals are preferred when present; absent fields are never reported as zero.
 
 ### What is deliberately not reported
 
@@ -163,11 +166,19 @@ errors_today         from metrics.failed_requests
 
 ## Adding a source
 
-1. Create `sources/mysource.py` with a class exposing `id`, `name` and
-   `collect() -> SourceSnapshot`.
-2. Register it in `sources/__init__.py`.
-3. Add a config section and a card builder in `dashboard.py`.
-4. Add tests with recorded fixtures from the official documentation.
+1. Create `sources/mysource.py` with a `Source` subclass exposing a unique
+   type `id`, `name`, and `collect() -> SourceSnapshot`.
+2. Decorate it with `@register`. Its module is imported at daemon startup.
+3. Declare `config_fields` with keys, labels, types (`int`, `url`, `string`),
+   defaults, and integer bounds. The admin page and settings validation use
+   these descriptors. Declare `secret_field` for an optional encrypted API key;
+   the collector passes the decrypted key into that constructor setting.
+4. Add fixture tests based on response shapes from the official documentation.
+
+The managed collector assigns each object its instance ID and display name.
+Use `self.id` in snapshots. New types appear in the status `sources` array and
+overall summary; adding a dedicated Presto card remains separate UI work.
+Modules are trusted Python code installed with the daemon, not uploaded by users.
 
 Do not mock an external API from assumption. Record a real response from the
 official docs, or from the live service, and test against that.

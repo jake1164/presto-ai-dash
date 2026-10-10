@@ -2,8 +2,8 @@
 
 A tiny AI usage dashboard for Pimoroni Presto with support for local and cloud AI providers.
 
-Repository: `presto-ai-dash`. Local integrations are planned for v0; direct
-cloud-provider sources remain future work. The current build uses fake data.
+Repository: `presto-ai-dash`. The daemon supports fake, Ollama, and LiteLLM
+sources; direct cloud-provider sources remain future work.
 
 It answers a handful of questions at a glance: is local Ollama active, is
 LiteLLM healthy, how many tokens have I used today, is anything near a limit,
@@ -17,13 +17,13 @@ not a dashboard replacement.
 ## Runtime Architecture
 
 The complete system does not run on the Presto. The static M1 demo can run
-entirely on the device; the planned connected runtime has two parts:
+entirely on the device; the connected runtime has two parts:
 
 ```text
 Pimoroni Presto
     | polls HTTP every ~15s
     v
-Presto AI Dash daemon  (Python, stdlib only, on your LAN)
+Presto AI Dash daemon  (Python, on your LAN)
     | reads
     v
 LiteLLM  --->  Ollama
@@ -88,23 +88,35 @@ tray support, pipx validation, and binary packaging are not implemented yet.
 
 ## v0 in one paragraph
 
-**Current milestone: M2 is implemented and tested with the fake source only.**
+**Current delivery: M1–M5 are complete.** The daemon uses fake data by default;
+configure Ollama or LiteLLM and disable fake to collect live source data.
+The [local configuration page](docs/configuration.md) supports multiple source
+instances and stores provider keys encrypted in SQLite. Enable it with
+`--admin`; its separate listener uses localhost and an admin token.
 The Presto Home preview stacks daily and weekly quota bars for OpenAI,
 Claude, Ollama Cloud, and OpenCode.ai using fixed values labelled **DEMO**,
-alongside the
-static Ollama and LiteLLM cards. These cloud names do not indicate integrations.
+alongside the static Ollama and LiteLLM cards. These cloud names do not indicate
+integrations.
 Drag up/down to scroll the Home list; swipe left/right to switch cards.
-SQLite supports snapshot insert/read;
-retention, trends, alert history, and real sources remain future milestones.
-The paragraph below describes the planned v0.
+SQLite stores UTC-normalized snapshot history and alert observations for
+72 hours.
+The connected app uses authenticated polling when `STATIC_DEMO = False`.
+Live Home lists daemon source instances and measured usage. Wi-Fi hardware
+acceptance is tracked in [milestones](docs/milestones.md). History is internal;
+trends remain future work.
 
 Three sources (`fake`, `ollama`, `litellm`) feed one daemon. The daemon serves
 `GET /api/v1/status` behind a shared bearer token. The Presto polls it, shows
 three cards (AI Dash, Ollama, LiteLLM), colours its LEDs by status, and can
-chirp on a warning. Snapshots are kept in SQLite for 72 hours so simple
-up/down trends can be shown. Nothing else.
+chirp on a warning. Snapshots are kept in SQLite for 72 hours; history stays
+internal with no trend calculations or history endpoints.
 
 ## Quick start
+
+In VS Code, select **Daemon + configuration** in **Run and Debug**: **F5**
+debugs and **Ctrl+F5** runs it. Open `http://127.0.0.1:8788` and use the admin
+token printed in the terminal. See [IDE setup](docs/setup.md#vs-code-run-and-debug)
+for the root `.venv` and private `dash.toml` used by this profile.
 
 ```bash
 # Daemon
@@ -136,7 +148,7 @@ presto-ai-dash/
     implementation-readiness.md the pre-build readiness pass
   daemon/
     pyproject.toml
-    src/presto_ai_dash/        Python daemon, stdlib only
+    src/presto_ai_dash/        Python daemon with encrypted configuration
   presto/
     main.py                     MicroPython app (only file touching hardware)
     config.example.py
@@ -153,6 +165,7 @@ presto-ai-dash/
 | --- | --- |
 | `docs/architecture.md` | you want to know how the parts fit together |
 | `docs/setup.md` | you are installing or running it |
+| `docs/configuration.md` | you want to manage source instances and encrypted keys |
 | `docs/sources.md` | you are adding or debugging a source |
 | `docs/limitations.md` | a number looks wrong or missing |
 | `docs/future.md` | you are wondering why feature X is absent |

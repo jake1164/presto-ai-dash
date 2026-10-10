@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Dash · Configuration</title>
+  <link rel="stylesheet" href="/admin.css">
+  <script src="/admin.js" defer></script>
+</head>
+<body>
+  <header><div><p class="eyebrow">PRESTO AI DASH</p><h1>Source configuration</h1></div>
+    <button id="logout" hidden>Lock configuration</button></header>
+  <p id="message" role="status" aria-live="polite"></p>
+  <section id="login-panel" class="panel">
+    <h2>Unlock local configuration</h2>
+    <p>Enter the separate admin token shown when the daemon starts. The device token cannot edit sources.</p>
+    <form id="login-form">
+      <label for="admin-token">Admin token</label>
+      <input id="admin-token" type="password" required autocomplete="off">
+      <button type="submit">Unlock</button>
+    </form>
+  </section>
+  <main id="workspace" hidden>
+    <section class="panel">
+      <div class="section-title"><h2>Your sources</h2><button id="add-source">Add source</button></div>
+      <p>Configure multiple endpoints or accounts. Disable demo data before enabling a live source.</p>
+      <div id="source-list"></div>
+      <p class="note">Changes apply automatically after any current probe finishes.</p>
+    </section>
+    <section class="panel">
+      <h2 id="editor-title">Add source</h2>
+      <form id="source-form">
+        <label for="source-type">Source type</label>
+        <select id="source-type" required></select>
+        <label for="source-name">Display name</label>
+        <input id="source-name" maxlength="80" required autocomplete="off">
+        <div id="source-fields"></div>
+        <label class="check"><input id="source-enabled" type="checkbox"> Enable collection</label>
+        <div id="key-section" hidden>
+          <label for="api-key">API key</label>
+          <input id="api-key" type="password" maxlength="4096" autocomplete="new-password">
+          <p id="key-help" class="note"></p>
+          <label id="clear-key-label" class="check" hidden><input id="clear-key" type="checkbox"> Remove stored key</label>
+        </div>
+        <div class="actions"><button id="save-source" type="submit">Save source</button>
+          <button id="delete-source" type="button" class="danger" hidden>Delete source</button></div>
+      </form>
+      <p class="note">Keys are encrypted in the database and cannot be read back through this page.
+        Deleting a source removes its saved key; past observations remain until retention cleanup.</p>
+    </section>
+  </main>
+</body>
+</html>

@@ -11,6 +11,10 @@ venv/
 *.db
 *.sqlite
 *.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+*.key
 dash.toml
 .local-backups/
 
@@ -19,7 +23,9 @@ presto/secrets.py
 presto/config.py
 
 # Editor / OS
-.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/extensions.json
 .idea/
 .DS_Store
 Thumbs.db

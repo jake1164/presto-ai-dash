@@ -147,8 +147,58 @@ def draw_home(display, palette, quotas, index, total, muted=False,
         _text(display, palette, "MUTED", width - 58, FOOTER_Y, INK_DIM, scale=1)
 
 
+def draw_sources(display, palette, rows, index, total, status="offline",
+                 muted=False, width=240, height=240, scroll=0, stale=False):
+    """Live Home: measured source instances, with no illustrative quota values."""
+    from alerts import rgb_for_accent
+    from cards import accent_for
+    from home import LIST_TOP, LIST_HEIGHT, ROW_HEIGHT, scroll_limit
+    display.set_pen(palette.pen(BACKGROUND))
+    display.clear()
+    accent = rgb_for_accent(accent_for(status), 0.45 if muted else 1.0)
+    display.set_pen(palette.pen(accent))
+    display.rectangle(0, 0, 5, height)
+    display.set_font("bitmap8")
+    _text(display, palette, "Home", 14, TITLE_Y, INK, scale=2)
+    display.set_font("bitmap6")
+    badge = "FAKE" if rows and all(row["type"] == "fake" for row in rows) else "LIVE"
+    _text(display, palette, badge, width - 42, 12, INK_DIM, scale=1)
+    _text(display, palette, "%d source%s - %s" %
+          (len(rows), "" if len(rows) == 1 else "s", status.upper()),
+          14, 34, accent, scale=1)
+    limit = scroll_limit(len(rows))
+    scroll = max(0, min(limit, int(scroll)))
+    row_width = width - 14 - MARGIN
+    display.set_clip(14, LIST_TOP, row_width, LIST_HEIGHT)
+    if not rows:
+        _text(display, palette, "No sources enabled", 14, LIST_TOP, INK_DIM, scale=1)
+    for position, row in enumerate(rows):
+        y = LIST_TOP + position * ROW_HEIGHT - scroll
+        if y + ROW_HEIGHT <= LIST_TOP or y >= LIST_TOP + LIST_HEIGHT:
+            continue
+        display.set_font("bitmap8")
+        _text(display, palette, row["name"], 14, y, INK, scale=2)
+        display.set_font("bitmap6")
+        _text(display, palette, row["status"].upper(), 14, y + 19,
+              rgb_for_accent(accent_for(row["status"])), scale=1)
+        _text(display, palette, row["usage"], 14, y + 32, INK_DIM, scale=1)
+    display.remove_clip()
+    if limit:
+        thumb = max(12, LIST_HEIGHT * LIST_HEIGHT // (len(rows) * ROW_HEIGHT))
+        display.set_pen(palette.pen(PANEL))
+        display.rectangle(width - 5, LIST_TOP, 2, LIST_HEIGHT)
+        display.set_pen(palette.pen(INK_DIM))
+        display.rectangle(width - 5, LIST_TOP + (LIST_HEIGHT - thumb) * scroll // limit, 2, thumb)
+    display.set_font("bitmap6")
+    _text(display, palette, "STALE - retrying" if stale else "Daemon data - swipe for details",
+          14, 208, INK_DIM, scale=1)
+    _draw_dots(display, palette, index, total, accent, width, height)
+    if muted:
+        _text(display, palette, "MUTED", width - 58, FOOTER_Y, INK_DIM, scale=1)
+
+
 def draw_card(display, palette, card, index, total, muted=False,
-              width=240, height=240):
+              width=240, height=240, stale=False):
     """Draw one card.
 
     ``index``/``total`` drive the page dots at the bottom. ``muted`` dims the
@@ -193,6 +243,9 @@ def draw_card(display, palette, card, index, total, muted=False,
         y += DETAIL_LINE_H
 
     # Page dots
+    if stale:
+        display.set_font("bitmap6")
+        _text(display, palette, "STALE - retrying", MARGIN + 6, 208, INK_DIM, scale=1)
     _draw_dots(display, palette, index, total, accent_rgb, width, height)
 
     # Mute indicator

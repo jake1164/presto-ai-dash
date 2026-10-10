@@ -27,7 +27,7 @@ HARDWARE_IMPORTS = re.compile(
 
 def _presto_files():
     for name in sorted(os.listdir(PRESTO_DIR)):
-        if name.endswith(".py"):
+        if name.endswith(".py") and name not in ("config.py", "secrets.py"):
             yield name
 
 
@@ -130,7 +130,7 @@ class TestCarouselEntry(unittest.TestCase):
                                for target in node.targets))
         self.assertNotEqual(os.path.basename(app_dir), "ai_dash")
         self.assertEqual(source.splitlines()[:3], ["# ICON monitoring", "# NAME AI Dash",
-                                                 "# DESC Static fake-data dashboard."])
+                                                 "# DESC Daemon status dashboard."])
 
 
 if __name__ == "__main__":

@@ -100,6 +100,10 @@ class FakeSource(Source):
 
     id = "fake"
     name = "Fake"
+    config_fields = (
+        {"key": "scenario_interval", "label": "Seconds per demo scenario",
+         "type": "int", "default": 20, "minimum": 1, "maximum": 3600},
+    )
 
     def __init__(self, config=None):
         super().__init__(config)

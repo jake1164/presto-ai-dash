@@ -1,5 +1,10 @@
 # Sources
 
+M2 enables only `fake`. The Ollama and LiteLLM sections below describe future
+M4/M5 contracts, not working integrations. Their draft modules are disabled
+and uncommitted. Cloud names on the static Home preview are labelled demo
+values, not additional daemon sources.
+
 A source is anything that can answer "what is the state of this thing right
 now". Each source returns a `SourceSnapshot`:
 
@@ -55,7 +60,7 @@ path is identical whether the data came from `fake` or from LiteLLM.
 
 **Purpose:** local model health and performance.
 
-Endpoints used (all verified against the official Ollama API documentation):
+Planned endpoints (recorded during the original readiness pass):
 
 | Endpoint | Used for |
 | --- | --- |
@@ -81,12 +86,13 @@ prompts, token counts or durations. The project plan states this in §6.3 and it
 is correct.
 
 So `last measured tokens/sec` can only come from something that *observed* a
-request: a collector, a shim, or a wrapper. That is a v0.2 feature.
+request: a future collector, shim, wrapper, or voluntary reporter. This work
+is unscheduled and is not required by M2.
 
-What v0 does instead: if `sources.ollama.samples_file` points at a JSON file
+What v0 is planned to do: if `sources.ollama.samples_file` points at a JSON file
 written by such a helper, the daemon reads the last sample and computes
-tokens/sec. The arithmetic is implemented and tested now, against a recorded
-`/api/generate` response, so it is ready the moment a collector exists.
+tokens/sec. That arithmetic and its fixture tests belong to M4 and have not
+been delivered in M2.
 
 Until then the card reads **"last measured: unavailable"**. It does not guess,
 and it does not show zero.
@@ -104,7 +110,11 @@ All Ollama durations are in **nanoseconds**.
 
 **Purpose:** routed AI usage through the gateway.
 
-Endpoints used (all verified against the current LiteLLM documentation):
+LiteLLM only sees traffic routed through LiteLLM; direct `jake-desktop` calls
+to Ollama are outside those usage totals. The v0 daemon is intended to run on
+`toontown-int-srv1`; desktop direct-usage reporting is a future helper.
+
+Planned endpoints (recorded during the original readiness pass):
 
 | Endpoint | Auth | Used for |
 | --- | --- | --- |

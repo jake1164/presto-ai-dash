@@ -1,6 +1,16 @@
 # Architecture
 
-## Shape
+## Runtime Architecture
+
+The Presto is the physical dashboard/controller: touchscreen card rendering,
+swipe/tap navigation, LEDs, optional sound, and local HTTP polling over Wi-Fi.
+The desktop/server daemon is the brain: source collection, provider secrets,
+normalization, SQLite history, and `/api/v1/status`.
+
+M1 runs static data entirely on the device. M2 runs the daemon with `fake`
+only and minimal snapshot insert/read. Live device polling, real sources,
+retention, alert history, and trends are later work; the diagram is the
+connected-runtime target.
 
 ```text
                  +-------------------+
@@ -24,6 +34,9 @@
 
 ## Daemon responsibilities
 
+This table includes planned later modules. HTTP source clients and daemon
+alerts remain disabled drafts in M2; storage currently handles snapshots only.
+
 | Responsibility | Module |
 | --- | --- |
 | Load and validate config | `config.py` |
@@ -46,6 +59,8 @@ sleep(poll_interval)
   -> storage.save_snapshot()
   -> alerts.evaluate(snapshot) # may raise an Alert
 ```
+
+The alert-evaluation step is planned beyond M2.
 
 `GET /api/v1/status` never blocks on a source. It reads the most recent
 snapshot per source from SQLite and renders immediately. A slow or dead source
@@ -106,7 +121,7 @@ Unauthenticated or badly authenticated requests get `401`. Unknown paths get
 
 ## Storage
 
-Three tables, as the plan specifies.
+M2 uses only `snapshots`. The planned history milestone extends it to:
 
 ```text
 snapshots   one row per source per collection
@@ -114,7 +129,41 @@ alerts      one row per raised alert
 settings    daemon-owned key/value state
 ```
 
-Retention defaults to 72 hours and is swept on a timer, not on every write.
+Planned retention defaults to 72 hours and is swept on a timer, not on every
+write. M2 does not run cleanup.
+
+## Deployment Model
+
+Normal Python 3.11+ first: source run or pip/pipx installation. The core
+targets Windows 10/11, macOS, and Linux with SQLite, TOML, and `pathlib` paths.
+Headless use is first-class; no systemd-only or Windows-only service dependency.
+Current execution has been checked on Windows; other OS checks remain to do.
+
+The current console command is `presto-ai-dash`; the planned v0 name is
+`presto-ai-dash-daemon`. Optional deployment targets are a Docker image in
+v0.1, a separate `presto-ai-dash-tray` wrapper in v0.2, and binaries/installers
+in v1 if useful. These are unimplemented; Docker must not be the only mode.
+See [Future Features](future.md) for the tray boundary.
+
+## Topology and Telemetry Limits
+
+```text
+toontown-int-srv1 -> LiteLLM -> jake-desktop -> Ollama
+jake-desktop -> Ollama directly
+Presto -> HTTP daemon on toontown-int-srv1
+```
+
+LiteLLM measures only traffic routed through it. Full direct Ollama usage
+needs a future desktop collector, shim, wrapper, or voluntary reporting;
+polling health cannot reconstruct request history. An optional future
+`jake-desktop` helper reports those samples to the server daemon.
+
+## Scope / Non-goals
+
+v0 remains demo-first with `fake`, `ollama`, and `litellm` sources only; real
+integrations are M4/M5. Direct OpenAI/Codex, Claude, Ollama Cloud, OpenCode,
+MQTT, multi-host collectors, desktop browser helpers, external plugins,
+Prometheus/Grafana, advanced alert rules, and installers remain future work.
 
 ## Presto app
 
@@ -122,6 +171,7 @@ Retention defaults to 72 hours and is swept on a timer, not on every write.
 main.py     the only file that imports presto/machine
 net.py      HTTP fetch (requests wrapper, injectable for tests)
 cards.py    card model + status -> accent mapping        (pure)
+home.py     labelled static cloud quotas                 (pure)
 gestures.py tap / swipe / long-press state machine       (pure)
 alerts.py   status -> LED colour + sound cue             (pure)
 ui.py       PicoGraphics drawing                         (hardware)

@@ -1,5 +1,8 @@
 # Limitations
 
+Current M2 uses fake data only; source behaviour described below is the
+planned v0 behaviour for M4/M5. Retention and trends are also deferred.
+
 Things this project honestly cannot do, and why. If a number on the Presto
 looks wrong or missing, it is probably here.
 
@@ -16,16 +19,23 @@ token history, no duration history. The API exposes:
 So "tokens used today against Ollama directly" is not reconstructable from
 Ollama alone. The project plan says this in §6.3 and it is correct.
 
-**What v0 shows:** reachability, version, loaded model, available model count,
+**What v0 is planned to show:** reachability, version, loaded model, available model count,
 and — only if a collector has written a samples file — the last measured
 request with a computed tokens/sec.
 
 **What v0 does not do:** invent a number. If there is no measured sample the
 card reads "last measured: unavailable".
 
-**The fix, in v0.2:** a desktop collector or a local Ollama shim that observes
-requests and writes JSON the daemon reads. The tokens/sec arithmetic is already
-implemented and tested, so this is a data-plumbing change, not a redesign.
+**A future fix:** a desktop collector, local Ollama shim, wrapper, or voluntary
+reporter that observes requests and supplies samples the daemon can read.
+Tokens/sec arithmetic and real-source tests belong to M4; they are not
+implemented in M2. The collector is future work without a release assignment.
+
+## LiteLLM sees only routed traffic
+
+The target topology is `toontown-int-srv1 -> LiteLLM -> jake-desktop -> Ollama`,
+with direct `jake-desktop -> Ollama` calls as well. LiteLLM usage totals cover
+only the first path. They must never be presented as complete desktop usage.
 
 ## LiteLLM spend may be permanently unavailable
 
@@ -56,7 +66,7 @@ LiteLLM's API stability policy is explicit: only endpoints present in the
 OpenAPI spec are a public contract. Everything else is private and may change
 or disappear in any release without notice.
 
-The LiteLLM source is therefore written fail-soft. An unexpected status code, a
+The planned LiteLLM source must fail soft. An unexpected status code, a
 missing field, or a 404 degrades that one metric to "unavailable". It never
 raises, and it never takes the card down with it.
 
@@ -70,7 +80,8 @@ compare, and the indicator reads "–" rather than guessing a direction.
 
 ## What cannot be automated in tests
 
-The daemon is fully testable on a development machine with no network. The
+The daemon is testable on a development machine without external services;
+HTTP tests use localhost networking. The
 Presto is not. These require physical hardware and are covered by the
 Milestone 7 manual checklist:
 
@@ -99,6 +110,6 @@ therefore only acts on single-touch input and explicitly ignores multi-touch.
 
 ## Not a security boundary
 
-The shared token keeps casual LAN neighbours out. It is not authentication, it
-does not expire, and it travels in a header over plain HTTP. Do not expose the
+The shared token provides bearer authentication for trusted LAN use. It has no
+per-user identity or expiry, and travels in a header over plain HTTP. Do not expose the
 daemon to the internet.

@@ -1,9 +1,32 @@
-# Future
+# Future Features
 
 Deliberately out of scope for v0. Recorded here so the boundary is explicit and
 so nobody has to re-derive it.
 
-## v0.2
+## Deployment roadmap
+
+| Target | Direction |
+| --- | --- |
+| v0 | Normal Python daemon: source run or pip/pipx; target command `presto-ai-dash-daemon` |
+| v0.1 | Optional Docker image for server/headless use, especially `toontown-int-srv1` |
+| v0.2 | Optional separate `presto-ai-dash-tray` runner/wrapper |
+| v1 | Packaged binaries/installers if the project proves useful |
+
+Today's installed command is `presto-ai-dash`; the new command names and these
+packaging targets are unimplemented. Docker is an optional mode. Headless
+Python use must remain first-class on Windows 10/11, macOS, and Linux.
+
+## Optional tray (v0.2 target)
+
+Keep the tray outside the daemon core. Windows/macOS are primary; Linux is
+best-effort because desktop environments differ. `pystray` is the likely
+candidate; `rumps` is optional later macOS polish, never required.
+
+The small menu contains status, open dashboard/status endpoint, open config
+folder, copy Presto endpoint URL, restart daemon, stop daemon, and about.
+It must not grow into a second full UI.
+
+## Desktop telemetry and display refinements (unscheduled)
 
 | Item | Notes |
 | --- | --- |
@@ -14,17 +37,18 @@ so nobody has to re-derive it.
 | Configurable polling interval | Already in config; expose it on the device. |
 | Simple web preview | Render the same status JSON in a browser for debugging. |
 
-## v0.3
+## Providers and messaging (unscheduled)
 
 | Item | Notes |
 | --- | --- |
 | OpenCode JSON source | OpenCode or a helper writes JSON, the daemon reads it, the Presto shows a card. Same pattern as the Ollama samples file. |
 | Ollama Cloud research | Research before implementation. No brittle scraping as a default. |
 | OpenAI usage source | Official usage/cost/status APIs only. Read-only or restricted keys. No paid test calls unless explicitly enabled. No dashboard scraping. |
+| Codex / Claude sources | Research supported or user-exported telemetry first; placeholders only. |
 | MQTT output/input | Publish status, accept commands. |
 | Multiple Presto devices | The daemon already serves many clients; this is about per-device config. |
 
-## v1.0
+## Other expansion (unscheduled)
 
 | Item | Notes |
 | --- | --- |

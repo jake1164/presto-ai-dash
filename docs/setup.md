@@ -8,6 +8,11 @@
 | Presto | Pimoroni Presto with the current MicroPython firmware and launcher |
 | Network | Presto and daemon on the same LAN |
 
+The network requirement applies to the planned connected runtime. The current
+static M1 preview needs neither Wi-Fi nor a daemon. The core daemon targets
+Windows 10/11, macOS, and Linux; see [Deployment Model](architecture.md#deployment-model)
+for the future direct Python/pipx, optional Docker, tray, and binary targets.
+
 ## 1. Run the daemon
 
 ```bash
@@ -42,6 +47,10 @@ Or, if you installed the console script:
 ```bash
 presto-ai-dash --config dash.toml
 ```
+
+`presto-ai-dash-daemon` is the planned command name, not yet installed. Use
+the current commands above. No Docker image, tray runner, or installers exist
+yet; pipx support is a deployment target still to be validated.
 
 Check it works:
 
@@ -79,34 +88,53 @@ see the launcher, download the latest `with-filesystem` `.uf2` from the
 hold **BOOT** while tapping **RESET**, and drag the `.uf2` onto the `RP2350`
 drive.
 
-Copy the app files to the Presto root with
-[Thonny](https://thonny.org/) (interpreter: *MicroPython (Raspberry Pi Pico)*):
+The first hardware checkpoint uses the existing static fake-data demo. It
+needs no Wi-Fi credentials or running daemon.
 
-```text
-main.py
-net.py
-cards.py
-gestures.py
-alerts.py
-ui.py
-config.py          <- copy of config.example.py, edited
-secrets.py         <- your Wi-Fi details
-```
+Keep the device's existing `main.py` carousel launcher. Create `/ai_dash_files` on
+the device and copy files using [Thonny](https://thonny.org/) (interpreter:
+*MicroPython (Raspberry Pi Pico)*) or `mpremote`:
 
-`secrets.py` must contain:
+| Repository file | Device path |
+| --- | --- |
+| `presto/launcher/ai_dash.py` | `/ai_dash.py` |
+| `presto/main.py` | `/ai_dash_files/ai_dash_app.py` |
+| `presto/config.example.py` | `/ai_dash_files/config.py` |
+| `presto/home.py` | `/ai_dash_files/home.py` |
+| `presto/net.py` | `/ai_dash_files/net.py` |
+| `presto/cards.py` | `/ai_dash_files/cards.py` |
+| `presto/gestures.py` | `/ai_dash_files/gestures.py` |
+| `presto/alerts.py` | `/ai_dash_files/alerts.py` |
+| `presto/ui.py` | `/ai_dash_files/ui.py` |
+| `examples/sample-status.json` | `/ai_dash_files/sample-status.json` |
 
-```python
-WIFI_SSID = "your-network"
-WIFI_PASSWORD = "your-password"
-```
+Only the entry script lives at the root, so helper modules do not appear as
+extra carousel apps. The entry script explicitly starts the app when imported
+by the firmware launcher.
+Use the distinct folder name shown above: MicroPython would import a folder
+named `/ai_dash` instead of running the root `/ai_dash.py` entry.
 
-Edit `config.py` and set `DAEMON_HOST`, `DAEMON_PORT` and `SHARED_TOKEN` to
-match the daemon.
+Press **RESET**, find **AI Dash** in the firmware carousel, and tap it. Home
+shows OpenAI, Claude, Ollama Cloud, and OpenCode.ai quota bars with a **DEMO** label: these
+are illustrative values, not real account usage. Each provider has one combined
+meter with two stacked lanes: cyan **daily** on top and purple **weekly** below,
+separated by a small gap. Both percentages remain visible, each against its
+own period's limit. Colours identify periods rather than severity. Missing
+quotas show `--`; over-limit percentages remain numeric while the fill caps
+at 100%. There is no period toggle.
 
-Press **RESET** to run the current M1 static demo. The current `presto/main.py`
-loads sample data; live daemon polling is not wired into the device loop yet.
-M2 verifies the daemon API independently on localhost. Keep the daemon settings
-above for the future device polling integration.
+Three rows fit at once. Drag up/down on the list to reveal the fourth demo;
+the title and legend stay fixed and the scrollbar shows position. Daily and
+weekly values for OpenCode.ai are illustrative, not a real usage integration.
+
+Swipe left/right to reach the existing Ollama and LiteLLM static cards.
+Home remembers its scroll position when returning from another card.
+Long-press should toggle the MUTED indicator. Press **RESET**
+to return to the firmware carousel.
+
+Live daemon polling is not wired into the device loop yet. M2 verifies the
+daemon API independently on localhost. Keep the daemon settings in `config.py`
+for the future polling integration; they are unused by this static demo.
 
 ## 3. Future real sources
 

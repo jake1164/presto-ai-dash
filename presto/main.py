@@ -8,8 +8,8 @@ The only module in this app that imports ``presto`` or ``machine``. Everything
 else (cards, gestures, alerts, net, ui) is pure Python and is unit-tested on a
 development machine. See docs/limitations.md for what cannot be automated.
 
-Milestone 1: shows three swipeable cards from static sample data, with LED
-status colours, tap-to-detail, long-press to mute, and an offline screen.
+Static device preview: a cloud-quota Home card using labelled demo values,
+plus the existing Ollama and LiteLLM cards. No cloud services are contacted.
 """
 
 import time
@@ -28,6 +28,7 @@ from gestures import (
     TAP,
     GestureRecogniser,
 )
+from home import DEMO_QUOTAS, HomeScroll
 from net import (
     StatusClient,
     StatusError,
@@ -36,7 +37,7 @@ from net import (
     embedded_payload,
     load_static_payload,
 )
-from ui import Palette, draw_boot, draw_card, draw_message
+from ui import Palette, draw_boot, draw_card, draw_home, draw_message
 
 
 # Where to look for a sample payload, in order.
@@ -96,6 +97,9 @@ class App(object):
 
         self.cards = []
         self.index = 0
+        self.home_scroll = HomeScroll(len(DEMO_QUOTAS))
+        self._touch_x = 0
+        self._touch_y = 0
         self.detail_open = False
         self.detail_opened_at = 0
         self.error = None
@@ -197,7 +201,10 @@ class App(object):
             elif gesture == SWIPE_RIGHT:
                 self._prev_card()
             elif gesture == TAP:
-                if self.detail_open:
+                if self._current_card().id == "dash":
+                    # Both periods are always visible on Home.
+                    self._needs_redraw = True
+                elif self.detail_open:
                     self._close_detail()
                 else:
                     self._open_detail()
@@ -212,9 +219,17 @@ class App(object):
         touch = self.presto.touch
         touch.poll()
         state = bool(touch.state)
-        x = touch.x if state else 0
-        y = touch.y if state else 0
-        return self.gestures.update(state, x, y, _now_ms())
+        if state:
+            self._touch_x = touch.x
+            self._touch_y = touch.y
+        previous_offset = self.home_scroll.offset
+        self.home_scroll.update(state, self._touch_x, self._touch_y,
+                                enabled=self._current_card().id == "dash")
+        if self.home_scroll.offset != previous_offset:
+            self._needs_redraw = True
+        # Use the final touched position on release, rather than resetting to
+        # (0, 0), so left/right swipes use the actual gesture.
+        return self.gestures.update(state, self._touch_x, self._touch_y, _now_ms())
 
     # -- rendering ----------------------------------------------------------
 
@@ -231,13 +246,11 @@ class App(object):
     def _render(self):
         card = self._current_card()
 
-        if self.detail_open:
-            draw_card(
-                self.display, self.palette, card,
-                self.index, len(self.cards),
-                muted=self.alerts.muted,
-                width=self.width, height=self.height,
-            )
+        if card.id == "dash":
+            draw_home(self.display, self.palette, DEMO_QUOTAS,
+                      self.index, len(self.cards), muted=self.alerts.muted,
+                      width=self.width, height=self.height,
+                      scroll=self.home_scroll.offset)
         else:
             draw_card(
                 self.display, self.palette, card,
@@ -247,6 +260,7 @@ class App(object):
             )
 
         self.presto.update()
+        self._needs_redraw = False
 
     def _render_offline(self, message):
         from alerts import rgb_for_accent
@@ -274,8 +288,9 @@ class App(object):
                 if _ticks_diff(_now_ms(), self.detail_opened_at) > DETAIL_TIMEOUT_MS:
                     self._close_detail()
 
-            self._update_leds()
-            self._render()
+            if self._needs_redraw:
+                self._update_leds()
+                self._render()
 
             time.sleep_ms(20)
 

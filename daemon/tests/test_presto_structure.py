@@ -6,6 +6,7 @@ hardware dependency, this fails loudly instead of silently making the logic
 untestable.
 """
 
+import ast
 import os
 import re
 import unittest
@@ -113,6 +114,23 @@ class TestConfigExample(unittest.TestCase):
         missing = used - defined
         self.assertEqual(missing, set(),
                          "config.example.py is missing: %s" % sorted(missing))
+
+
+class TestCarouselEntry(unittest.TestCase):
+
+    def test_entry_does_not_share_its_name_with_a_directory(self):
+        # MicroPython selects a namespace package before the same-named .py.
+        entry = os.path.join(PRESTO_DIR, "launcher", "ai_dash.py")
+        with open(entry, encoding="utf-8") as handle:
+            source = handle.read()
+        tree = ast.parse(source)
+        app_dir = next(node.value.value for node in tree.body
+                       if isinstance(node, ast.Assign)
+                       and any(isinstance(target, ast.Name) and target.id == "APP_DIR"
+                               for target in node.targets))
+        self.assertNotEqual(os.path.basename(app_dir), "ai_dash")
+        self.assertEqual(source.splitlines()[:3], ["# ICON monitoring", "# NAME AI Dash",
+                                                 "# DESC Static fake-data dashboard."])
 
 
 if __name__ == "__main__":

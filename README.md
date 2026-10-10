@@ -1,6 +1,9 @@
 # Presto AI Dash
 
-A small physical AI-usage/status display for the **Pimoroni Presto**.
+A tiny AI usage dashboard for Pimoroni Presto with support for local and cloud AI providers.
+
+Repository: `presto-ai-dash`. Local integrations are planned for v0; direct
+cloud-provider sources remain future work. The current build uses fake data.
 
 It answers a handful of questions at a glance: is local Ollama active, is
 LiteLLM healthy, how many tokens have I used today, is anything near a limit,
@@ -11,7 +14,10 @@ not a dashboard replacement.
 
 ---
 
-## What this is
+## Runtime Architecture
+
+The complete system does not run on the Presto. The static M1 demo can run
+entirely on the device; the planned connected runtime has two parts:
 
 ```text
 Pimoroni Presto
@@ -23,14 +29,15 @@ Presto AI Dash daemon  (Python, stdlib only, on your LAN)
 LiteLLM  --->  Ollama
 ```
 
-- The **Presto** is the product. It renders three swipeable cards, drives seven
-  RGB LEDs, and can chirp on a warning.
+- The **Presto** is the physical dashboard/controller: touchscreen card
+  rendering, swipe/tap navigation, LEDs, optional sound, and polling the local
+  HTTP endpoint over Wi-Fi.
 - The **daemon** exists to make the Presto display simple, safe and useful. It
   collects from sources, normalises them, keeps a short SQLite history, and
   serves one JSON endpoint.
 - The Presto holds **no provider secrets** and makes **no provider API calls**.
 
-## What this is not
+## Scope / Non-goals
 
 Out of scope for v0, and deliberately so:
 
@@ -40,12 +47,49 @@ Out of scope for v0, and deliberately so:
 - Per-project billing breakdown, advanced analytics, alert rule engine
 - Cloud-hosted dashboard, user accounts, desktop browser opener
 
-See `docs/future.md` for where those live.
+See [Future Features](docs/future.md) for where those live. The optional tray,
+Docker image, and binary installers are also outside v0.
+
+## Topology and Telemetry Limits
+
+```text
+toontown-int-srv1 -> LiteLLM -> jake-desktop -> Ollama
+jake-desktop -> Ollama directly
+```
+
+For v0, run the daemon on `toontown-int-srv1` and have the Presto poll it over
+HTTP. LiteLLM sees only traffic routed through it. Direct desktop Ollama usage
+requires a future collector, shim, wrapper, or voluntary metrics reporting;
+health polling cannot reconstruct token history.
+
+## Deployment Model
+
+The core is a normal, headless Python 3.11+ app targeting Windows 10/11,
+macOS, and Linux, with SQLite, TOML, and portable `pathlib` paths. No systemd
+or Windows service is required. Cross-platform support is the target; current
+execution checks have been on Windows.
+
+| Release target | Deployment direction |
+| --- | --- |
+| v0 | Direct Python or pip/pipx installation |
+| v0.1 | Optional Docker image, especially for `toontown-int-srv1` |
+| v0.2 | Optional separate desktop tray runner |
+| v1 | Small binaries/installers if the project proves useful |
+
+The planned command is `presto-ai-dash-daemon`; the **current** installed
+command is `presto-ai-dash` (or `python -m presto_ai_dash.app`). The future
+`presto-ai-dash-tray` wrapper must leave headless use first-class. Docker,
+tray support, pipx validation, and binary packaging are not implemented yet.
 
 ## v0 in one paragraph
 
 **Current milestone: M2 is implemented and tested with the fake source only.**
-The three cards show labelled demo data. SQLite supports snapshot insert/read;
+The Presto Home preview stacks daily and weekly quota bars for OpenAI,
+Claude, Ollama Cloud, and OpenCode.ai using fixed values labelled **DEMO**,
+alongside the
+static Ollama and LiteLLM cards. These cloud names do not indicate integrations.
+Drag up/down to scroll the Home list; swipe left/right to switch cards.
+SQLite supports snapshot insert/read;
 retention, trends, alert history, and real sources remain future milestones.
 The paragraph below describes the planned v0.
 
@@ -66,8 +110,8 @@ cp ../examples/config.example.toml dash.toml
 python -m presto_ai_dash.app --config dash.toml
 
 # Presto
-# Copy presto/*.py to the Presto, add your Wi-Fi details to secrets.py,
-# copy presto/config.example.py to config.py and edit it.
+# Install the static demo alongside the Presto's existing carousel launcher.
+# See docs/setup.md for the source-to-device file mapping; no Wi-Fi is needed.
 ```
 
 Full instructions: [`docs/setup.md`](docs/setup.md).
@@ -91,7 +135,8 @@ presto-ai-dash/
   presto/
     main.py                     MicroPython app (only file touching hardware)
     config.example.py
-    net.py  cards.py  gestures.py  alerts.py  ui.py
+    home.py  net.py  cards.py  gestures.py  alerts.py  ui.py
+    launcher/ai_dash.py          entry for the firmware carousel
   examples/
     sample-status.json          the API shape, as static data
     config.example.toml

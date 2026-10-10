@@ -10,9 +10,66 @@ M2 implements only the fake source and minimal snapshot insert/read; real
 sources, retention, alert history, and trends are deferred. Implementation
 status is tracked in `milestones.md`.
 
-**Bottom line: nothing blocks Milestones 0–2.** All three external contracts
-(Presto MicroPython, LiteLLM, Ollama) were verified against current official
-sources. Two plan-internal contradictions were found and resolved below.
+**The original readiness pass found no blockers for Milestones 0–2.** All three external contracts
+(Presto MicroPython, LiteLLM, Ollama) were checked against official sources
+at that review. The historical contract notes below were not reverified in
+this planning update. Two plan-internal contradictions were resolved below.
+
+## Runtime Architecture and milestone boundary
+
+M1's static demo runs entirely on the Presto. In the connected target, the
+Presto handles touchscreen cards, swipe/tap navigation, LEDs, optional sound,
+and local HTTP polling over Wi-Fi. The desktop/server daemon handles LiteLLM,
+Ollama, provider secrets/API keys, normalization, SQLite history, and
+`/api/v1/status`.
+
+M2 is executable daemon + config + shared-token auth + fake source + minimal
+SQLite snapshot insert/read, with import checks, a local HTTP smoke check, and
+tests. Real Ollama/LiteLLM runtime imports are excluded. Live Presto polling
+is a separately authorized checkpoint; real sources remain M4/M5.
+
+## Deployment Model
+
+The core targets Windows 10/11, macOS, and Linux using Python 3.11+, SQLite,
+TOML, and `pathlib`. Headless/server use is first-class; avoid systemd-only or
+Windows-only service assumptions. Current runtime checks are on Windows;
+cross-platform acceptance still needs macOS/Linux execution.
+
+v0 targets normal Python source run or pip/pipx installation. The planned
+command is `presto-ai-dash-daemon`; today's command is `presto-ai-dash` or
+`python -m presto_ai_dash.app`. Optional targets: v0.1 Docker (especially on
+`toontown-int-srv1`), v0.2 separate `presto-ai-dash-tray`, v1 binaries/installers
+if useful. No packaging changes are made by this planning update.
+
+## Topology and Telemetry Limits
+
+```text
+toontown-int-srv1 -> LiteLLM -> jake-desktop -> Ollama
+jake-desktop -> Ollama directly
+Presto -> HTTP daemon on toontown-int-srv1
+```
+
+LiteLLM sees only routed traffic. Full direct Ollama measurement requires a
+future desktop collector/shim/wrapper or voluntary reporting. Health polling
+cannot reconstruct usage history. This is a telemetry limit, not an M2 blocker.
+
+## Scope / Non-goals and Future Features
+
+v0 sources stay `fake`, `ollama`, and `litellm`. Direct OpenAI/Codex, Claude,
+Ollama Cloud, OpenCode, MQTT, multi-host collectors, desktop browser helpers,
+external plugins, Prometheus/Grafana, advanced alert rules, and binaries remain
+placeholders. The static cloud-quota Home preview is labelled DEMO and does
+not implement these providers.
+
+Tray support is future and separate from the core: Windows/macOS primary,
+Linux best-effort; `pystray` is the likely candidate and `rumps` optional macOS
+polish. Keep its menu to status, open dashboard/status endpoint, open config
+folder, copy Presto URL, restart/stop daemon, and about.
+See [future.md](future.md) for the deployment roadmap.
+
+These are planning decisions, not implementation authorization. A requested
+review/readiness pass stops at that deliverable unless implementation is
+explicitly approved.
 
 ---
 
@@ -25,7 +82,7 @@ and each is recorded here with its rationale so it can be challenged.
 
 | Decision | Choice | Why |
 | --- | --- | --- |
-| Daemon config format | TOML (`daemon/config.example.toml`) | Plan sketches `examples/fake-config.yaml`. TOML is parsed by stdlib `tomllib` (Python 3.11+), so the daemon has **zero runtime dependencies**. PyYAML would add one. The Presto app keeps `config.example.py` (plain constants) exactly as the plan specifies, because MicroPython has no TOML/YAML parser. |
+| Daemon config format | TOML (`examples/config.example.toml`) | The original plan sketched YAML. TOML is parsed by stdlib `tomllib` (Python 3.11+), so the daemon has **zero runtime dependencies**. PyYAML would add one. The Presto app keeps `config.example.py` (plain constants), because MicroPython has no TOML/YAML parser. |
 | HTTP framework | stdlib `http.server.ThreadingHTTPServer` | Zero dependencies. The API is one GET endpoint. FastAPI/Flask would be scope creep against "small enough for a Presto developer to understand". |
 | Test framework | stdlib `unittest` | Zero dev dependencies. `python -m unittest` works everywhere. |
 | Python floor | 3.11 | Required for `tomllib`. |

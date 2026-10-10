@@ -15,7 +15,10 @@ recogniser can be exercised without a screen.
 TAP = "tap"
 SWIPE_LEFT = "swipe_left"
 SWIPE_RIGHT = "swipe_right"
+SWIPE_UP = "swipe_up"
+SWIPE_DOWN = "swipe_down"
 LONG_PRESS = "long_press"
+DRAG_SLOP_PX = 8
 
 # Internal states.
 _IDLE = "idle"
@@ -36,7 +39,7 @@ class GestureRecogniser(object):
 
     __slots__ = ("_state", "_start_x", "_start_y", "_start_ms",
                  "long_press_ms", "swipe_min_px", "debounce_ms",
-                 "_last_emit_ms", "_armed")
+                 "_last_emit_ms", "_armed", "_axis")
 
     def __init__(self, long_press_ms=700, swipe_min_px=40, debounce_ms=180):
         self.long_press_ms = long_press_ms
@@ -48,11 +51,13 @@ class GestureRecogniser(object):
         self._start_ms = 0
         self._last_emit_ms = -debounce_ms - 1
         self._armed = True
+        self._axis = None
 
     def reset(self):
         """Forget any in-progress touch. Used when changing screens."""
         self._state = _IDLE
         self._armed = True
+        self._axis = None
 
     def _debounced(self, now_ms):
         return (now_ms - self._last_emit_ms) < self.debounce_ms
@@ -72,9 +77,15 @@ class GestureRecogniser(object):
             if self._state == _DOWN:
                 dx = x - self._start_x
                 dy = y - self._start_y
-                if abs(dx) >= self.swipe_min_px and abs(dx) > abs(dy):
+                # Include the final release position in axis recognition.
+                self._track_motion(x, y)
+                if self._axis == "horizontal" and abs(dx) >= self.swipe_min_px:
                     if not self._debounced(now_ms):
                         gestures.append(SWIPE_LEFT if dx < 0 else SWIPE_RIGHT)
+                        self._last_emit_ms = now_ms
+                elif self._axis == "vertical" and abs(dy) >= self.swipe_min_px:
+                    if not self._debounced(now_ms):
+                        gestures.append(SWIPE_UP if dy < 0 else SWIPE_DOWN)
                         self._last_emit_ms = now_ms
                 elif self._armed and not self._debounced(now_ms):
                     # A short press that never became a long press is a tap.
@@ -82,6 +93,7 @@ class GestureRecogniser(object):
                     self._last_emit_ms = now_ms
             self._state = _IDLE
             self._armed = True
+            self._axis = None
             return gestures
 
         # touched is True from here on.
@@ -91,9 +103,11 @@ class GestureRecogniser(object):
             self._start_y = y
             self._start_ms = now_ms
             self._armed = True
+            self._axis = None
             return gestures
 
         if self._state == _DOWN:
+            self._track_motion(x, y)
             held = now_ms - self._start_ms
             if held >= self.long_press_ms and self._armed:
                 if not self._debounced(now_ms):
@@ -106,3 +120,10 @@ class GestureRecogniser(object):
 
         # _LONG_FIRED: wait for the finger to come up.
         return gestures
+
+    def _track_motion(self, x, y):
+        dx, dy = x - self._start_x, y - self._start_y
+        if self._axis is None and max(abs(dx), abs(dy)) >= DRAG_SLOP_PX:
+            self._axis = "vertical" if abs(dy) > abs(dx) else "horizontal"
+            # A drag must never become a tap or long press, even at a boundary.
+            self._armed = False

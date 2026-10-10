@@ -35,20 +35,56 @@ Not yet done, and why:
   M2 delivery verifies the daemon API with fake data on localhost; wiring live
   polling into the device loop remains deferred. Milestone 1 proves the UI on
   static data first, as the plan's §19 build sequence requires.
-- **Anything needing physical hardware.** Pixels, touch, LEDs, sound and Wi-Fi
-  need a real Presto. See `docs/limitations.md`.
+- **Remaining hardware checks.** LED colours, sound, Wi-Fi, and power behaviour
+  still need manual checks. The static carousel/display checkpoint below has
+  now been exercised on a real Presto. See `docs/limitations.md`.
+
+### Static hardware checkpoint — 2026-10-10
+
+- Installed alongside the existing firmware carousel on a USB-connected
+  Presto running MicroPython 1.29.0; the device's original launcher was backed
+  up and left in place.
+- Fixed text wrapping/overlap using the real bitmap-font pixel measurements.
+  On-device checks verify single-line rows on all three 240×240 cards.
+- Fixed the MicroPython namespace collision between the entry script and its
+  helper folder. The entry is `/ai_dash.py`; helpers live in `/ai_dash_files`.
+- User confirmed launch from the firmware carousel stays open and all three
+  cards look good after swiping through them.
+- This checkpoint uses static fake data. Live daemon polling remains deferred.
+
+### Home quota design preview — 2026-10-10
+
+The on-device Home preview uses fixed daily/weekly cloud quotas labelled DEMO.
+Real-font layout, combined daily/weekly meters, missing-quota rendering, and
+existing card navigation pass checks on the Presto. This preview adds no cloud
+integrations or daemon polling and is separate from M2.
+
+It groups two stacked bars per provider: cyan daily above purple weekly, on
+the same 0–100% scale with a gap. Both percentages are shown against their own
+period's limit. The initial overlay was hard to distinguish on the panel;
+the stacked revision is deployed for user review.
+
+Added a fourth demo row, OpenCode.ai (27% daily / 54% weekly), to exercise
+overflow. Vertical dragging follows the finger within bounds, with a pinned
+header/legend, clipped rows, and a scrollbar. Horizontal swipes keep their
+carousel role; drags cannot trigger long-press mute. Removing continuous idle
+redraws improved card-switching feel. User confirmed scrolling works and looks
+good, then confirmed switching looks good after that refinement. All 170 host
+tests and the on-device clipped-layout/navigation checks pass.
 
 ## Test counts
 
 | Suite | Tests |
 | --- | --- |
 | `test_cards.py` | 34 |
-| `test_gestures.py` | 16 |
+| `test_gestures.py` | 20 |
 | `test_alerts.py` | 34 |
 | `test_net.py` | 23 |
-| `test_presto_structure.py` | 6 |
+| `test_presto_structure.py` | 7 |
 | `test_m2.py` | 29 |
-| **Total** | **142** |
+| `test_ui.py` | 4 |
+| `test_home.py` | 19 |
+| **Total** | **170** |
 
 ## Milestone 2 detail
 
@@ -71,3 +107,15 @@ Run with:
 cd daemon
 python -m unittest discover -s tests -v
 ```
+
+## Planned checkpoints beyond M2
+
+- **Device polling integration:** explicitly authorize and verify Wi-Fi plus
+  authenticated daemon fake-data polling before real providers. This is a
+  separate checkpoint; M2 does not claim it is complete.
+- **M3–M5:** history/retention, then Ollama and LiteLLM integrations. v0 sources
+  stay limited to `fake`, `ollama`, and `litellm`.
+- **Deployment targets:** v0 direct Python/pip/pipx; v0.1 optional Docker;
+  v0.2 optional separate tray runner; v1 binaries/installers if useful.
+  These targets are plans, not delivered features. The planned daemon command
+  is `presto-ai-dash-daemon`; today's command is `presto-ai-dash`.

@@ -2,7 +2,12 @@
 
 ## 1. Project summary
 
-**Presto AI Dash** is a small physical AI-usage/status display for the Pimoroni Presto.
+**Presto AI Dash** (`presto-ai-dash`): A tiny AI usage dashboard for Pimoroni Presto with support for local and cloud AI providers.
+
+Local integrations are planned for v0; direct cloud sources are future work.
+Current delivery: M1 static device demo and M2 fake-source daemon. The Home
+design preview shows labelled, fixed cloud quotas; it is not cloud telemetry.
+See [milestones.md](milestones.md) for implementation status.
 
 It shows whether local and routed AI usage is normal, active, expensive, rate-limited, or broken. It is not trying to be a full analytics platform. The first version should be a useful desk demo that proves the Presto can act as a touch-enabled AI companion display.
 
@@ -44,8 +49,12 @@ The device should show this through:
 6. **No provider branding issues**
    - No copied logos, mascots, fonts, or provider-owned artwork in the core repo.
    - Plugin authors can provide their own assets later and are responsible for rights.
+7. **Portable and headless first**
+   - Core daemon targets Windows 10/11, macOS, and Linux.
+   - Python 3.11+, SQLite, TOML, and `pathlib`; no systemd-only or Windows-only service assumptions.
+   - Optional desktop conveniences stay outside the daemon core.
 
-## 4. Initial target topology
+## 4. Topology and Telemetry Limits
 
 Current usage pattern:
 
@@ -65,11 +74,16 @@ LiteLLM on toontown-int-srv1
     ↓ routes to
 Ollama on jake-desktop
 
-Optional:
-jake-desktop collector -> pushes direct Ollama samples -> daemon
+Optional future:
+jake-desktop collector/shim -> reports direct Ollama samples -> daemon
 ```
 
-## 5. MVP scope
+LiteLLM only sees requests routed through LiteLLM. Direct calls from
+`jake-desktop` to Ollama require a collector, shim, wrapper, or voluntary
+metrics reporting to measure full usage. Health/model polling alone cannot
+reconstruct request or token history. The desktop reporting path is not v0.
+
+## 5. Scope / Non-goals
 
 ### Included in v0
 
@@ -110,6 +124,12 @@ These are future placeholders, not part of the first build:
 - complex alert rule engine
 - cloud-hosted dashboard
 - user accounts
+- desktop tray runner
+- Docker image
+- packaged binaries/installers
+- multi-host collectors
+
+v0 sources remain `fake`, `ollama`, and `litellm`; M2 enables only `fake`.
 
 ## 6. v0 data sources
 
@@ -234,7 +254,11 @@ OpenCode or helper writes JSON -> daemon reads JSON -> Presto shows card
 
 Do not build a deep OpenCode analytics parser in v0.
 
-## 8. System architecture
+## 8. Runtime Architecture
+
+The complete connected system does not run on the Presto. M1's static demo
+can run entirely on the device without Wi-Fi or a daemon. M2 verifies the
+daemon independently with fake data; device polling is a separate checkpoint.
 
 ### v0 architecture
 
@@ -260,6 +284,8 @@ Touch cards + LEDs + sound
 The daemon handles:
 
 - source collection
+- talking to LiteLLM and Ollama (M5 and M4 respectively)
+- handling provider secrets/API keys
 - status normalization
 - SQLite storage
 - alert calculation
@@ -280,6 +306,25 @@ The Presto handles:
 - offline/fallback display
 
 The Presto should not store provider secrets or call AI provider APIs directly.
+
+### Deployment Model
+
+The core daemon is a normal Python 3.11+ app, runnable headlessly from source
+or installed with pip/pipx. Portability targets Windows 10/11, macOS, and Linux
+using SQLite, TOML, and `pathlib`. Service managers are optional deployment
+wrappers; neither systemd nor Windows services are assumed.
+
+| Release target | Deployment direction |
+| --- | --- |
+| v0 | Direct Python / pip / pipx; target command `presto-ai-dash-daemon` |
+| v0.1 | Optional Docker image for server/headless use, particularly `toontown-int-srv1` |
+| v0.2 | Optional separate `presto-ai-dash-tray` runner/wrapper |
+| v1 | Packaged binaries/installers if the project proves useful |
+
+The current installed command is `presto-ai-dash`, or run
+`python -m presto_ai_dash.app`. The target command name, pipx validation,
+Docker, tray, and binaries are plans; this docs update changes no packaging.
+Docker must remain optional, and headless use must remain first-class.
 
 ## 9. API design
 
@@ -410,6 +455,15 @@ provider recently active/inactive
 No complex charting in v0.
 
 ## 12. Presto UI plan
+
+The current Home design preview groups cyan daily and purple weekly bars in
+two stacked lanes per cloud provider, daily above weekly. Both show percentage
+of their own period's limit, with numeric labels and `--` for unknown values.
+OpenAI, Claude, Ollama Cloud, and OpenCode.ai values are fixed and labelled DEMO.
+The list scrolls vertically with a pinned header; left/right swipes navigate
+cards. This
+preview does not add cloud sources or change the v0 API contract; the screens
+below describe the planned connected v0 cards.
 
 ### Screen 1: AI Dash
 
@@ -549,15 +603,15 @@ presto-ai-dash/
     src/presto_ai_dash/
       app.py
       config.py
-      db.py
-      schema.py
+      models.py
+      dashboard.py
       api.py
       sources/
         __init__.py
         fake.py
-        litellm.py
-        ollama.py
-      alerts.py
+        litellm.py               future M5 draft; disabled in M2
+        ollama.py                future M4 draft; disabled in M2
+      alerts.py                  future draft; disabled in M2
       storage.py
   presto/
     main.py
@@ -566,9 +620,12 @@ presto-ai-dash/
     ui.py
     cards.py
     alerts.py
+    gestures.py
+    home.py                      static cloud-quota design preview
+    launcher/ai_dash.py           firmware carousel entry
   examples/
     sample-status.json
-    fake-config.yaml
+    config.example.toml
 ```
 
 ## 16. Milestones
@@ -619,7 +676,7 @@ Presto shows AI Dash, Ollama, and LiteLLM cards using fake data.
 
 Goal:
 
-Replace static data with live HTTP polling.
+Make the Python daemon executable and testable with the fake source only.
 
 Tasks:
 
@@ -629,12 +686,22 @@ Tasks:
 - add shared token support
 - add basic logging
 - add config file
+- keep minimal SQLite snapshot insert/read used by the status API
+- run import/smoke checks and local daemon execution
+- test config, fake source, auth, dashboard response shape, and storage
+- exclude real Ollama/LiteLLM imports and runtime registration
 
 Acceptance criteria:
 
 ```text
-Presto polls daemon and displays fake source data over Wi-Fi.
+Daemon starts cleanly, loads config, and serves fake status JSON locally.
+Missing/wrong shared-token auth returns 401; valid auth returns 200.
+Import/smoke checks and tests pass, including SQLite timestamp round-trip.
 ```
+
+M2 does not require real services or live Presto polling. A separately
+authorized device integration checkpoint should verify Wi-Fi and authenticated
+fake-data polling before real provider integration. M1 remains device-only.
 
 ### Milestone 3: SQLite snapshots
 
@@ -644,8 +711,8 @@ Persist simple history.
 
 Tasks:
 
-- add SQLite database
-- store snapshots
+- extend the minimal SQLite snapshot storage delivered in M2
+- query recent snapshot history
 - store alerts
 - add retention cleanup
 - expose last updated time
@@ -739,7 +806,25 @@ A Presto developer can clone the repo, run fake mode, and understand how to enab
 
 ## 17. Future roadmap
 
-### v0.2
+### Deployment roadmap
+
+- **v0:** direct Python/pip/pipx daemon; fake, Ollama, and LiteLLM sources only.
+- **v0.1:** optional Docker image for server/headless use.
+- **v0.2:** optional separate desktop tray runner.
+- **v1:** small binaries/installers if the project proves useful.
+
+### Future Features: optional tray
+
+The tray is a runner/wrapper, never part of the daemon core or a second full
+UI. Windows/macOS are the primary targets; Linux is best-effort because desktop
+environments differ. `pystray` is the likely candidate; `rumps` is optional
+later macOS polish, not a requirement. Future commands are
+`presto-ai-dash-daemon` and `presto-ai-dash-tray`.
+
+Keep the menu tiny: status, open dashboard/status endpoint, open config folder,
+copy Presto endpoint URL, restart daemon, stop daemon, and about.
+
+### Other future features (unscheduled)
 
 Potential additions:
 
@@ -752,7 +837,7 @@ configurable polling interval
 simple web preview of the same status JSON
 ```
 
-### v0.3
+### Future providers and messaging (unscheduled)
 
 Potential additions:
 
@@ -760,11 +845,12 @@ Potential additions:
 OpenCode JSON source
 Ollama Cloud research/source
 OpenAI usage source
+Codex / Claude sources
 MQTT output/input
 multiple Presto devices
 ```
 
-### v1.0
+### Future expansion (unscheduled)
 
 Potential additions:
 

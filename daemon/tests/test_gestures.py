@@ -8,6 +8,8 @@ from gestures import (
     LONG_PRESS,
     SWIPE_LEFT,
     SWIPE_RIGHT,
+    SWIPE_UP,
+    SWIPE_DOWN,
     TAP,
     GestureRecogniser,
 )
@@ -45,18 +47,33 @@ class TestSwipe(unittest.TestCase):
         g.update(True, 40, 100, 0)
         self.assertEqual(g.update(False, 200, 100, 300), [SWIPE_RIGHT])
 
-    def test_short_horizontal_move_is_a_tap_not_a_swipe(self):
+    def test_tiny_horizontal_move_is_a_tap_not_a_swipe(self):
         g = GestureRecogniser(long_press_ms=700, swipe_min_px=40,
                               debounce_ms=0)
         g.update(True, 100, 100, 0)
-        self.assertEqual(g.update(False, 130, 100, 200), [TAP])
+        self.assertEqual(g.update(False, 105, 100, 200), [TAP])
 
-    def test_vertical_move_is_not_a_swipe(self):
+    def test_vertical_move_is_down_swipe(self):
         g = GestureRecogniser(long_press_ms=700, swipe_min_px=40,
                               debounce_ms=0)
         g.update(True, 100, 40, 0)
-        # Bigger vertical than horizontal travel, so it is not a swipe.
-        self.assertEqual(g.update(False, 120, 220, 300), [TAP])
+        self.assertEqual(g.update(False, 120, 220, 300), [SWIPE_DOWN])
+
+    def test_vertical_move_is_up_swipe(self):
+        g = GestureRecogniser(debounce_ms=0)
+        g.update(True, 120, 200, 0)
+        self.assertEqual(g.update(False, 120, 80, 300), [SWIPE_UP])
+
+    def test_drag_below_swipe_threshold_does_not_become_tap(self):
+        g = GestureRecogniser(debounce_ms=0)
+        g.update(True, 100, 100, 0)
+        self.assertEqual(g.update(False, 100, 80, 300), [])
+
+    def test_axis_locks_before_diagonal_drift(self):
+        g = GestureRecogniser(debounce_ms=0)
+        g.update(True, 120, 200, 0)
+        g.update(True, 120, 180, 100)
+        self.assertEqual(g.update(False, 220, 150, 300), [SWIPE_UP])
 
     def test_exact_threshold_counts(self):
         g = GestureRecogniser(long_press_ms=700, swipe_min_px=40,
@@ -66,6 +83,12 @@ class TestSwipe(unittest.TestCase):
 
 
 class TestLongPress(unittest.TestCase):
+
+    def test_slow_drag_does_not_mute_or_tap(self):
+        g = GestureRecogniser(debounce_ms=0)
+        g.update(True, 100, 180, 0)
+        self.assertEqual(g.update(True, 100, 160, 800), [])
+        self.assertEqual(g.update(False, 100, 160, 900), [])
 
     def test_long_press_fires_while_held(self):
         g = GestureRecogniser(long_press_ms=700, swipe_min_px=40,

@@ -88,7 +88,7 @@ Authorization: Bearer <shared-token>
       "title": "AI Dash",
       "status": "ok",
       "primary": "128k tokens today",
-      "secondary": "Ollama active · LiteLLM OK",
+      "secondary": "Ollama active - LiteLLM OK",
       "detail": ["LiteLLM: 42 requests today", "Alerts: none"],
       "accent": "green",
       "alert": null

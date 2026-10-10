@@ -1,0 +1,298 @@
+# ICON monitoring
+# NAME AI Dash
+# DESC A tiny AI usage dashboard for Pimoroni Presto.
+
+"""Presto AI Dash - Presto application.
+
+The only module in this app that imports ``presto`` or ``machine``. Everything
+else (cards, gestures, alerts, net, ui) is pure Python and is unit-tested on a
+development machine. See docs/limitations.md for what cannot be automated.
+
+Milestone 1: shows three swipeable cards from static sample data, with LED
+status colours, tap-to-detail, long-press to mute, and an offline screen.
+"""
+
+import time
+
+try:
+    import config
+except ImportError:
+    import config.example as config  # type: ignore
+
+from alerts import AlertTracker, led_pattern
+from cards import error_card, offline_card, overall_status, parse_cards
+from gestures import (
+    LONG_PRESS,
+    SWIPE_LEFT,
+    SWIPE_RIGHT,
+    TAP,
+    GestureRecogniser,
+)
+from net import (
+    StatusClient,
+    StatusError,
+    Unauthorised,
+    NetworkUnavailable,
+    embedded_payload,
+    load_static_payload,
+)
+from ui import Palette, draw_boot, draw_card, draw_message
+
+
+# Where to look for a sample payload, in order.
+SAMPLE_PATHS = ("sample-status.json", "/sample-status.json")
+
+# How long a detail view stays open before returning to the card.
+DETAIL_TIMEOUT_MS = 15000
+
+
+def _now_ms():
+    return time.ticks_ms()
+
+
+def _ticks_diff(a, b):
+    """``a - b`` in milliseconds, safe across a ticks rollover."""
+    return time.ticks_diff(a, b)
+
+
+class App(object):
+    """The Presto application.
+
+    ``presto`` is the Pimoroni Presto instance. It is only touched inside this
+    class, which keeps the rest of the app testable.
+    """
+
+    def __init__(self, presto):
+        self.presto = presto
+        self.display = presto.display
+        self.palette = Palette(self.display)
+
+        self.full_res = bool(getattr(config, "FULL_RES", False))
+        self.width, self.height = self.display.get_bounds()
+
+        self.led_brightness = float(getattr(config, "LED_BRIGHTNESS", 0.35))
+        self.led_dim_when_muted = bool(
+            getattr(config, "LED_DIM_WHEN_MUTED", True))
+
+        self.sound_enabled = bool(getattr(config, "SOUND_ENABLED", True))
+        self.sound_volume = float(getattr(config, "SOUND_VOLUME", 0.15))
+        self.chirp_hz = int(getattr(config, "CHIRP_HZ", 880))
+        self.double_chirp_hz = int(getattr(config, "DOUBLE_CHIRP_HZ", 1320))
+        self.chirp_ms = int(getattr(config, "CHIRP_MS", 90))
+        self.sound_repeat = bool(getattr(config, "SOUND_REPEAT", False))
+
+        self.long_press_ms = int(getattr(config, "LONG_PRESS_MS", 700))
+        self.swipe_min_px = int(getattr(config, "SWIPE_MIN_PX", 40))
+        self.tap_debounce_ms = int(getattr(config, "TAP_DEBOUNCE_MS", 180))
+
+        self.offline_after_s = int(getattr(config, "OFFLINE_AFTER_S", 30))
+
+        self.gestures = GestureRecogniser(
+            long_press_ms=self.long_press_ms,
+            swipe_min_px=self.swipe_min_px,
+            debounce_ms=self.tap_debounce_ms,
+        )
+        self.alerts = AlertTracker()
+
+        self.cards = []
+        self.index = 0
+        self.detail_open = False
+        self.detail_opened_at = 0
+        self.error = None
+        self.last_good_at = None
+
+        self._buzzer = None
+        self._needs_redraw = True
+
+    # -- hardware helpers ---------------------------------------------------
+
+    def _setup_buzzer(self):
+        """The Presto piezo is on GPIO 43."""
+        try:
+            from presto import Buzzer
+            self._buzzer = Buzzer(43)
+        except Exception:
+            self._buzzer = None
+
+    def _set_leds(self, rgb):
+        for i in range(self.presto.NUM_LEDS):
+            self.presto.set_led_rgb(i, rgb[0], rgb[1], rgb[2])
+
+    def _play_cue(self, cue):
+        """Play a sound cue. Quiet by design."""
+        if not self.sound_enabled or self._buzzer is None:
+            return
+        from alerts import chirp_count
+
+        count = chirp_count(cue)
+        if count == 0:
+            return
+
+        hz = self.chirp_hz if count == 1 else self.double_chirp_hz
+        for _ in range(count):
+            self._buzzer.set_tone(hz, self.sound_volume)
+            time.sleep_ms(self.chirp_ms)
+            self._buzzer.set_tone(-1)
+            time.sleep_ms(60)
+
+    # -- data ---------------------------------------------------------------
+
+    def load_static(self):
+        """Load sample data for the static demo.
+
+        Tries a file first, then falls back to the embedded sample so the
+        device always has something to show.
+        """
+        for path in SAMPLE_PATHS:
+            try:
+                payload = load_static_payload(path)
+                self._set_payload(payload)
+                return True
+            except StatusError:
+                continue
+
+        self._set_payload(embedded_payload())
+        return True
+
+    def _set_payload(self, payload):
+        cards, error = parse_cards(payload)
+        self.cards = cards
+        self.error = error
+        if error is None:
+            self.last_good_at = _now_ms()
+        if self.index >= len(self.cards):
+            self.index = 0
+        self._needs_redraw = True
+
+    # -- interaction --------------------------------------------------------
+
+    def _current_card(self):
+        if not self.cards:
+            return offline_card("no data")
+        return self.cards[self.index]
+
+    def _next_card(self):
+        if self.cards:
+            self.index = (self.index + 1) % len(self.cards)
+        self._needs_redraw = True
+
+    def _prev_card(self):
+        if self.cards:
+            self.index = (self.index - 1) % len(self.cards)
+        self._needs_redraw = True
+
+    def _open_detail(self):
+        self.detail_open = True
+        self.detail_opened_at = _now_ms()
+        self._needs_redraw = True
+
+    def _close_detail(self):
+        self.detail_open = False
+        self._needs_redraw = True
+
+    def _handle_gestures(self, gestures):
+        for gesture in gestures:
+            if gesture == SWIPE_LEFT:
+                self._next_card()
+            elif gesture == SWIPE_RIGHT:
+                self._prev_card()
+            elif gesture == TAP:
+                if self.detail_open:
+                    self._close_detail()
+                else:
+                    self._open_detail()
+            elif gesture == LONG_PRESS:
+                muted = self.alerts.toggle_mute()
+                if muted:
+                    self._close_detail()
+                self._needs_redraw = True
+
+    def _poll_touch(self):
+        """Read the touchscreen and feed the recogniser."""
+        touch = self.presto.touch
+        touch.poll()
+        state = bool(touch.state)
+        x = touch.x if state else 0
+        y = touch.y if state else 0
+        return self.gestures.update(state, x, y, _now_ms())
+
+    # -- rendering ----------------------------------------------------------
+
+    def _update_leds(self):
+        card = self._current_card()
+        rgb = led_pattern(
+            card.accent,
+            brightness=self.led_brightness,
+            muted=self.alerts.muted,
+            dim_when_muted=self.led_dim_when_muted,
+        )
+        self._set_leds(rgb)
+
+    def _render(self):
+        card = self._current_card()
+
+        if self.detail_open:
+            draw_card(
+                self.display, self.palette, card,
+                self.index, len(self.cards),
+                muted=self.alerts.muted,
+                width=self.width, height=self.height,
+            )
+        else:
+            draw_card(
+                self.display, self.palette, card,
+                self.index, len(self.cards),
+                muted=self.alerts.muted,
+                width=self.width, height=self.height,
+            )
+
+        self.presto.update()
+
+    def _render_offline(self, message):
+        from alerts import rgb_for_accent
+        draw_message(
+            self.display, self.palette,
+            "Daemon offline", message,
+            accent_rgb=rgb_for_accent("red"),
+            detail=["Retrying...", "Check daemon and Wi-Fi"],
+        )
+        self.presto.update()
+
+    # -- main loop ----------------------------------------------------------
+
+    def run(self):
+        """Static demo loop: sample data, no daemon."""
+        self._setup_buzzer()
+        self.load_static()
+
+        while True:
+            gestures = self._poll_touch()
+            self._handle_gestures(gestures)
+
+            # A detail view closes itself after a while.
+            if self.detail_open:
+                if _ticks_diff(_now_ms(), self.detail_opened_at) > DETAIL_TIMEOUT_MS:
+                    self._close_detail()
+
+            self._update_leds()
+            self._render()
+
+            time.sleep_ms(20)
+
+
+def main():
+    from presto import Presto
+
+    presto = Presto(full_res=bool(getattr(config, "FULL_RES", False)))
+    display = presto.display
+    palette = Palette(display)
+
+    draw_boot(display, palette, "Starting...")
+    presto.update()
+
+    app = App(presto)
+    app.run()
+
+
+if __name__ == "__main__":
+    main()

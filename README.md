@@ -101,6 +101,7 @@ presto-ai-dash/
 | `docs/sources.md` | you are adding or debugging a source |
 | `docs/limitations.md` | a number looks wrong or missing |
 | `docs/future.md` | you are wondering why feature X is absent |
+| `docs/milestones.md` | you want to know what is built and what is next |
 | `docs/implementation-readiness.md` | you want the verified external contracts and the decisions taken |
 
 ## Tests

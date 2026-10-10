@@ -9,7 +9,7 @@
       "title": "AI Dash",
       "status": "ok",
       "primary": "128k tokens today",
-      "secondary": "Ollama active · LiteLLM OK",
+      "secondary": "Ollama active - LiteLLM OK",
       "detail": [
         "LiteLLM: 42 requests today",
         "Ollama: 38 tok/s last run",
@@ -23,7 +23,7 @@
       "title": "Ollama",
       "status": "active",
       "primary": "38 tok/s",
-      "secondary": "qwen model · last run 2m ago",
+      "secondary": "qwen model - last run 2m ago",
       "detail": [
         "Reachable: yes",
         "Prompt tokens: 812",

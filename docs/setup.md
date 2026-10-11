@@ -226,10 +226,13 @@ yield to the touch/render loop. Failed requests retry every `RETRY_INTERVAL`
 HTTP by `HTTP_TIMEOUT` (default 8). Hostname lookup can block on MicroPython,
 so a LAN IP is preferred. See [MicroPython asyncio](https://docs.micropython.org/en/latest/library/asyncio.html).
 
-After losing the daemon, the last good display is marked **STALE - retrying**
-for up to `OFFLINE_AFTER_S` (default 30), then shows the offline screen. First
-boot without a connection, a rejected token, and bad data show a clear error
-immediately. Successful polling restores the selected card automatically;
+After a connection interruption or unusable refresh, the last good display is
+marked **STALE - retrying** until its age reaches `OFFLINE_AFTER_S` (default 30),
+then shows the relevant error screen. Incomplete transfers count as connection
+interruptions. Malformed replies produce a diagnostic reason in the USB console
+without logging response contents or tokens. First boot without usable data and
+a rejected token show a clear error immediately. Successful polling restores
+the selected card automatically;
 live mode never substitutes static demo values.
 
 If Windows asks about the daemon's network access, allow your trusted private

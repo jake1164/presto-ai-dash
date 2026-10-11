@@ -96,6 +96,24 @@ and clipped Home scrolling pass. The app is running and COM3 is released.
 All 285 tests and frontend setup/removal checks pass. Graphical-panel coverage
 and separate usage-page comparison remain unverified. Display polish is deferred.
 
+## Presto refresh recovery checkpoint — 2026-10-11
+
+An unusable refresh previously replaced recent working cards with a full-screen
+**Bad data** error. Failed refreshes now retain the last good Home and cards,
+marked **STALE - retrying**, until their age reaches `OFFLINE_AFTER_S` (default
+30 seconds). Invalid polls never advance the last-good timestamp. First boot
+without usable data, expired last-good data, and rejected authentication still
+show clear errors. Incomplete HTTP transfers count as connection interruptions;
+malformed replies log a fixed diagnostic reason without response contents or tokens.
+
+All **288 host tests pass**, including interrupted socket transfers, repeated
+invalid refreshes, bounded staleness, and recovery. Both changed device code
+files were backed up, deployed and byte-verified. On-device failure injection
+verified stale Home/card rendering, persistent-error behavior, and real recovery;
+20 subsequent live refreshes passed across six accounts/seven cards. The app
+is running and COM3 released. The user's underlying intermittent response failure
+was not reproduced during either 20-poll probe; its cause remains unconfirmed.
+
 ## Milestone 1 detail
 
 Acceptance criterion from the plan:
@@ -203,7 +221,8 @@ tests and the on-device clipped-layout/navigation checks pass.
 
 The subsequent [Codex reporting checkpoint](codex.md) adds 13 tests and the
 [Claude exporter checkpoint](claude.md) adds 16, bringing
-the complete host suite to **285 passing tests**. The prior cloud/device suite
+the host suite to 285 passing tests. Three subsequent refresh-recovery tests bring
+the current complete suite to **288 passing tests**. The prior cloud/device suite
 breakdown is below; its original checkpoint count is preserved.
 
 | Suite | Tests |

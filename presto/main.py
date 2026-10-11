@@ -217,8 +217,11 @@ class App(object):
         except Unauthorised:
             self._poll_failed("Unauthorised", "Check shared token", immediate=True)
             return False
-        except StatusError:
-            self._poll_failed("Bad data", "Cannot read daemon status", immediate=True)
+        except StatusError as exc:
+            # Retain recent valid readings during a failed refresh, as for a
+            # connection interruption. Never replace them with invalid data.
+            print("AI Dash: rejected refresh: %s" % exc)
+            self._poll_failed("Bad data", str(exc))
             return False
         except NetworkUnavailable:
             self._poll_failed("Daemon offline", "Check daemon and LAN address")

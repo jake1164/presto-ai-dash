@@ -98,6 +98,27 @@ class AsyncHttpTests(unittest.IsolatedAsyncioTestCase):
         client.timeout = 1
         self.assertEqual(await client.fetch_async(), {})
 
+    async def test_incomplete_transfer_is_connection_failure_and_retry_recovers(self):
+        replies = iter((b'HTTP/1.1 200 OK\r\nContent-Len',
+                        b'HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n{}',
+                        response(json.dumps(embedded_payload()).encode())))
+
+        async def handle(reader, writer):
+            await reader.readuntil(b'\r\n\r\n')
+            writer.write(next(replies))
+            await writer.drain()
+            writer.close()
+            await writer.wait_closed()
+
+        server = await asyncio.start_server(handle, '127.0.0.1', 0)
+        self.addAsyncCleanup(server.wait_closed)
+        self.addCleanup(server.close)
+        client = StatusClient('127.0.0.1', server.sockets[0].getsockname()[1], 'token')
+        for _ in range(2):
+            with self.assertRaises(NetworkUnavailable):
+                await client.fetch_async()
+        self.assertEqual(await client.fetch_async(), embedded_payload())
+
     async def test_real_managed_fake_daemon_contract(self):
         from presto_ai_dash.app import Daemon
         from presto_ai_dash.config import load_config
@@ -167,17 +188,47 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.app.connection_error)
         self.assertEqual(self.app.index, 1)
 
-    async def test_auth_and_bad_data_show_immediate_errors_and_preserve_last_good(self):
+    async def test_auth_is_immediate_and_preserves_last_good(self):
         await self.app.poll_once()
         old = self.app.cards
         self.app.client.fetch_async.side_effect = Unauthorised('wrong')
         self.assertFalse(await self.app.poll_once())
         self.assertEqual(self.app._connection_screen()[0], 'Unauthorised')
-        self.app.client.fetch_async.side_effect = None
+        self.assertIs(self.app.cards, old)
+
+    async def test_bad_refresh_keeps_recent_cards_stale_then_errors_and_recovers(self):
+        await self.app.poll_once()
+        self.app.index = 1
+        self.app.detail_open = True
+        old_cards, old_rows = self.app.cards, self.app.live_rows
         self.app.client.fetch_async.return_value = {'cards': []}
+        for now in (1000, 13000, 29999):
+            with patch.object(self.module, '_now_ms', return_value=now):
+                self.assertFalse(await self.app.poll_once())
+                self.assertIsNone(self.app._connection_screen())
+                self.app._render()
+                self.assertIn('STALE - retrying', [row[0] for row in self.device.display.rows])
+                self.assertIs(self.app.cards, old_cards)
+                self.assertIs(self.app.live_rows, old_rows)
+                self.assertEqual(self.app.last_good_at, 0)
+                self.assertEqual(self.app.index, 1)
+                self.assertTrue(self.app.detail_open)
+        with patch.object(self.module, '_now_ms', return_value=30000):
+            self.assertEqual(self.app._connection_screen()[0], 'Bad data')
+        self.app.client.fetch_async.side_effect = None
+        self.app.client.fetch_async.return_value = self.payload()
+        with patch.object(self.module, '_now_ms', return_value=31000):
+            self.assertTrue(await self.app.poll_once())
+        self.assertIsNone(self.app.connection_error)
+        self.assertEqual(self.app.last_good_at, 31000)
+        self.assertEqual(self.app.index, 1)
+
+    async def test_bad_data_on_first_boot_is_immediate(self):
+        self.app.client.fetch_async.side_effect = StatusError('response was not valid JSON')
         self.assertFalse(await self.app.poll_once())
         self.assertEqual(self.app._connection_screen()[0], 'Bad data')
-        self.assertIs(self.app.cards, old)
+        self.assertIsNone(self.app.last_good_at)
+        self.assertEqual(self.app.cards, [])
 
     async def test_wifi_reconnect_is_bounded_and_missing_settings_do_not_crash(self):
         self.device.wifi.isconnected = lambda: False

@@ -48,8 +48,9 @@ def parse_payload(text):
     """
     try:
         data = json.loads(text)
-    except ValueError as exc:
-        raise StatusError("response was not valid JSON: {}".format(exc))
+    except ValueError:
+        # Parser exceptions may include response contents. Keep diagnostics safe.
+        raise StatusError("response was not valid JSON")
     if not isinstance(data, dict):
         raise StatusError("response was not a JSON object")
     return data
@@ -156,7 +157,7 @@ class StatusClient(object):
             while b"\r\n\r\n" not in header:
                 chunk = await reader.read(256)
                 if not chunk:
-                    raise StatusError("incomplete HTTP response")
+                    raise NetworkUnavailable("incomplete HTTP response")
                 header += chunk
                 if len(header) > 4096:
                     raise StatusError("response headers too large")
@@ -183,7 +184,7 @@ class StatusClient(object):
             while len(body) < length:
                 chunk = await reader.read(min(1024, length - len(body)))
                 if not chunk:
-                    raise StatusError("incomplete response body")
+                    raise NetworkUnavailable("incomplete response body")
                 body += chunk
             if len(body) != length:
                 raise StatusError("invalid response length")

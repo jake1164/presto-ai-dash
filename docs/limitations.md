@@ -92,7 +92,7 @@ compare, and the indicator reads "–" rather than guessing a direction.
 The daemon is testable on a development machine without external services;
 HTTP tests use localhost networking. The
 Presto is not. These require physical hardware and are covered by the
-Milestone 7 manual checklist:
+Milestone 13 release manual checklist (formerly M7):
 
 | Area | Why it cannot be automated |
 | --- | --- |

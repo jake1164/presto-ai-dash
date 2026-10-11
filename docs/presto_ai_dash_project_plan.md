@@ -4,10 +4,13 @@
 
 **Presto AI Dash** (`presto-ai-dash`): A tiny AI usage dashboard for Pimoroni Presto with support for local and cloud AI providers.
 
-The daemon supports fake, Ollama, and LiteLLM sources; direct cloud sources are
-future work. Current delivery: M1 static device demo and M2–M5 daemon work.
+The daemon currently supports fake, Ollama, and LiteLLM sources, with local
+configuration and a connected Presto display. The next planned sources monitor
+OpenAI/Codex, Claude, and OpenCode Go subscription allowances; they are not yet
+implemented. Reporting readiness and reusable quota data come before adapters.
 The Home design preview shows labelled, fixed cloud quotas; it is not cloud telemetry.
-See [milestones.md](milestones.md) for implementation status.
+See [milestones.md](milestones.md) for implementation status and
+[subscription monitoring](subscription-monitoring.md) for the next phase.
 
 It shows whether local and routed AI usage is normal, active, expensive, rate-limited, or broken. It is not trying to be a full analytics platform. The first version should be a useful desk demo that proves the Presto can act as a touch-enabled AI companion display.
 
@@ -19,6 +22,7 @@ The Presto should sit on the desk and answer a few simple questions at a glance:
 - Is LiteLLM healthy?
 - Am I using a lot of tokens today?
 - Is anything near a limit?
+- How much of each subscription allowance remains, and when does it reset?
 - Is anything offline or broken?
 - How fast is my local model running?
 
@@ -39,7 +43,8 @@ The device should show this through:
    - The daemon exists to make the Presto display simple, safe, and useful.
 3. **Local-first**
    - The first useful sources are local Ollama and LiteLLM.
-   - Cloud provider support can come later.
+   - The next phase adds subscription monitoring through the local daemon.
+   - Support multiple configured accounts without provider-specific UI code.
 4. **Honest telemetry**
    - Show what is actually measured.
    - Do not pretend to see direct Ollama usage unless it is routed through a collector or shim.
@@ -87,7 +92,7 @@ reconstruct request or token history. The desktop reporting path is not v0.
 
 ### Included in v0
 
-The MVP includes:
+The foundation includes:
 
 - Python daemon
 - SQLite snapshot storage
@@ -104,6 +109,13 @@ The MVP includes:
 - simple shared token for Presto-to-daemon access
 - clear documentation
 
+The next planned phase adds subscription quota monitoring for OpenAI/Codex,
+Claude, and OpenCode's own Go subscription, ahead of alert polish and release.
+It includes reusable account instances, actual quota windows and reset times,
+freshness/unavailable states, and a scrolling Home summary with separate stacked
+bars. Each adapter requires a verified reporting path; these are planned features,
+not currently available sources. See milestones M6–M11 below.
+
 ### Not included in v0
 
 These are future placeholders, not part of the first build:
@@ -115,10 +127,10 @@ These are future placeholders, not part of the first build:
 - external plugin package system
 - provider marketplace
 - Prometheus/Grafana export
-- OpenAI/Codex direct usage support
-- Claude direct usage support
+- direct OpenAI/Anthropic API billing connectors
+- other ChatGPT subscription limits beyond verified Codex reporting
 - Ollama Cloud support
-- OpenCode status support
+- OpenCode application/session analytics beyond Go quota monitoring
 - advanced analytics
 - application usage monitoring (separate future checkpoint after M5)
 - invoice generation, billing reconciliation, and chargeback accounting
@@ -130,7 +142,9 @@ These are future placeholders, not part of the first build:
 - packaged binaries/installers
 - multi-host collectors
 
-v0 sources remain `fake`, `ollama`, and `litellm`; M2 enables only `fake`.
+Currently implemented source types are `fake`, `ollama`, and `litellm`.
+The subscription adapters above are planned additions. M2's completed scope
+remains fake-only; later work does not expand its acceptance requirements.
 
 ## 6. v0 data sources
 
@@ -196,37 +210,39 @@ Important limitation:
 
 Direct calls to Ollama are only fully measurable if they pass through a collector, shim, wrapper, or tool that reports usage. Basic Ollama health can be detected without this, but full token history cannot be magically reconstructed.
 
-## 7. Future sources
+## 7. Planned subscription sources
+
+These sources are the next priority, not unscheduled placeholders. M6 first
+verifies reporting, account coverage, authentication, and a real redacted quota
+sample for each service. M7 defines shared data before M8–M10 implement adapters.
+No API spend or token count may stand in for a subscription allowance.
+See [the subscription monitoring contract](subscription-monitoring.md).
 
 ### 7.1 OpenAI / Codex
 
-Future goal:
-
-```text
-show official usage/cost/status where supported by official APIs
-```
-
-Rules:
-
-- use read-only or restricted keys where available
-- do not make paid model calls just to test status unless explicitly enabled
-- do not scrape dashboards in v0
+Monitor Codex subscription allowances using the documented app-server
+`account/rateLimits/read` path and supported account login. Verify the installed
+version, plan, reported buckets, window durations, reset times, and refresh behavior.
+Codex reporting does not establish coverage of every ChatGPT model limit.
+API billing is a separate future feature.
 
 ### 7.2 Claude
 
-Future goal:
+Use Claude Code's documented statusline quota fields as the candidate reporting
+path for supported subscription plans, with a local helper exporting only needed
+fields. Verify five-hour and seven-day windows against a real account, preserve
+the user's existing statusline, and handle absent or stale readings honestly.
+Do not scrape credentials or reverse-engineer private CLI state.
 
-```text
-support official organization/admin usage or Claude Code telemetry where cleanly available
-```
+### 7.3 OpenCode Go
 
-Rules:
+Monitor OpenCode's own Go subscription, not usage of OpenAI or Claude through
+OpenCode. Its documented allowances include five-hour, weekly, and monthly
+windows. The supported retrieval path, authentication scope, and reset semantics
+remain unverified and must pass M6 before implementation. Do not invent an endpoint
+or reconstruct quota percentages from session logs.
 
-- avoid credential scraping
-- avoid reverse-engineering private CLI state
-- support only official or user-exported telemetry paths
-
-### 7.3 Ollama Cloud
+### 7.4 Ollama Cloud (unscheduled)
 
 Future goal:
 
@@ -239,21 +255,8 @@ Rules:
 - research before implementation
 - do not rely on brittle scraping as a default
 
-### 7.4 OpenCode
-
-Future goal:
-
-```text
-show occasional OpenCode status
-```
-
-Preferred approach:
-
-```text
-OpenCode or helper writes JSON -> daemon reads JSON -> Presto shows card
-```
-
-Do not build a deep OpenCode analytics parser in v0.
+OpenCode application/session telemetry remains separate future work. Subscription
+monitoring does not introduce a deep analytics parser.
 
 ## 8. Runtime Architecture
 
@@ -470,9 +473,15 @@ two stacked lanes per cloud provider, daily above weekly. Both show percentage
 of their own period's limit, with numeric labels and `--` for unknown values.
 OpenAI, Claude, Ollama Cloud, and OpenCode.ai values are fixed and labelled DEMO.
 The list scrolls vertically with a pinned header; left/right swipes navigate
-cards. This
-preview does not add cloud sources or change the v0 API contract; the screens
-below describe the planned connected v0 cards.
+cards. This preview does not add cloud sources or change the current API contract.
+
+M11 replaces preview values with verified subscription readings. Labels describe
+actual windows (such as 5h, Weekly, and Monthly); Daily is used only for a real
+daily window. Keep two bars in separate stacked lanes, with additional windows
+available in reusable details. OpenCode Go's monthly allowance must remain visible.
+Show reset times and distinguish stale, unavailable, and unlimited readings;
+never fall back to demo quotas in live mode. Multiple accounts use the same renderer.
+The screens below describe the existing local/gateway foundation.
 
 ### Screen 1: AI Dash
 
@@ -786,7 +795,127 @@ Acceptance criteria:
 Presto shows LiteLLM status and useful daily usage metrics.
 ```
 
-### Milestone 6: Alert polish
+### Milestone 6: Subscription reporting readiness
+
+Goal:
+
+Verify supported quota reporting for Codex, Claude, and OpenCode Go before implementation.
+
+Tasks:
+
+- verify installed versions, subscription plans, account coverage, and authentication
+- capture a real redacted quota reading and document window/reset semantics
+- classify each path as ready, conditional, or blocked with concrete evidence
+- document missing capabilities without substituting API spend or token counts
+
+Acceptance criteria:
+
+```text
+Each provider has an evidence-backed readiness result and explicit blockers.
+No model request is made solely to obtain quota telemetry.
+The readiness deliverable ends at review; implementation needs explicit approval.
+```
+
+### Milestone 7: Reusable quota model
+
+Goal:
+
+Represent multiple subscription accounts and independently reported quota windows.
+
+Tasks:
+
+- define stable instance/account identity and a list of typed quota windows
+- include percent used, actual duration/label, reset time, observation time, and freshness
+- distinguish unavailable, stale, and unlimited states
+- extend configuration, status API, and tests while preserving existing sources
+
+Acceptance criteria:
+
+```text
+Two accounts of the same type work without new provider-specific UI code.
+Optional windows, resets, missing data, and account replacement are tested.
+Percentages are not summed and cumulative quota snapshots are not added together.
+```
+
+### Milestone 8: OpenAI/Codex subscription source
+
+Goal:
+
+Show verified Codex subscription allowances through supported account reporting.
+
+Tasks:
+
+- implement the M6-verified app-server reporting/login path
+- normalize available quota buckets, durations, percentages, and resets
+- handle authentication refresh and stale/unavailable readings
+
+Acceptance criteria:
+
+```text
+Real account readings match the verified reporting contract and tests pass.
+Plan-dependent or missing windows remain explicit; other ChatGPT limits are not implied.
+```
+
+### Milestone 9: Claude subscription source
+
+Goal:
+
+Show verified Claude subscription allowances from documented Claude Code exports.
+
+Tasks:
+
+- implement the M6-verified local export/helper path
+- preserve existing statusline behavior and normalize available quota windows
+- handle absent fields, inactivity, reset times, and freshness
+
+Acceptance criteria:
+
+```text
+Supported account readings match real telemetry without credential scraping.
+Missing five-hour or weekly readings remain unavailable rather than zero.
+```
+
+### Milestone 10: OpenCode Go subscription source
+
+Goal:
+
+Show OpenCode Go's own subscription allowances.
+
+Tasks:
+
+- implement only the supported retrieval/authentication path verified in M6
+- normalize five-hour, weekly, and monthly allowances and resets
+- document unsupported account or reporting cases
+
+Acceptance criteria:
+
+```text
+All reported Go windows match real readings, with authentication and freshness tests.
+If retrieval remains blocked, record the blocker and do not claim implementation complete.
+```
+
+### Milestone 11: Live quota Home on Presto
+
+Goal:
+
+Make subscription allowances readable at a glance across multiple accounts.
+
+Tasks:
+
+- render scrolling account rows with a pinned header and separate stacked bars
+- label actual periods, expose reset times and additional windows in details
+- preserve horizontal card navigation and show stale/unavailable states
+- verify multiple accounts, overflow, account changes, and touch behavior on hardware
+
+Acceptance criteria:
+
+```text
+Verified live quotas display clearly with no overlap or demo fallback.
+OpenCode Go's monthly window remains accessible and actual periods are labelled correctly.
+Adding another supported account requires configuration, not new UI code.
+```
+
+### Milestone 12: Alert polish
 
 Goal:
 
@@ -795,6 +924,7 @@ Make the device feel like a physical status meter.
 Tasks:
 
 - define alert severity mapping
+- add configurable thresholds for verified subscription quota windows
 - implement LED animation modes
 - implement quiet sound alerts
 - implement mute/long-press behavior
@@ -804,9 +934,10 @@ Acceptance criteria:
 
 ```text
 Warnings and critical states are obvious from across the desk but not annoying.
+Quota reset/recovery and unavailable readings do not create misleading alerts.
 ```
 
-### Milestone 7: Demo release
+### Milestone 13: Demo release
 
 Goal:
 
@@ -819,19 +950,23 @@ Tasks:
 - add sample config
 - document limitations
 - document future sources
+- document supported subscription reporting paths, account setup, and blockers
 - add simple troubleshooting section
 
 Acceptance criteria:
 
 ```text
 A Presto developer can clone the repo, run fake mode, and understand how to enable Ollama or LiteLLM.
+They can configure supported subscription accounts and understand reporting limitations.
 ```
 
 ## 17. Future roadmap
 
 ### Deployment roadmap
 
-- **v0:** direct Python/pip/pipx daemon; fake, Ollama, and LiteLLM sources only.
+- **v0:** direct Python/pip/pipx daemon; current sources are fake, Ollama, and
+  LiteLLM. M6–M11 prioritize verified Codex, Claude, and OpenCode Go subscription
+  monitoring before M12 alert polish and M13 release.
 - **v0.1:** optional Docker image for server/headless use.
 - **v0.2:** optional separate desktop tray runner.
 - **v1:** small binaries/installers if the project proves useful.
@@ -859,7 +994,7 @@ connectors or application attribution are implied by this checkpoint.
 
 See [setup, encryption, and recovery](configuration.md).
 
-### Application usage monitoring (after M5)
+### Application usage monitoring (separate future checkpoint)
 
 A separate future checkpoint will monitor multiple configured applications,
 such as a book app, regardless of their provider/model. Stable application IDs,
@@ -875,7 +1010,7 @@ or daily aggregates beyond M3's 72-hour snapshots.
 
 See [the application monitoring design](future.md#application-usage-monitoring)
 for boundaries and multi-app acceptance checks. This is planned work, not an
-implemented integration, and does not change M3 or the current v0 milestones.
+implemented integration, and does not change M3 or the subscription milestones.
 Billing reconciliation and invoice generation remain outside the project.
 
 ### Other future features (unscheduled)
@@ -896,10 +1031,10 @@ simple web preview of the same status JSON
 Potential additions:
 
 ```text
-OpenCode JSON source
+OpenCode application/session telemetry
 Ollama Cloud research/source
-OpenAI usage source
-Codex / Claude sources
+direct OpenAI / Anthropic API billing sources
+other ChatGPT subscription limit research
 MQTT output/input
 multiple Presto devices
 ```
@@ -923,13 +1058,17 @@ multi-host collector model
 
 Mitigation:
 
-Keep v0 to fake, Ollama, LiteLLM, 3 cards, LEDs, sound, SQLite.
+Keep the delivered local/gateway foundation and the next subscription phase
+focused on small quota summaries. API billing, deep analytics, and application
+attribution remain separate future work.
 
 ### Risk: provider APIs are inconsistent
 
 Mitigation:
 
-Start with local and gateway sources. Treat cloud providers as later plugins.
+Gate each subscription adapter on verified reporting and account coverage.
+Normalize actual windows and freshness rather than inferring allowances from
+token counts or spend. Record unavailable paths as blockers.
 
 ### Risk: direct Ollama usage is hard to measure
 
@@ -949,22 +1088,25 @@ Mitigation:
 
 Use generic icons and original code only. Do not ship provider logos.
 
-## 19. Recommended first build sequence
+## 19. Recommended next build sequence
 
-Build in this order:
+M0–M5 established the static demo, daemon, storage, and local/gateway sources.
+Keep their completed milestone scope unchanged. Continue in this order:
 
 ```text
-1. sample-status.json
-2. Presto static UI
-3. fake daemon endpoint
-4. SQLite snapshots
-5. Ollama source
-6. LiteLLM source
-7. LED/sound polish
-8. documentation
+M6. Subscription reporting readiness (review only)
+M7. Reusable multi-account quota model
+M8. OpenAI/Codex subscription source
+M9. Claude subscription source
+M10. OpenCode Go subscription source, subject to verified retrieval
+M11. Live quota Home on Presto
+M12. LED/sound and quota alert polish
+M13. Documentation and demo release
 ```
 
-Do not start with Claude, Codex, OpenAI, Ollama Cloud, OpenCode, MQTT, or external plugins.
+This ordering is a plan, not approval to implement after a requested readiness
+review. Unverified reporting paths remain blocked; MQTT and external plugins
+remain outside this phase.
 
 ## 20. Definition of done for v0
 
@@ -975,8 +1117,15 @@ v0 is done when:
 - Presto shows 3 swipeable cards
 - daemon has fake, Ollama, and LiteLLM sources
 - daemon stores recent snapshots in SQLite
+- verified Codex, Claude, and OpenCode Go allowances are displayed for supported accounts
+- multiple accounts share reusable quota windows and display components
+- actual period labels, reset times, and stale/unavailable states are clear
 - LEDs reflect status
 - sound can be enabled, disabled, and muted
 - README explains setup and limitations
 - no provider secrets are stored on the Presto
 - the project is small enough for a Presto developer to understand
+
+These subscription criteria are planned targets, not claims about current
+delivery. An unresolved reporting blocker must be documented and reviewed;
+it cannot be counted as a completed subscription integration.

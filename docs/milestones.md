@@ -12,8 +12,23 @@ Status of each milestone in `presto_ai_dash_project_plan.md` §16.
 | 5 | LiteLLM source | **done** | Authenticated daily request/token/spend activity, health/readiness, partial-data warnings; fake and live modes are mutually exclusive. |
 | — | Local source configuration | **done** | Separate loopback admin page, multiple source instances, encrypted SQLite keys with external master key, live edits; 17 management tests. |
 | — | Connected Presto | **done** | Async authenticated polling, live source-instance Home, bounded retry/stale/offline states; 12 live tests, USB deployment, and actual Wi-Fi/auth/recovery checks. |
-| 6 | Alert polish | not started | Severity mapping, LED animation, quiet sound, mute/long-press, config docs. |
-| 7 | Demo release | not started | Setup guide, screenshots, sample config, limitations, troubleshooting. |
+| 6 | Subscription reporting readiness | not started | Verify installed/account reporting for OpenAI/Codex, Claude, and OpenCode Go; supported auth, real redacted quota readings, and explicit blockers. Review deliverable only. |
+| 7 | Reusable quota model | not started | Multiple accounts and quota windows; percentages, provider periods/resets, freshness, unavailable/unlimited states, API/config contract, and regression tests. |
+| 8 | OpenAI/Codex subscription source | not started | Supported Codex account login and app-server quota reads; verify bucket/plan coverage, optional windows, reset and auth recovery. Other ChatGPT limits require separate evidence. |
+| 9 | Claude subscription source | not started | Documented Claude Code quota export; verify installed version/plan, preserve status-line setup, and handle stale/absent 5-hour and weekly data. |
+| 10 | OpenCode Go subscription source | not started | Go's own 5-hour/weekly/monthly allowances; retrieval and reset semantics must pass M6 readiness before implementation. |
+| 11 | Live quota Home on Presto | not started | Reusable scrolling account rows, separate stacked bars, real period labels, reset details, extra windows, and stale/unavailable states; hardware verification. |
+| 12 | Alert polish | not started | Current health and configurable quota thresholds, LED animation, quiet sound, mute, reset/recovery behavior, and config docs. |
+| 13 | Demo release | not started | Setup guide, screenshots, sample config, supported subscription paths, limitations, and troubleshooting. |
+
+The 2026-10-11 planning update prioritizes **subscription allowances** for
+OpenAI/Codex, Claude, and **OpenCode's own Go subscription** before polish and
+release. Former M6/M7 are now M12/M13; completed M0–M5 retain their scope.
+These are planned milestones, not implemented sources. See
+[subscription monitoring](subscription-monitoring.md) for verified documentation,
+readiness gaps, and acceptance criteria. API billing and application usage
+monitoring remain separate work. Stop after a requested readiness/review
+deliverable unless implementation is explicitly requested.
 
 ## Milestone 1 detail
 
@@ -34,7 +49,7 @@ Delivered:
 Not yet done, and why:
 
 - **Live device polling at M1.** M1 proved the UI on static data first, as the
-  plan's §19 build sequence requires. The later connected checkpoint below
+  original build sequence required. The later connected checkpoint below
   implements daemon polling separately from M1/M2.
 - **Remaining hardware checks.** LED colours, sound, Wi-Fi, and power behaviour
   still need manual checks. The static carousel/display checkpoint below has

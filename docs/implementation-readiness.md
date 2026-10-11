@@ -13,6 +13,12 @@ M4/M5 now implement Ollama/LiteLLM, and the approved
 [local configuration checkpoint](configuration.md) adds encrypted SQLite keys
 and the `cryptography` runtime dependency, superseding the zero-dependency sketch.
 
+The 2026-10-11 roadmap also supersedes the historical cloud-provider exclusions
+below: Codex, Claude, and OpenCode Go subscription monitoring is now planned
+in M6–M11, before alert polish and release. See
+[subscription monitoring](subscription-monitoring.md). This record does not
+establish account-level readiness for those new sources.
+
 The focused [M3 readiness and Luna handoff](m3-readiness.md) supersedes the
 older storage/settings/trend sketches for the M3 implementation boundary.
 It defines internal history queries, alert observations, retention, migration,
@@ -274,7 +280,7 @@ logic is unit-tested on the host and the hardware-touching code stays thin.
 | Backlight / battery behaviour | Needs the power hardware |
 | Physical boot-button press (GPIO 46) | Needs the button |
 
-These are covered by the Milestone 7 manual checklist, not by CI. The
+These are covered by the release manual checklist (formerly M7, now M13), not by CI. The
 mitigation is structural: everything decidable without hardware lives in pure
 modules and is tested; the hardware layer is a thin adapter.
 
@@ -317,7 +323,7 @@ Ollama exposes no request history. §6.3 already says this.
 **Resolution:** the Ollama source reports live health (`/api/version`,
 `/api/tags`, `/api/ps`) plus, *if* an optional samples file exists, the last
 measured request. The samples file is the same "helper writes JSON → daemon
-reads JSON" pattern the plan already endorses for OpenCode in §7.4. The tok/s
+reads JSON" pattern the original plan endorsed for future OpenCode telemetry. The tok/s
 arithmetic is planned for the Ollama milestone and is not implemented or tested
 in M2. Until a
 collector exists the card honestly reads "last measured: unavailable".

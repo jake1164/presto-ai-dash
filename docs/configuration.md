@@ -36,10 +36,14 @@ Changes trigger collection without restarting the daemon. An in-flight probe
 may finish first; its result is discarded if its configuration changed or the
 instance was disabled/deleted.
 
-Available connectors are fake, Ollama, and LiteLLM. Direct OpenAI, Claude, and
-Ollama Cloud account connectors remain future work. Entering their credentials
-does not add a missing usage API. Application attribution remains a separate
-feature; these reusable source IDs provide a place to attach it later.
+Available connectors are fake, Ollama, and LiteLLM. OpenAI/Codex, Claude, and
+OpenCode Go subscription quota adapters are the next planned integrations;
+their account/login and reporting paths require readiness checks first.
+See [subscription monitoring](subscription-monitoring.md). They are not current
+source types, and entering their credentials does not add a missing usage API.
+Direct API billing and Ollama Cloud connectors remain future work. Application
+attribution remains a separate feature; these reusable source IDs provide a
+place to attach it later.
 
 ## What is stored where
 

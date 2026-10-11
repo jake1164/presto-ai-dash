@@ -177,10 +177,16 @@ polling health cannot reconstruct request history. An optional future
 
 ## Scope / Non-goals
 
-v0 remains demo-first with `fake`, `ollama`, and `litellm` sources only; real
-integrations are M4/M5. Direct OpenAI/Codex, Claude, Ollama Cloud, OpenCode,
-MQTT, multi-host collectors, desktop browser helpers, external plugins,
-Prometheus/Grafana, advanced alert rules, and installers remain future work.
+Implemented source types are `fake`, `ollama`, and `litellm`; the real
+local/gateway integrations were delivered in M4/M5. The active M6–M11 plan
+adds subscription quota monitoring for OpenAI/Codex, Claude, and OpenCode Go,
+subject to verified reporting paths. Multiple configured accounts share a quota
+window contract rather than fixed daily/weekly fields. See
+[subscription monitoring](subscription-monitoring.md) for readiness and boundaries.
+
+Direct API billing, Ollama Cloud, OpenCode session analytics, MQTT, multi-host
+collectors, desktop browser helpers, external plugins, Prometheus/Grafana,
+advanced alert rules, and installers remain separate future work.
 
 ## Presto app
 

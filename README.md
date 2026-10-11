@@ -3,11 +3,19 @@
 A tiny AI usage dashboard for Pimoroni Presto with support for local and cloud AI providers.
 
 Repository: `presto-ai-dash`. The daemon supports fake, Ollama, and LiteLLM
-sources; direct cloud-provider sources remain future work.
+sources. The next planned sources monitor subscription quotas for OpenAI/Codex,
+Claude, and OpenCode Go; they are not implemented yet.
 
 It answers a handful of questions at a glance: is local Ollama active, is
 LiteLLM healthy, how many tokens have I used today, is anything near a limit,
 is anything offline or broken, how fast is my local model running.
+
+The priority is now subscription usage against provider time-window limits,
+with reset times and multiple accounts. [The roadmap](docs/milestones.md)
+puts reporting readiness, a reusable quota model, named subscription adapters,
+and a live scrolling Home ahead of alert polish and release. The stacked bars
+will use real labels such as `5h`, `Weekly`, and `Monthly`; a five-hour allowance
+is not a daily quota. See [the subscription plan](docs/subscription-monitoring.md).
 
 It is **not** an analytics platform, not a general AI observability tool, and
 not a dashboard replacement.
@@ -42,13 +50,16 @@ LiteLLM  --->  Ollama
 Out of scope for v0, and deliberately so:
 
 - MQTT, multi-daemon federation, Prometheus/Grafana export
-- OpenAI / Codex / Claude / Ollama Cloud / OpenCode direct usage sources
+- Direct API billing connectors and Ollama Cloud research/source
 - Provider logo packs, plugin package system, provider marketplace
 - Billing reconciliation/invoices, advanced analytics, alert rule engine
 - Cloud-hosted dashboard, user accounts, desktop browser opener
 
 See [Future Features](docs/future.md) for where those live. The optional tray,
 Docker image, and binary installers are also outside v0.
+OpenAI/Codex, Claude, and OpenCode Go subscription monitoring is in the active
+plan, gated by supported reporting paths. The existing DEMO bars and LiteLLM
+token/spend metrics do not establish real subscription allowance usage.
 
 [Application usage monitoring](docs/future.md#application-usage-monitoring) is
 planned as a separate checkpoint after M5: multiple configured apps, reusable

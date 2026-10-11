@@ -3,6 +3,13 @@
 Deliberately out of scope for v0. Recorded here so the boundary is explicit and
 so nobody has to re-derive it.
 
+OpenAI/Codex, Claude, and OpenCode Go **subscription quota monitoring** moved
+into the active M6–M11 plan on 2026-10-11, ahead of alert polish and release.
+It is not implemented yet. See [subscription monitoring](subscription-monitoring.md)
+for supported reporting candidates, unresolved readiness checks, reusable
+accounts/windows, and Presto acceptance. OpenCode means its own Go subscription.
+The deferred API billing and application features below are separate work.
+
 ## Deployment roadmap
 
 | Target | Direction |
@@ -97,10 +104,10 @@ The intended approach follows its official [virtual-key documentation](https://d
 
 | Item | Notes |
 | --- | --- |
-| OpenCode JSON source | OpenCode or a helper writes JSON, the daemon reads it, the Presto shows a card. Same pattern as the Ollama samples file. |
 | Ollama Cloud research | Research before implementation. No brittle scraping as a default. |
-| OpenAI usage source | Official usage/cost/status APIs only. Read-only or restricted keys. No paid test calls unless explicitly enabled. No dashboard scraping. |
-| Codex / Claude sources | Research supported or user-exported telemetry first; placeholders only. |
+| Direct OpenAI / Anthropic API billing sources | Separate from the prioritized subscription quotas. Official usage/cost APIs only, restricted keys where available, and no paid test calls or dashboard scraping. |
+| Other ChatGPT subscription limits | Codex quota reporting does not establish coverage of every ChatGPT model/message limit; research separately if requested. |
+| OpenCode application/session telemetry | Separate from Go subscription allowances. A supported helper/export can report app activity later; no deep analytics parser. |
 | MQTT output/input | Publish status, accept commands. |
 | Multiple Presto devices | The daemon already serves many clients; this is about per-device config. |
 

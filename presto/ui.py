@@ -36,6 +36,7 @@ BACKGROUND = (16, 18, 22)
 PANEL = (28, 31, 38)
 DAILY = (65, 225, 255)
 WEEKLY = (135, 62, 210)
+MONTHLY = (255, 169, 56)
 
 
 class Palette(object):
@@ -152,7 +153,7 @@ def draw_sources(display, palette, rows, index, total, status="offline",
     """Live Home: measured source instances, with no illustrative quota values."""
     from alerts import rgb_for_accent
     from cards import accent_for
-    from home import LIST_TOP, LIST_HEIGHT, ROW_HEIGHT, scroll_limit
+    from home import LIST_TOP, LIST_HEIGHT, source_row_height, scroll_limit, quota_width, quota_label
     display.set_pen(palette.pen(BACKGROUND))
     display.clear()
     accent = rgb_for_accent(accent_for(status), 0.45 if muted else 1.0)
@@ -164,33 +165,57 @@ def draw_sources(display, palette, rows, index, total, status="offline",
     badge = "FAKE" if rows and all(row["type"] == "fake" for row in rows) else "LIVE"
     _text(display, palette, badge, width - 42, 12, INK_DIM, scale=1)
     _text(display, palette, "%d source%s - %s" %
-          (len(rows), "" if len(rows) == 1 else "s", status.upper()),
+          (len(set(row["id"] for row in rows)),
+           "" if len(set(row["id"] for row in rows)) == 1 else "s", status.upper()),
           14, 34, accent, scale=1)
-    limit = scroll_limit(len(rows))
+    row_height = source_row_height(rows)
+    limit = scroll_limit(len(rows), row_height)
     scroll = max(0, min(limit, int(scroll)))
     row_width = width - 14 - MARGIN
     display.set_clip(14, LIST_TOP, row_width, LIST_HEIGHT)
     if not rows:
         _text(display, palette, "No sources enabled", 14, LIST_TOP, INK_DIM, scale=1)
     for position, row in enumerate(rows):
-        y = LIST_TOP + position * ROW_HEIGHT - scroll
-        if y + ROW_HEIGHT <= LIST_TOP or y >= LIST_TOP + LIST_HEIGHT:
+        y = LIST_TOP + position * row_height - scroll
+        if y + row_height <= LIST_TOP or y >= LIST_TOP + LIST_HEIGHT:
             continue
         display.set_font("bitmap8")
         _text(display, palette, row["name"], 14, y, INK, scale=2)
         display.set_font("bitmap6")
+        windows = row.get("windows")
+        if windows:
+            for position_in_account, quota in enumerate(windows):
+                state = quota["state"]
+                rgb = DAILY if quota.get("period_minutes") and quota["period_minutes"] <= 1440 else (
+                    WEEKLY if quota.get("period_minutes") else MONTHLY)
+                rgb = INK_DIM if stale or state != "available" else rgb
+                value = quota_label(quota["percent"])
+                if state != "available":
+                    value = (value + " stale") if state == "stale" else state
+                line_y = y + 19 + position_in_account * 19
+                _text(display, palette, quota["label"] + " " + value, 14, line_y, rgb, scale=1)
+                display.set_pen(palette.pen(PANEL))
+                display.rectangle(14, line_y + 8, row_width, 5)
+                filled = quota_width(quota["percent"], row_width) if state in ("available", "stale") else 0
+                if filled:
+                    display.set_pen(palette.pen(rgb))
+                    display.rectangle(14, line_y + 8, filled, 5)
+            if row.get("activity"):
+                _text(display, palette, row["activity"], 14, y + 19 + len(windows) * 19,
+                      INK_DIM, scale=1)
+            continue
         _text(display, palette, row["status"].upper(), 14, y + 19,
               rgb_for_accent(accent_for(row["status"])), scale=1)
         _text(display, palette, row["usage"], 14, y + 32, INK_DIM, scale=1)
     display.remove_clip()
     if limit:
-        thumb = max(12, LIST_HEIGHT * LIST_HEIGHT // (len(rows) * ROW_HEIGHT))
+        thumb = max(12, LIST_HEIGHT * LIST_HEIGHT // (len(rows) * row_height))
         display.set_pen(palette.pen(PANEL))
         display.rectangle(width - 5, LIST_TOP, 2, LIST_HEIGHT)
         display.set_pen(palette.pen(INK_DIM))
         display.rectangle(width - 5, LIST_TOP + (LIST_HEIGHT - thumb) * scroll // limit, 2, thumb)
     display.set_font("bitmap6")
-    _text(display, palette, "STALE - retrying" if stale else "Daemon data - swipe for details",
+    _text(display, palette, "STALE - retrying" if stale else "Swipe for resets / details",
           14, 208, INK_DIM, scale=1)
     _draw_dots(display, palette, index, total, accent, width, height)
     if muted:
@@ -260,16 +285,23 @@ def _draw_dots(display, palette, index, total, accent_rgb, width, height):
         return
     radius = 3
     spacing = 12
-    block = (total - 1) * spacing
+    visible = min(total, 9)
+    first = max(0, min(index - visible // 2, total - visible))
+    block = (visible - 1) * spacing
     start = (width - block) // 2
     y = height - 12
-    for i in range(total):
-        cx = start + i * spacing
+    for position in range(visible):
+        i = first + position
+        cx = start + position * spacing
         if i == index:
             display.set_pen(palette.pen(accent_rgb))
         else:
             display.set_pen(palette.pen((70, 74, 82)))
         display.circle(cx, y, radius)
+    if total > visible:
+        display.set_font("bitmap6")
+        _text(display, palette, "%d/%d" % (index + 1, total), 14, FOOTER_Y, INK_DIM,
+              scale=1, max_width=max(0, start - 22))
 
 
 def draw_message(display, palette, title, message, accent_rgb=None,

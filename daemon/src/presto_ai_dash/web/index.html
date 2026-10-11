@@ -14,18 +14,28 @@
   <section id="login-panel" class="panel">
     <h2>Unlock local configuration</h2>
     <p>Enter the separate admin token shown when the daemon starts. The device token cannot edit sources.</p>
+    <p class="note">This browser stays logged in for seven days, including daemon restarts.
+      Lock configuration to end its session. Use the same address each time.</p>
     <form id="login-form">
       <label for="admin-token">Admin token</label>
       <input id="admin-token" type="password" required autocomplete="off">
-      <button type="submit">Unlock</button>
+      <button id="unlock" type="submit">Unlock</button>
     </form>
   </section>
   <main id="workspace" hidden>
     <section class="panel">
       <div class="section-title"><h2>Your sources</h2><button id="add-source">Add source</button></div>
-      <p>Configure multiple endpoints or accounts. Disable demo data before enabling a live source.</p>
+      <p>Manage accounts, keys, and refresh settings here. Changes are saved in the database.
+        Disable demo data before enabling a live source.</p>
       <div id="source-list"></div>
       <p class="note">Changes apply automatically after any current probe finishes.</p>
+      <h2>Cloud and subscription sources</h2>
+      <p class="note">Available subscription connectors show current allowance meters in your source list.
+        OpenCode Go reports quota percentages. Ollama Cloud reports dated activity;
+        its monthly credit balance is not available from the current reporting API.
+        Codex uses your existing ChatGPT login in the local Codex app. Claude uses a Claude Code terminal quota export. Subscription allowances are separate from API billing.</p>
+      <p class="note">Fake remains available for demos and connection testing. You can delete
+        its saved instance; it will not return on restart.</p>
     </section>
     <section class="panel">
       <h2 id="editor-title">Add source</h2>
@@ -35,6 +45,7 @@
         <label for="source-name">Display name</label>
         <input id="source-name" maxlength="80" required autocomplete="off">
         <div id="source-fields"></div>
+        <p id="source-help" class="note"></p>
         <label class="check"><input id="source-enabled" type="checkbox"> Enable collection</label>
         <div id="key-section" hidden>
           <label for="api-key">API key</label>

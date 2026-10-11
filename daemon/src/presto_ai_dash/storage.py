@@ -1,6 +1,7 @@
 """UTC-normalized SQLite snapshot and alert-observation history."""
 
 import json
+from copy import deepcopy
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
@@ -49,7 +50,7 @@ def _validated_alerts(value):
 
 
 class Storage:
-    SCHEMA_VERSION = 2
+    SCHEMA_VERSION = 4
     MAX_HISTORY_LIMIT = 1000
 
     def __init__(self, path):
@@ -111,7 +112,19 @@ class Storage:
             self._conn.execute("""CREATE TABLE IF NOT EXISTS configuration_meta (
                 name TEXT PRIMARY KEY, value BLOB NOT NULL
             )""")
-            self._conn.execute("PRAGMA user_version = 2")
+            self._conn.execute("""CREATE TABLE IF NOT EXISTS admin_sessions (
+                token_hash TEXT PRIMARY KEY, csrf_token TEXT NOT NULL,
+                expires_at REAL NOT NULL
+            )""")
+            self._conn.execute("""CREATE TABLE IF NOT EXISTS claude_exports (
+                instance_id TEXT PRIMARY KEY REFERENCES source_instances(id) ON DELETE CASCADE,
+                report TEXT NOT NULL, evidence TEXT NOT NULL
+            )""")
+            self._conn.execute("""CREATE TABLE IF NOT EXISTS claude_bridges (
+                instance_id TEXT PRIMARY KEY REFERENCES source_instances(id) ON DELETE CASCADE,
+                settings_path TEXT NOT NULL UNIQUE, previous BLOB NOT NULL, command TEXT NOT NULL
+            )""")
+            self._conn.execute("PRAGMA user_version = 4")
             self._conn.commit()
         except Exception:
             self._conn.rollback()
@@ -128,6 +141,79 @@ class Storage:
             row = self._conn.execute(
                 "SELECT value FROM configuration_meta WHERE name = 'vault_check'").fetchone()
             return bytes(row["value"]) if row else None
+
+    def claude_export(self, instance_id):
+        with self._lock:
+            row = self._conn.execute("SELECT report FROM claude_exports WHERE instance_id = ?",
+                                     (instance_id,)).fetchone()
+        return json.loads(row["report"]) if row else None
+
+    def save_claude_export(self, instance_id, report, evidence):
+        """Atomic account routing and freshness preservation across helper processes."""
+        result = deepcopy(report)
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                account = self._conn.execute("SELECT type, enabled FROM source_instances WHERE id = ?",
+                                             (instance_id,)).fetchone()
+                if not account or account["type"] != "claude" or not account["enabled"]:
+                    self._conn.rollback()
+                    return False
+                previous = self._conn.execute("SELECT report, evidence FROM claude_exports WHERE instance_id = ?",
+                                              (instance_id,)).fetchone()
+                if previous:
+                    old_evidence = json.loads(previous["evidence"])
+                    old_windows = {w["id"]: w for w in json.loads(previous["report"])["windows"]}
+                    for window in result["windows"]:
+                        key = window["id"]
+                        if key in old_windows and old_evidence.get(key) == evidence.get(key):
+                            window["observed_at"] = old_windows[key]["observed_at"]
+                self._conn.execute("INSERT INTO claude_exports VALUES (?, ?, ?) "
+                    "ON CONFLICT(instance_id) DO UPDATE SET report=excluded.report, evidence=excluded.evidence",
+                    (instance_id, json.dumps(result), json.dumps(evidence)))
+                self._conn.commit()
+                return True
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def claude_bridge(self, instance_id):
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM claude_bridges WHERE instance_id = ?",
+                                     (instance_id,)).fetchone()
+        return dict(row) if row else None
+
+    def save_claude_bridge(self, instance_id, settings_path, previous, command):
+        try:
+            with self._lock, self._conn:
+                self._conn.execute("INSERT INTO claude_bridges VALUES (?, ?, ?, ?)",
+                                   (instance_id, settings_path, previous, command))
+        except sqlite3.IntegrityError:
+            raise ValueError("This Claude settings profile already has an export account") from None
+
+    def remove_claude_bridge(self, instance_id):
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM claude_bridges WHERE instance_id = ?", (instance_id,))
+
+    def create_admin_session(self, token_hash, csrf_token, expires_at, now):
+        """Store only a digest of the browser's bearer credential."""
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM admin_sessions WHERE expires_at <= ?", (now,))
+            self._conn.execute(
+                "INSERT INTO admin_sessions (token_hash, csrf_token, expires_at) VALUES (?, ?, ?)",
+                (token_hash, csrf_token, expires_at))
+
+    def admin_session(self, token_hash, now):
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM admin_sessions WHERE expires_at <= ?", (now,))
+            row = self._conn.execute(
+                "SELECT csrf_token, expires_at FROM admin_sessions WHERE token_hash = ?",
+                (token_hash,)).fetchone()
+            return dict(row) if row else None
+
+    def revoke_admin_session(self, token_hash):
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM admin_sessions WHERE token_hash = ?", (token_hash,))
 
     def source_instances(self):
         """Internal records; callers must strip encrypted credential blobs for public output."""

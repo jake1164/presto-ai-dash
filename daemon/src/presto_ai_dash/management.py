@@ -10,6 +10,8 @@ from .credentials import load_cipher
 from .dashboard import build_instance_payload
 from .sources import source_catalog, source_type
 from .models import SourceSnapshot
+from .quotas import present_quota, present_snapshot
+from .storage import ConfigurationConflict
 
 
 def validate_settings(cls, settings):
@@ -49,6 +51,7 @@ def validate_settings(cls, settings):
 class SourceConfiguration:
     def __init__(self, storage, config):
         self.storage = storage
+        self.config = config
         self.changed = threading.Event()
         self._edit_lock = threading.RLock()
         marker = storage.configuration_marker()
@@ -88,9 +91,15 @@ class SourceConfiguration:
         for record in records:
             public = {key: record[key] for key in ("id", "type", "name", "enabled", "config", "revision")}
             public["has_key"] = record["credential"] is not None
+            if record["type"] == "claude":
+                public["export_installed"] = self.storage.claude_bridge(record["id"]) is not None
             snapshot = snapshots.get(record["id"])
+            if snapshot:
+                snapshot = present_snapshot(snapshot)
             public["status"] = snapshot.status if snapshot else "waiting"
             public["updated_at"] = snapshot.to_dict()["updated_at"] if snapshot else None
+            if snapshot and snapshot.metrics.get("quota"):
+                public["quota"] = present_quota(snapshot.metrics["quota"])
             sources.append(public)
         return {"types": source_catalog(), "sources": sources}
 
@@ -119,6 +128,9 @@ class SourceConfiguration:
                 raise ValueError("enabled must be a boolean")
             settings = data.get("config", current["config"] if current else {})
             settings = validate_settings(cls, settings)
+            if (current and type_id == "claude" and self.storage.claude_bridge(instance_id) and
+                    settings["settings_path"] != current["config"]["settings_path"]):
+                raise ValueError("Remove the Claude export setup before changing its profile settings path")
             revision = data.get("revision", 0)
             if type(revision) is not int or (current and revision < 1) or (not current and revision != 0):
                 raise ValueError("reload the source before editing it")
@@ -149,8 +161,26 @@ class SourceConfiguration:
         if type(revision) is not int or revision < 1:
             raise ValueError("reload the source before deleting it")
         with self._edit_lock:
+            bridge = self.storage.claude_bridge(instance_id)
+            if bridge:
+                self.configure_claude_export(instance_id, {"action": "remove", "revision": revision})
             self.storage.delete_source_instance(instance_id, revision)
             self.changed.set()
+
+    def configure_claude_export(self, instance_id, data):
+        from .claude_export import configure_bridge
+        if (not isinstance(data, dict) or set(data) != {"action", "revision"} or
+                type(data["revision"]) is not int):
+            raise ValueError("Export setup requires an action and the current revision")
+        with self._edit_lock:
+            record = next((r for r in self.storage.source_instances() if r["id"] == instance_id), None)
+            if not record:
+                raise KeyError(instance_id)
+            if record["type"] != "claude":
+                raise ValueError("Export setup is only available for Claude")
+            if record["revision"] != data["revision"]:
+                raise ConfigurationConflict("source changed; reload before configuring export")
+            return configure_bridge(self, record, data["action"])
 
     def status_payload(self):
         with self.storage._lock:
@@ -196,6 +226,7 @@ class ManagedCollector:
                         error="source type unavailable or configuration invalid"))
                     continue
                 source.id, source.name = record["id"], record["name"]
+                source.attach_storage(self.manager.storage)
                 cache = (record["revision"], source)
                 self._cache[record["id"]] = cache
             work.append((record, cache[1]))

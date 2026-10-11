@@ -1,9 +1,10 @@
 # Sources
 
-The daemon ships three registered sources: `fake`, `ollama`, and `litellm`.
-Fake data is enabled by default. It cannot be enabled alongside either live
-source, which avoids mixing synthetic and real measurements. Cloud names on
-the static Home preview remain labelled demo values, not daemon sources.
+The daemon ships five registered sources: `fake`, `ollama`, `litellm`,
+`opencode_go`, and `ollama_cloud`. A fresh database enables Fake by default;
+it cannot run alongside any live source. Manage saved accounts, settings, and
+encrypted keys in the [local UI](configuration.md). Cloud names on the static
+Home preview remain DEMO; live measurements come from enabled daemon accounts.
 
 A source is anything that can answer "what is the state of this thing right
 now". Each source returns a `SourceSnapshot`:
@@ -169,6 +170,26 @@ errors_today         from metrics.failed_requests
   LED and sound paths are all exercised, but LiteLLM does not synthesise them.
   No endpoint was invented to fill the gap.
 
+## opencode_go and ollama_cloud
+
+OpenCode Go reads provider-reported 5h, Weekly, and Monthly percentages and
+reset times from `GET https://opencode.ai/zen/go/v1/usage`. Each account has its
+own encrypted key and configurable refresh interval in the database.
+
+Ollama Cloud is separate from the keyless local Ollama connector. Its authorized
+`GET https://ollama.com/api/usage` returns dated activity totals. Monthly credit
+allowance, remaining balance, and reset are absent from the verified response;
+those stay unavailable instead of being inferred from the plan price. Requests,
+tokens, and reported USD activity are shown separately.
+
+Both connectors use fixed HTTPS reporting routes with redirects disabled and
+make no inference requests. See [quota contract, freshness, and verified coverage](quotas.md).
+Codex subscription reporting is implemented for an existing local ChatGPT
+login, with UI/database source settings and provider-owned OAuth. See
+[Codex behavior, setup, and remaining M8 work](codex.md). Claude's
+[terminal quota exporter](claude.md) is implemented with UI-managed settings,
+SQLite telemetry, and real-export verification pending.
+
 ## Adding a source
 
 1. Create `sources/mysource.py` with a `Source` subclass exposing a unique
@@ -182,7 +203,9 @@ errors_today         from metrics.failed_requests
 
 The managed collector assigns each object its instance ID and display name.
 Use `self.id` in snapshots. New types appear in the status `sources` array and
-overall summary; adding a dedicated Presto card remains separate UI work.
+overall summary. Each enabled instance automatically gets a swipe card; quota
+reports get grouped Home bars through the shared contract. No provider-specific
+device navigation code is needed for a new type.
 Modules are trusted Python code installed with the daemon, not uploaded by users.
 
 Do not mock an external API from assumption. Record a real response from the

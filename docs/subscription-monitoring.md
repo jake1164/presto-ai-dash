@@ -1,12 +1,22 @@
 # Subscription quota monitoring
 
-Planning update agreed on 2026-10-11. This is planned work, not an implemented
-integration or a completed account-level readiness check.
+Planning update agreed on 2026-10-11. The shared quota model, OpenCode Go adapter,
+and Ollama Cloud activity adapter are now implemented. Accounts and keys are
+managed through the UI and encrypted database; [current readings and limitations](quotas.md)
+describe what is available. [Codex reporting](codex.md) now uses an existing
+local subscription login; dashboard-managed sign-in remains pending. Claude
+[has a live verified terminal exporter](claude.md) for 5h/Weekly readings. The
+[M6 readiness review](m6-readiness.md) now verifies Codex reporting for the
+current account and authenticated Go quota reads matching the user's Console
+meters. Claude's real terminal export also reaches its Home meters and swipe card
+on the Presto. Graphical-panel export coverage remains unverified.
 
 ## Priority and scope
 
-The next milestones monitor subscription allowances for OpenAI/Codex, Claude,
-and OpenCode's own Go subscription. They precede alert polish and the demo
+The active milestones monitor subscription allowances for OpenAI/Codex, Claude,
+and OpenCode's own Go subscription, plus Ollama Cloud monthly credits where
+reported. Ollama Cloud currently provides activity, not the credit balance.
+These sources precede alert polish and the demo
 release. API billing and LiteLLM request/token/spend totals are separate metrics;
 they cannot establish how much of these subscription allowances remains.
 
@@ -26,7 +36,7 @@ Official documentation reviewed on 2026-10-11 establishes these candidates:
 | --- | --- | --- |
 | OpenAI/Codex subscription | Codex app-server `account/rateLimits/read`, using its supported account login. Reports usage percentage, window duration, reset time, and potentially multiple quota buckets. | Installed protocol version, account/plan coverage, supported login and refresh, and a real redacted reading. This does not establish coverage of every ordinary ChatGPT model/message limit. |
 | Claude subscription | Claude Code's documented status-line JSON exposes `rate_limits.five_hour` and `rate_limits.seven_day` percentages and reset times for Pro/Max subscribers when available. A local helper can export only those fields to the daemon. | Installed Claude Code version and plan, a real reading, preservation of any existing status-line command, and freshness when no session is updating the export. Fields appear only after the first API response and may be independently absent. |
-| OpenCode Go subscription | Go documents 5-hour, weekly, and monthly allowances. Monitor Go itself, independently of any OpenAI/Claude account used in the OpenCode app. | A supported way to retrieve current usage and reset times, authentication, account/model scope, period semantics, and a real redacted reading. The limits documentation alone does not prove automated retrieval is available. |
+| OpenCode Go subscription | M6 verified authenticated `GET /zen/go/v1/usage`: HTTP 200, three percentages and reset times. User confirmed all three 0% readings match the subscribed account's Console meters. | Implementation must verify nonzero readings, reset/recovery, and compatibility for migrated or other accounts. Per-model breakdown and every plan's bucket coverage remain unverified. |
 
 Primary references:
 
@@ -49,7 +59,7 @@ quota fields, not prompts, transcripts, access tokens, or account email.
 
 ## Reusable quota contract
 
-M7 specifies the API/config contract before source implementation:
+M7 implements the [shared API/config contract](quotas.md) used by the first adapters:
 
 - A stable account/source-instance identity, configurable name, provider, and
   subscription product. Rotation or reconnect preserves identity and history.
@@ -76,9 +86,13 @@ M7 specifies the API/config contract before source implementation:
 M11 connects the reusable windows to Home:
 
 - Reuse the scrolling account list, pinned header, and horizontal navigation.
-  Two stacked bars remain visually separate, with percentages and period labels.
+  Each account's actual windows remain visually separate in stacked lanes,
+  with percentages and period labels. Quota accounts lead the Home list.
 - Show additional windows, such as Go's monthly allowance, in the same reusable
-  row/detail design. Do not drop them or label them as weekly to fit two bars.
+  grouped Home row. Do not drop them or label them as weekly to fit two bars.
+- Generate one swipe card per enabled account, including new source types and
+  multiple accounts of one type. Preserve selected identity across refreshes;
+  adding/disabling/deleting accounts updates the sequence on the next poll.
 - Show reset information and stale/unavailable states without synthetic fallback.
   Static quota samples remain explicitly labelled DEMO.
 - At least two accounts work independently; adding another account needs

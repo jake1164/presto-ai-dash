@@ -1,4 +1,4 @@
-"""Illustrative quotas and bounded scrolling for the Home design preview."""
+"""Live source/quota rows, static preview data, and bounded Home scrolling."""
 
 from gestures import DRAG_SLOP_PX
 
@@ -14,8 +14,14 @@ DEMO_QUOTAS = (
 )
 
 
-def scroll_limit(count):
-    return max(0, count * ROW_HEIGHT - LIST_HEIGHT)
+def scroll_limit(count, row_height=ROW_HEIGHT):
+    return max(0, count * row_height - LIST_HEIGHT)
+
+
+def source_row_height(rows):
+    """Keep each account's stacked windows together; fit every actual period."""
+    return max([ROW_HEIGHT] + [20 + 19 * len(row.get("windows", [])) +
+                              (12 if row.get("activity") else 0) for row in rows])
 
 
 def source_rows(payload):
@@ -24,10 +30,40 @@ def source_rows(payload):
     sources = payload.get("sources")
     if not isinstance(sources, list):
         return None  # Older daemons still render their ordinary summary card.
+    # Put allowance meters on the first screen; local/gateway activity follows.
+    sources = sorted(sources, key=lambda source: 0 if isinstance(source, dict) and
+                     isinstance(source.get("quota"), dict) else 1)
     rows = []
     for source in sources:
         if not isinstance(source, dict):
             continue
+        quota = source.get("quota")
+        if isinstance(quota, dict) and isinstance(quota.get("windows"), list):
+            windows = []
+            for window in quota["windows"]:
+                if not isinstance(window, dict):
+                    continue
+                state = window.get("state", "unavailable")
+                percent = quota_value(window.get("used_percent"))
+                label = str(window.get("label") or "Allowance")
+                windows.append({"label": label, "percent": percent, "state": state,
+                                "period_minutes": window.get("period_minutes"),
+                                "resets_at": window.get("resets_at")})
+            activity = quota.get("activity")
+            text = ""
+            if isinstance(activity, dict):
+                requests, cost = activity.get("request_count"), activity.get("usage_usd")
+                text = ("%s req / $%.6f" % (requests, cost) if
+                        quota_value(requests) is not None and quota_value(cost) is not None
+                        else "Activity unavailable")
+                if activity.get("state") == "stale":
+                    text = "Stale: " + text
+            if windows or text:
+                rows.append({"id": source.get("id"), "type": source.get("type"),
+                             "name": str(source.get("name") or "Cloud account"),
+                             "status": normalise_status(source.get("status")), "usage": text,
+                             "windows": windows, "activity": text})
+                continue
         metrics = source.get("metrics")
         metrics = metrics if isinstance(metrics, dict) else {}
         usage = []
@@ -47,14 +83,14 @@ def source_rows(payload):
 class HomeScroll(object):
     """Finger-following vertical scroll; horizontal drags belong to cards."""
 
-    def __init__(self, count):
-        self.limit = scroll_limit(count)
+    def __init__(self, count, row_height=ROW_HEIGHT):
+        self.limit = scroll_limit(count, row_height)
         self.offset = 0
         self._down = False
         self._axis = None
 
-    def set_count(self, count):
-        self.limit = scroll_limit(count)
+    def set_count(self, count, row_height=ROW_HEIGHT):
+        self.limit = scroll_limit(count, row_height)
         self.offset = min(self.offset, self.limit)
 
     def update(self, touched, x, y, enabled=True):

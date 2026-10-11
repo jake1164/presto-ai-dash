@@ -199,6 +199,29 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
         await self.app.poll_once()
         self.assertEqual(self.app.home_scroll.offset, 0)
 
+    async def test_dynamic_cards_keep_selected_account_and_wrap_swipes(self):
+        def accounts(ids):
+            payload = self.payload(0)
+            payload.update(card_order='accounts', cards=[{'id': key, 'title': key, 'status': 'ok'}
+                for key in ['dash'] + ids])
+            return payload
+        self.app.client.fetch_async.return_value = accounts(['a', 'b', 'c'])
+        await self.app.poll_once()
+        self.app.index = 2
+        self.app.detail_open = True
+        self.app.client.fetch_async.return_value = accounts(['new', 'c', 'a', 'b'])
+        await self.app.poll_once()
+        self.assertEqual(self.app._current_card().id, 'b')
+        self.assertTrue(self.app.detail_open)
+        self.app._next_card()
+        self.assertEqual(self.app._current_card().id, 'dash')
+        self.app._prev_card()
+        self.assertEqual(self.app._current_card().id, 'b')
+        self.app.client.fetch_async.return_value = accounts(['new', 'c', 'a'])
+        await self.app.poll_once()
+        self.assertEqual(self.app._current_card().id, 'dash')
+        self.assertFalse(self.app.detail_open)
+
     async def test_unknown_usage_empty_sources_and_old_daemon_remain_honest(self):
         row = source_rows({'sources': [{'name': 'Unknown gateway', 'metrics': {}}]})[0]
         self.assertEqual(row['usage'], 'Usage unavailable')

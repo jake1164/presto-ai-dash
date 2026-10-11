@@ -34,7 +34,7 @@ from gestures import (
     TAP,
     GestureRecogniser,
 )
-from home import DEMO_QUOTAS, HomeScroll, source_rows
+from home import DEMO_QUOTAS, HomeScroll, source_rows, source_row_height
 from net import (
     StatusClient,
     StatusError,
@@ -177,6 +177,7 @@ class App(object):
         return True
 
     def _set_payload(self, payload):
+        selected = self._current_card().id if self.cards else None
         cards, error = parse_cards(payload)
         self.cards = cards
         self.error = error
@@ -184,9 +185,11 @@ class App(object):
             self.last_good_at = _now_ms()
             if not self.static_demo:
                 self.live_rows = source_rows(payload)
-                self.home_scroll.set_count(len(self.live_rows or []))
-        if self.index >= len(self.cards):
-            self.index = 0
+                self.home_scroll.set_count(len(self.live_rows or []),
+                                           source_row_height(self.live_rows or []))
+        self.index = next((i for i, card in enumerate(cards) if card.id == selected), 0)
+        if selected is not None and self._current_card().id != selected:
+            self.detail_open = False
         self._needs_redraw = True
 
     async def poll_once(self):

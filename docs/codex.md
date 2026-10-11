@@ -1,0 +1,79 @@
+# Codex subscription source
+
+The first M8 delivery reads live **Codex** allowance windows through the
+[supported local app-server protocol](https://learn.chatgpt.com/docs/app-server).
+It uses an existing ChatGPT subscription login in Codex. It does not cover all
+ordinary ChatGPT model/message limits or API billing.
+
+## Configure in the dashboard
+
+1. Open the local configuration UI and choose **Add source → OpenAI / Codex**.
+2. Give the account a display name and enable collection.
+3. Leave **Codex executable** blank for PATH discovery, followed by discovery
+   of a locally installed VS Code Codex extension binary. A custom installed
+   executable path can also be saved here.
+4. Leave **Codex profile directory** blank to use the existing default login.
+   For another account, select its separately authenticated, absolute Codex
+   profile directory. Each source has its own instance ID and process; duplicate
+   references to the same profile monitor the same login, not different accounts.
+5. Save. The account gets a Home quota group and its own swipe card automatically.
+
+Names, paths, timeout, enabled state, and refresh interval live in SQLite and
+are managed through the UI. There is no new provider TOML file or API key to
+enter. Codex owns its OAuth credential cache/keychain and refresh; the daemon
+does not read or copy credential files into its database. This is an explicit
+exception for provider-managed OAuth, rather than a second source-settings
+store. See [Codex authentication](https://learn.chatgpt.com/docs/auth).
+
+Browser/device-code sign-in, cancellation, and logout from this dashboard are
+**not implemented yet**. If no subscription login is present, sign into the
+selected profile using Codex's normal ChatGPT login flow. An API-key login is
+rejected for this source because it cannot report subscription allowances.
+Do not paste OAuth credentials into source settings.
+
+## Reporting behavior
+
+- Every fresh probe starts a bounded local app-server process, initializes it,
+  asks `account/read` to use supported token refresh, then reads
+  `account/rateLimits/read`. It closes and reaps only its own process afterward.
+- No thread, turn, model prompt, credit purchase, or quota-reset action is sent.
+  Notifications and raw account/error data are discarded. Account emails,
+  identity fields, and tokens are not saved in observations or returned by the API.
+- Use the bucket map when supplied; the legacy single view is a fallback,
+  never a second copy. Buckets and primary/secondary slots retain separate IDs.
+- Labels derive from the reported duration. A primary weekly window is labelled
+  Weekly, not Daily or 5h. Missing optional windows stay unavailable, not 0%.
+- Default refresh is 60 seconds, reporting timeout 15 seconds. Cached reads
+  retain their original timestamps. Failed probes retain the last known quota
+  visibly stale, with a fixed diagnostic; subsequent success clears the error.
+  Crossing a reset never fabricates a new zero reading.
+
+## Verification and remaining M8 work
+
+On 2026-10-11, the installed CLI `0.162.0-alpha.17.2` returned a live weekly
+window at **14%**, resetting `2026-10-18T09:55:34Z`, with no secondary window.
+This is a checkpoint observation, not a configured limit or permanent value.
+The verified account was saved in the live database after a consistent backup.
+
+Thirteen focused tests cover map/legacy responses, independent buckets,
+optional and unusual periods, malformed data, rate limiting, reset aging,
+failure/recovery, redaction, exact reporting-only methods, subprocess timeout
+and cleanup, profile routing, and multiple UI-configured accounts across a
+database restart. All 269 host tests pass. Direct frontend smoke checks verify
+source selection, profile fields, hidden API-key inputs, cookie-authenticated
+save, and reload. These frontend checks do not claim browser visual verification.
+An isolated runnable daemon also passes a real Codex end-to-end smoke check:
+status auth returns 401/200, the admin catalog includes Codex and its reading,
+and the API creates the separate account card. After the user restarted the
+VS Code daemon, its actual status API returns 401 without authentication and
+200 with the device token; Codex reports healthy, fresh weekly usage at 14%.
+The connected Presto fetched that reading and its reset, with five accounts
+and six cards. Real-font layouts, every swipe card, wraparound, selected-account
+preservation, grouped quota bars, and clipped scrolling pass on-device.
+The live app was left running and COM3 released. No device code change was
+needed for the additional account.
+
+M8 remains **in progress**: dashboard-managed sign-in/logout/cancellation, real
+expired-login recovery, a second real account/profile, other plans/buckets,
+and compatibility with later CLI protocol versions still need acceptance work.
+Claude remains a separate M9 source with a real-export readiness gate.

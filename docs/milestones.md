@@ -10,25 +10,91 @@ Status of each milestone in `presto_ai_dash_project_plan.md` §16.
 | 3 | SQLite history and retention | **done** | UTC migration, bounded snapshot/alert history, atomic observations, 72-hour cleanup, safe HTTP shutdown; 15 M3 tests. |
 | 4 | Ollama source | **done** | Version, local model inventory and loaded state; optional observed sample and tokens/sec; no fabricated usage history. |
 | 5 | LiteLLM source | **done** | Authenticated daily request/token/spend activity, health/readiness, partial-data warnings; fake and live modes are mutually exclusive. |
-| — | Local source configuration | **done** | Separate loopback admin page, multiple source instances, encrypted SQLite keys with external master key, live edits; 17 management tests. |
-| — | Connected Presto | **done** | Async authenticated polling, live source-instance Home, bounded retry/stale/offline states; 12 live tests, USB deployment, and actual Wi-Fi/auth/recovery checks. |
-| 6 | Subscription reporting readiness | not started | Verify installed/account reporting for OpenAI/Codex, Claude, and OpenCode Go; supported auth, real redacted quota readings, and explicit blockers. Review deliverable only. |
-| 7 | Reusable quota model | not started | Multiple accounts and quota windows; percentages, provider periods/resets, freshness, unavailable/unlimited states, API/config contract, and regression tests. |
-| 8 | OpenAI/Codex subscription source | not started | Supported Codex account login and app-server quota reads; verify bucket/plan coverage, optional windows, reset and auth recovery. Other ChatGPT limits require separate evidence. |
-| 9 | Claude subscription source | not started | Documented Claude Code quota export; verify installed version/plan, preserve status-line setup, and handle stale/absent 5-hour and weekly data. |
-| 10 | OpenCode Go subscription source | not started | Go's own 5-hour/weekly/monthly allowances; retrieval and reset semantics must pass M6 readiness before implementation. |
-| 11 | Live quota Home on Presto | not started | Reusable scrolling account rows, separate stacked bars, real period labels, reset details, extra windows, and stale/unavailable states; hardware verification. |
+| — | Local source configuration | **done** | Separate loopback admin page, multiple source instances, encrypted SQLite keys with external master key, live edits, seven-day remembered browser sessions; 24 management tests. |
+| — | Connected Presto | **done** | Async authenticated polling, dynamic per-account cards, live source-instance Home, bounded retry/stale/offline states; 13 live tests, USB deployment, and actual Wi-Fi/auth/recovery checks. |
+| 6 | Subscription reporting readiness | **review complete; terminal paths verified** | [M6 findings](m6-readiness.md): real Codex Plus weekly quota and authenticated Go rolling/weekly/monthly quotas verified; user confirmed Go matches Console. The later [Claude checkpoint](claude.md) verifies its terminal export. Graphical-panel coverage remains unverified. |
+| 7 | Reusable quota model | **done** | Multiple accounts/windows, provider periods/resets, freshness, unavailable/unlimited states, versioned API projection; [contract and verification](quotas.md). |
+| 8 | OpenAI/Codex subscription source | **reporting implemented; login workflow pending** | [Existing subscription login](codex.md) reads live weekly quota; UI/database settings, bounded app-server, bucket/period handling, failure recovery, and 13 tests. Actual daemon and Presto verified with five accounts/six cards. Dashboard-managed sign-in and real multi-account/expired-login acceptance remain. Other ChatGPT limits require separate evidence. |
+| 9 | Claude subscription source | **terminal implemented; live verified** | [UI-managed terminal exporter](claude.md), direct SQLite telemetry, encrypted prior status line, 5h/Weekly windows and idle freshness; 16 focused tests. Real 0%/34% readings and resets verified through the daemon and Presto. Graphical-panel coverage and separate usage-page comparison unverified. |
+| 10 | OpenCode Go subscription source | **implemented; live verified** | Authenticated 5h/Weekly/Monthly percentages/resets, UI-managed encrypted keys. Current account reads 0%; nonzero/reset/failure recovery tested with fixtures. |
+| 10a | Ollama Cloud source | **activity implemented; credits unavailable** | Separate cloud account/key in UI/database; read-only dated requests/tokens/USD. Current response has no monthly allowance, balance, or reset; no invented credit percentage. |
+| 11 | Live quota Home on Presto | **done** | Grouped stacked account bars, actual periods, per-account swipe cards/reset details, bounded carousel dots, scrolling and stale/unavailable states. Real-data/font/navigation checks pass; user confirmed bars and all five cards look good. |
 | 12 | Alert polish | not started | Current health and configurable quota thresholds, LED animation, quiet sound, mute, reset/recovery behavior, and config docs. |
 | 13 | Demo release | not started | Setup guide, screenshots, sample config, supported subscription paths, limitations, and troubleshooting. |
 
 The 2026-10-11 planning update prioritizes **subscription allowances** for
 OpenAI/Codex, Claude, and **OpenCode's own Go subscription** before polish and
 release. Former M6/M7 are now M12/M13; completed M0–M5 retain their scope.
-These are planned milestones, not implemented sources. See
+OpenCode Go, Ollama Cloud activity, and Codex reporting are now implemented;
+Claude's terminal reporting is live verified; Codex's dashboard login workflow
+and Claude's graphical-panel coverage remain pending. See
 [subscription monitoring](subscription-monitoring.md) for verified documentation,
 readiness gaps, and acceptance criteria. API billing and application usage
 monitoring remain separate work. Stop after a requested readiness/review
 deliverable unless implementation is explicitly requested.
+
+## Milestone 6 readiness result — 2026-10-11
+
+The [review](m6-readiness.md) records installed versions, bounded read-only
+checks, a minimized real Codex reading, official reporting contracts, and
+account-level gaps. Codex's observed primary window is weekly, with no secondary
+window; the UI must not assume primary means daily or five-hour usage. Claude
+needed a real export at review time; the later Claude checkpoint verifies it.
+A user-provided Go key now returns HTTP 200 with
+three real quota windows and resets. The user confirmed all three 0% readings
+match the subscribed account in Console. Nonzero/reset/recovery checks remain
+implementation acceptance work; per-model attribution is not implied.
+
+M6 itself changed no runtime/device files. The subsequently authorized cloud
+implementation completes M7 and implements M10 plus Ollama Cloud activity;
+M8 reporting is now implemented for an existing login; its dashboard login
+workflow remains pending. M9's terminal exporter and real-data path are now verified;
+graphical-panel coverage remains unverified.
+
+## Cloud implementation checkpoint — 2026-10-11
+
+The [quota contract and verification](quotas.md) cover multiple accounts,
+provider periods and resets, truthful stale/unavailable states, and UI-managed
+encrypted credentials. Fresh Go reads succeed with standard JSON/User-Agent
+headers and show three 0% meters. Ollama Cloud reports dated activity; monthly
+allowance and balance are absent from the current response. Both accounts
+were imported into SQLite and verified after reopening; temporary key intake
+files were removed. A consistent database backup was retained.
+
+All 256 host tests pass. Frontend smoke checks pass for cloud source options,
+readings, create/edit/key replacement/delete, refresh settings, and login
+restoration. The dynamic carousel and grouped quota Home were backed up and
+deployed on COM3. Real-data/font/navigation checks pass on-device, with four
+accounts and five cards. The user confirmed bars and all five swipe cards look
+good. No Codex or Claude runtime
+adapter is claimed by this checkpoint.
+
+After restarting, the actual daemon returns authenticated HTTP 200 with quota
+schema version 1 and healthy Go/Cloud sources; missing auth returns 401. Its
+source settings now come only from SQLite; obsolete private bootstrap source
+sections were removed while preserving daemon connection settings.
+
+## Codex live checkpoint — 2026-10-11
+
+After the user restarted the VS Code daemon, Codex reports healthy with a fresh
+14% Weekly reading and provider reset time; its optional secondary window
+remains unavailable. Actual status authentication checks return 401/200.
+The Presto fetches five accounts and six cards, including Codex's Home meter
+and account card. Automated real-font layout, swipe/wraparound, selection
+preservation, and clipped-scroll checks pass. The app remains running and COM3
+is released. The [Codex checkpoint](codex.md) records remaining M8 login work.
+
+## Claude implementation checkpoint — 2026-10-11
+
+The [Claude source and UI-managed setup](claude.md) are implemented. A database
+backup preceded schema v4 migration. The real account and status-line exporter
+are configured. After the user's normal Claude Code terminal response, the daemon
+reports fresh **5h 0% / Weekly 34%** readings with provider reset times. Actual
+status auth passes 401/200. The Presto fetches the same readings across six
+accounts/seven cards; real-font layouts, swipe/wraparound, selection preservation,
+and clipped Home scrolling pass. The app is running and COM3 is released.
+All 285 tests and frontend setup/removal checks pass. Graphical-panel coverage
+and separate usage-page comparison remain unverified. Display polish is deferred.
 
 ## Milestone 1 detail
 
@@ -119,11 +185,30 @@ tests and the on-device clipped-layout/navigation checks pass.
 - User confirmed the FAKE Home display and swiping through Home, Ollama, and
   LiteLLM work while daemon values update.
 
+### Configuration login follow-up — 2026-10-11
+
+- Browser sessions survive daemon/database restarts and fresh startup admin
+  codes for seven days. SQLite stores credential hashes; logout revokes the
+  current session. Cookie-authenticated edits require an exact Origin and CSRF
+  token. The existing device-token API remains unchanged.
+- Local Ollama is labelled **local API · no key required**. Fake remains an
+  explicitly labelled demo/test connector. OpenAI/Codex, Claude, and OpenCode
+  Go appear as disabled planned choices, with no runtime adapter path.
+- All 235 host tests pass, including session expiry/revocation, code rotation,
+  and schema migration preserving encrypted keys/history. Direct frontend
+  smoke checks pass for reload, restart restoration, source save, labels,
+  and logout. Visual browser verification was unavailable in this session.
+
 ## Test counts
+
+The subsequent [Codex reporting checkpoint](codex.md) adds 13 tests and the
+[Claude exporter checkpoint](claude.md) adds 16, bringing
+the complete host suite to **285 passing tests**. The prior cloud/device suite
+breakdown is below; its original checkpoint count is preserved.
 
 | Suite | Tests |
 | --- | --- |
-| `test_cards.py` | 34 |
+| `test_cards.py` | 35 |
 | `test_gestures.py` | 20 |
 | `test_alerts.py` | 34 |
 | `test_net.py` | 23 |
@@ -131,11 +216,12 @@ tests and the on-device clipped-layout/navigation checks pass.
 | `test_m2.py` | 31 |
 | `test_m3.py` | 15 |
 | `test_sources.py` | 13 |
-| `test_management.py` | 17 |
-| `test_live.py` | 12 |
+| `test_management.py` | 24 |
+| `test_quotas.py` | 18 |
+| `test_live.py` | 13 |
 | `test_ui.py` | 4 |
 | `test_home.py` | 19 |
-| **Total** | **229** |
+| **Total** | **256** |
 
 ## Milestone 2 detail
 

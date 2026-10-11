@@ -23,7 +23,12 @@ class HttpUnreachable(Exception):
     """The server could not be reached at all."""
 
 
-def get_json(url, timeout=5, headers=None, transport=None):
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, new_url):
+        return None
+
+
+def get_json(url, timeout=5, headers=None, transport=None, allow_redirects=True):
     """GET a URL and parse the JSON body.
 
     Raises ``HttpError`` on a non-2xx status and ``HttpUnreachable`` when the
@@ -37,7 +42,8 @@ def get_json(url, timeout=5, headers=None, transport=None):
         request.add_header(key, value)
 
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        opener = urllib.request.urlopen if allow_redirects else urllib.request.build_opener(_NoRedirect()).open
+        with opener(request, timeout=timeout) as response:
             status = getattr(response, "status", None) or response.getcode()
             raw = response.read()
     except urllib.error.HTTPError as exc:

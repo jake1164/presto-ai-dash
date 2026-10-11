@@ -133,7 +133,8 @@ class FakeTests(unittest.TestCase):
             self.assertEqual(source.collect().alerts[0]["severity"], "warning")
 
     def test_sources_are_registered_and_disabled_sources_do_not_probe(self):
-        self.assertEqual(available_sources(), ["fake", "ollama", "litellm"])
+        self.assertEqual(set(available_sources()),
+                         {"fake", "ollama", "litellm", "opencode_go", "ollama_cloud", "codex", "claude"})
         config = load_config()
         sources = build_sources(config)
         self.assertEqual([source.id for source in sources], ["fake"])

@@ -1,13 +1,25 @@
-"""Render the stable three-card API response from configured sources."""
+"""Render Home and per-account cards, preserving the original fake demo."""
 
 from . import __version__
 from .models import Card, iso, overall_status, severity
+from .quotas import QUOTA_SCHEMA_VERSION, present_quota, present_snapshot
 
 
 def build_status_payload(snapshots):
     snapshot = snapshots.get("fake")
     if snapshot:
         return _fake_payload(snapshot)
+
+    if any(key not in ("ollama", "litellm") for key in snapshots):
+        from .sources import source_type
+        instances = []
+        for key in snapshots:
+            try:
+                name = source_type(key).name
+            except KeyError:
+                name = key
+            instances.append({"id": key, "type": key, "name": name, "enabled": True})
+        return build_instance_payload(snapshots, instances)
 
     live = {key: snapshots[key] for key in ("ollama", "litellm")
             if key in snapshots}
@@ -127,59 +139,67 @@ def _fake_payload(snapshot):
     }
 
 
+def _account_card(row, snapshot):
+    """Each configured account owns a card, including new connector types."""
+    if snapshot is None:
+        return Card(row["id"], row["name"], "offline", primary="Awaiting first report")
+    report = snapshot.metrics.get("quota")
+    if report:
+        def reading(window):
+            percent = window.get("used_percent")
+            value = "%g%%" % percent if percent is not None else window["state"]
+            if window["state"] == "stale":
+                value += " (stale)"
+            return window["label"] + ": " + value
+        windows = report["windows"]
+        primary = reading(windows[0]) if windows else "Usage unavailable"
+        secondary = " / ".join(reading(w) for w in windows[1:])
+        details = [w["label"] + " reset: " +
+                   (w["resets_at"][5:16].replace("T", " ") + "Z" if w["resets_at"] else "unavailable")
+                   for w in windows]
+        activity = report.get("activity")
+        if activity:
+            primary = "%s requests" % activity["request_count"]
+            secondary = "$%.6f / %s tokens" % (activity["usage_usd"],
+                          activity["input_tokens"] + activity["output_tokens"])
+            details += ["Activity: " + activity["state"],
+                        "Period: " + activity["from"][:10] + " - " + activity["until"][:10]]
+        if report.get("error"):
+            details.append(report["error"])
+        return Card(row["id"], row["name"], snapshot.status, primary, secondary, details)
+    if row["type"] in ("ollama", "litellm"):
+        template = build_status_payload({row["type"]: snapshot})["cards"][
+            1 if row["type"] == "ollama" else 2]
+        template.update(id=row["id"], title=row["name"])
+        return Card(**template)
+    return Card(row["id"], row["name"], snapshot.status, primary="Usage unavailable",
+                secondary=row["type"], detail=[snapshot.error] if snapshot.error else [])
+
+
 def build_instance_payload(snapshots, instances):
-    """Keep device navigation stable and expose each instance without overlapping totals."""
+    """Home plus one card per enabled account, without overlapping totals."""
     enabled = [row for row in instances if row["enabled"]]
-    reporting = {row["id"]: snapshots[row["id"]] for row in enabled if row["id"] in snapshots}
+    reporting = {row["id"]: present_snapshot(snapshots[row["id"]])
+                 for row in enabled if row["id"] in snapshots}
     fake = next((row for row in enabled if row["type"] == "fake"), None)
     if fake:
         payload = _fake_payload(reporting.get(fake["id"]))
     else:
-        aliases = {}
-        for type_id in ("ollama", "litellm"):
-            matching = [row for row in enabled if row["type"] == type_id]
-            if len(matching) == 1 and matching[0]["id"] in reporting:
-                aliases[type_id] = reporting[matching[0]["id"]]
-        payload = build_status_payload(aliases)
-        for index, type_id in enumerate(("ollama", "litellm"), start=1):
-            matching = [row for row in enabled if row["type"] == type_id]
-            if not matching:
-                payload["cards"][index] = Card(
-                    type_id, payload["cards"][index]["title"], "offline",
-                    primary="Not configured", secondary="Source disabled").to_dict()
-            elif len(matching) > 1:
-                states = [Card(row["id"], row["name"],
-                               reporting[row["id"]].status if row["id"] in reporting else "offline")
-                          for row in matching]
-                payload["cards"][index] = Card(
-                    type_id, payload["cards"][index]["title"], overall_status(states),
-                    primary="%d configured sources" % len(matching),
-                    secondary="Separate accounts; usage is not summed",
-                    detail=["%s: %s" % (card.title, card.status) for card in states]).to_dict()
-            elif len(matching) == 1:
-                row = matching[0]
-                if row["id"] in reporting:
-                    payload["cards"][index]["secondary"] = (
-                        row["name"] + " · " + payload["cards"][index]["secondary"])
-                else:
-                    payload["cards"][index] = Card(
-                        type_id, payload["cards"][index]["title"], "offline",
-                        primary="Awaiting first report", secondary=row["name"]).to_dict()
-        states = [Card(row["id"], row["name"],
-                       reporting[row["id"]].status if row["id"] in reporting else "offline")
-                  for row in enabled]
+        states = [_account_card(row, reporting.get(row["id"])) for row in enabled]
         status = overall_status(states)
         all_alerts = [alert for snapshot in reporting.values() for alert in snapshot.alerts]
         worst = max(all_alerts, key=lambda alert: severity(alert.get("severity"))) if all_alerts else None
-        payload["overall_status"] = status
-        payload["updated_at"] = iso(max((snapshot.updated_at for snapshot in reporting.values()),
-                                       default=None))
-        payload["cards"][0] = Card(
+        home = Card(
             "dash", "AI Dash", status, primary="%d live sources" % len(enabled),
             secondary="Configured source status",
             detail=["%s: %s" % (card.title, card.status) for card in states],
             alert={"severity": worst["severity"], "message": worst["message"]} if worst else None
-        ).to_dict()
+        )
+        payload = {"app": "presto-ai-dash", "version": __version__,
+                   "overall_status": status,
+                   "updated_at": iso(max((s.updated_at for s in reporting.values()), default=None)),
+                   "card_order": "accounts",
+                   "cards": [home.to_dict()] + [card.to_dict() for card in states]}
     payload["sources"] = [
         {"id": row["id"], "type": row["type"], "name": row["name"],
          "status": reporting[row["id"]].status if row["id"] in reporting else "offline",
@@ -188,4 +208,9 @@ def build_instance_payload(snapshots, instances):
          "alerts": reporting[row["id"]].alerts if row["id"] in reporting else []}
         for row in enabled
     ]
+    payload["quota_schema_version"] = QUOTA_SCHEMA_VERSION
+    for source in payload["sources"]:
+        report = source["metrics"].get("quota")
+        if report:
+            source["quota"] = present_quota(report)
     return payload

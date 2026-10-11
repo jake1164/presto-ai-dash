@@ -2,9 +2,13 @@
 
 A tiny AI usage dashboard for Pimoroni Presto with support for local and cloud AI providers.
 
-Repository: `presto-ai-dash`. The daemon supports fake, Ollama, and LiteLLM
-sources. The next planned sources monitor subscription quotas for OpenAI/Codex,
-Claude, and OpenCode Go; they are not implemented yet.
+Repository: `presto-ai-dash`. The daemon supports fake, local Ollama, LiteLLM,
+OpenCode Go and Codex subscription quotas, and Ollama Cloud activity. Manage accounts,
+keys, and refresh settings in the local UI; they are saved in SQLite, with keys
+encrypted. Codex uses its existing provider-managed ChatGPT login; see
+[setup and remaining login work](docs/codex.md). Claude uses a UI-configured
+[Claude Code terminal exporter](docs/claude.md), verified with live 5h/Weekly readings.
+See [cloud readings and limitations](docs/quotas.md).
 
 It answers a handful of questions at a glance: is local Ollama active, is
 LiteLLM healthy, how many tokens have I used today, is anything near a limit,
@@ -13,8 +17,8 @@ is anything offline or broken, how fast is my local model running.
 The priority is now subscription usage against provider time-window limits,
 with reset times and multiple accounts. [The roadmap](docs/milestones.md)
 puts reporting readiness, a reusable quota model, named subscription adapters,
-and a live scrolling Home ahead of alert polish and release. The stacked bars
-will use real labels such as `5h`, `Weekly`, and `Monthly`; a five-hour allowance
+and a live scrolling Home ahead of alert polish and release. The live stacked bars
+use real labels such as `5h`, `Weekly`, and `Monthly`; a five-hour allowance
 is not a daily quota. See [the subscription plan](docs/subscription-monitoring.md).
 
 It is **not** an analytics platform, not a general AI observability tool, and
@@ -50,14 +54,14 @@ LiteLLM  --->  Ollama
 Out of scope for v0, and deliberately so:
 
 - MQTT, multi-daemon federation, Prometheus/Grafana export
-- Direct API billing connectors and Ollama Cloud research/source
+- Direct OpenAI/Anthropic API billing connectors
 - Provider logo packs, plugin package system, provider marketplace
 - Billing reconciliation/invoices, advanced analytics, alert rule engine
 - Cloud-hosted dashboard, user accounts, desktop browser opener
 
 See [Future Features](docs/future.md) for where those live. The optional tray,
 Docker image, and binary installers are also outside v0.
-OpenAI/Codex, Claude, and OpenCode Go subscription monitoring is in the active
+OpenAI/Codex, Claude, OpenCode Go, and Ollama Cloud monitoring is in the active
 plan, gated by supported reporting paths. The existing DEMO bars and LiteLLM
 token/spend metrics do not establish real subscription allowance usage.
 
@@ -104,6 +108,8 @@ configure Ollama or LiteLLM and disable fake to collect live source data.
 The [local configuration page](docs/configuration.md) supports multiple source
 instances and stores provider keys encrypted in SQLite. Enable it with
 `--admin`; its separate listener uses localhost and an admin token.
+Browser login is remembered for seven days across daemon restarts; **Lock
+configuration** revokes that browser session. Local Ollama needs no stored key.
 The Presto Home preview stacks daily and weekly quota bars for OpenAI,
 Claude, Ollama Cloud, and OpenCode.ai using fixed values labelled **DEMO**,
 alongside the static Ollama and LiteLLM cards. These cloud names do not indicate
@@ -116,9 +122,10 @@ Live Home lists daemon source instances and measured usage. Wi-Fi hardware
 acceptance is tracked in [milestones](docs/milestones.md). History is internal;
 trends remain future work.
 
-Three sources (`fake`, `ollama`, `litellm`) feed one daemon. The daemon serves
+Five connector types (`fake`, `ollama`, `litellm`, `opencode_go`, `ollama_cloud`)
+feed one daemon, with multiple UI-managed accounts per type. The daemon serves
 `GET /api/v1/status` behind a shared bearer token. The Presto polls it, shows
-three cards (AI Dash, Ollama, LiteLLM), colours its LEDs by status, and can
+Home plus one swipe card per enabled account, colours its LEDs by status, and can
 chirp on a warning. Snapshots are kept in SQLite for 72 hours; history stays
 internal with no trend calculations or history endpoints.
 

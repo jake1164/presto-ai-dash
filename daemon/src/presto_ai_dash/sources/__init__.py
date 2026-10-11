@@ -34,6 +34,9 @@ class Source(object):
     def collect(self):
         raise NotImplementedError
 
+    def attach_storage(self, storage):
+        """Optional access for local export connectors; ordinary sources ignore it."""
+
     # -- helpers for subclasses -------------------------------------------
 
     def snapshot(self, status, metrics=None, alerts=None, cards=None,

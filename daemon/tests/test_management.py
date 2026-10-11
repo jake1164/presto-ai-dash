@@ -17,6 +17,7 @@ sys.path.insert(0, str(SRC))
 
 from cryptography.fernet import Fernet
 from presto_ai_dash.admin import AdminServer
+from presto_ai_dash.admin_sessions import AdminSessions, SESSION_SECONDS
 from presto_ai_dash.app import Daemon
 from presto_ai_dash.config import ConfigError, load_config
 from presto_ai_dash.credentials import load_cipher
@@ -55,6 +56,21 @@ class ManagementBase(unittest.TestCase):
 
 
 class EncryptedConfigurationTests(ManagementBase):
+    def test_version_two_migration_preserves_configuration_credentials_and_history(self):
+        row = self.add_litellm()
+        self.storage.save_snapshot(SourceSnapshot(row["id"], "ok", metrics={"requests_today": 9}))
+        with self.storage._conn:
+            self.storage._conn.execute("DROP TABLE admin_sessions")
+            self.storage._conn.execute("PRAGMA user_version = 2")
+        self.storage.close()
+        self.storage = Storage(self.database)
+        self.addCleanup(self.storage.close)
+        restarted = SourceConfiguration(self.storage, self.config)
+        stored = next(item for item in self.storage.source_instances() if item["id"] == row["id"])
+        self.assertEqual(restarted.cipher.decrypt(row["id"], stored["credential"]), "test-provider-key")
+        self.assertEqual(self.storage.latest_snapshots()[row["id"]].metrics["requests_today"], 9)
+        self.assertTrue(AdminSessions(self.storage).create()[0])
+
     def test_ciphertext_database_public_output_and_restart(self):
         row = self.add_litellm()
         raw = next(record for record in self.storage.source_instances() if record["id"] == row["id"])
@@ -128,7 +144,7 @@ class EncryptedConfigurationTests(ManagementBase):
         self.assertEqual(self.storage.source_instances(), [])
         payload = self.manager.status_payload()
         self.assertEqual(payload["sources"], [])
-        self.assertTrue(all(card["primary"] == "Not configured" for card in payload["cards"][1:]))
+        self.assertEqual([card["id"] for card in payload["cards"]], ["dash"])
         self.assertNotIn("fake source", json.dumps(payload))
 
     def test_environment_key_is_imported_once_and_never_published(self):
@@ -203,8 +219,9 @@ class EncryptedConfigurationTests(ManagementBase):
         payload = self.manager.status_payload()
         self.assertEqual(payload["overall_status"], "warning")
         self.assertEqual(len(payload["sources"]), 2)
-        self.assertEqual(payload["cards"][2]["primary"], "2 configured sources")
-        self.assertIn("not summed", payload["cards"][2]["secondary"])
+        self.assertEqual([card["id"] for card in payload["cards"]], ["dash", first["id"], second["id"]])
+        self.assertEqual([card["primary"] for card in payload["cards"][1:]],
+                         ["4 requests today", "8 requests today"])
 
     def test_runtime_reloads_keys_and_rejects_stale_observations(self):
         self.disable_fake()
@@ -270,6 +287,128 @@ class AdminHttpTests(ManagementBase):
         self.assertNotIn("credential", json.dumps(data))
         self.assertEqual(self.admin._server.server_address[0], "127.0.0.1")
 
+    def login(self, cookie=None):
+        status, headers, session = self.request("/api/admin/session", "POST",
+                                               headers={"Cookie": cookie} if cookie else None)
+        self.assertEqual(status, 201)
+        return headers["Set-Cookie"].split(";", 1)[0], session, headers
+
+    def test_browser_session_cookie_and_credential_hash_only(self):
+        cookie, session, headers = self.login()
+        for attribute in ("HttpOnly", "SameSite=Strict", "Path=/api/admin", "Max-Age=604800"):
+            self.assertIn(attribute, headers["Set-Cookie"])
+        self.assertNotIn("Domain=", headers["Set-Cookie"])
+        credential = cookie.split("=", 1)[1]
+        self.assertNotIn("unit-secret-admin-token", headers["Set-Cookie"])
+        self.assertNotIn(credential.encode(), self.database.read_bytes())
+        self.assertAlmostEqual(session["expires_at"] - time.time(), SESSION_SECONDS, delta=2)
+        status, _, restored = self.request("/api/admin/session", token=None, headers={"Cookie": cookie})
+        self.assertEqual(status, 200)
+        self.assertEqual(restored, session)
+        self.assertEqual(self.request(token=None, headers={"Cookie": cookie})[0], 200)
+        # A remembered session cannot mint another session without the current admin code.
+        self.assertEqual(self.request("/api/admin/session", "POST", token=None,
+                                      headers={"Cookie": cookie})[0], 401)
+        self.assertEqual(self.request("/api/admin/session", "POST", token="device-token")[0], 401)
+
+    def test_cookie_mutations_require_csrf_and_exact_origin(self):
+        cookie, session, _ = self.login()
+        payload = {"type": "litellm", "name": "Cookie-managed source", "api_key": "test-secret"}
+        headers = {"Cookie": cookie, "Origin": self.base_url, "X-CSRF-Token": session["csrf_token"]}
+        for changes in ({"X-CSRF-Token": ""}, {"X-CSRF-Token": "wrong"},
+                        {"Origin": "http://localhost:%d" % self.admin.actual_port},
+                        {"Origin": "null"}, {"Origin": "http://127.0.0.1:9999"}):
+            self.assertEqual(self.request(method="POST", data=payload, token=None,
+                                          headers={**headers, **changes})[0], 403)
+        no_origin = {key: value for key, value in headers.items() if key != "Origin"}
+        self.assertEqual(self.request(method="POST", data=payload, token=None, headers=no_origin)[0], 403)
+        status, _, source = self.request(method="POST", data=payload, token=None, headers=headers)
+        self.assertEqual(status, 201)
+        self.assertTrue(source["has_key"])
+        path = "/api/admin/sources/" + source["id"]
+        self.assertEqual(self.request(path, "PUT", {"revision": source["revision"], "name": "Renamed"},
+                                      token=None, headers=headers)[0], 200)
+        self.assertEqual(self.request(path, "DELETE", {"revision": source["revision"] + 1},
+                                      token=None, headers=headers)[0], 200)
+
+    def test_logout_revokes_cookie_and_leaves_other_browser_valid(self):
+        cookie, session, _ = self.login()
+        other_cookie, _, _ = self.login()
+        headers = {"Cookie": cookie, "Origin": self.base_url, "X-CSRF-Token": session["csrf_token"]}
+        self.assertEqual(self.request("/api/admin/session", "DELETE", token=None,
+                                      headers={"Cookie": cookie, "Origin": self.base_url})[0], 403)
+        status, response_headers, _ = self.request("/api/admin/session", "DELETE", token=None, headers=headers)
+        self.assertEqual(status, 200)
+        self.assertIn("Max-Age=0", response_headers["Set-Cookie"])
+        self.assertEqual(self.request(token=None, headers={"Cookie": cookie})[0], 401)
+        self.assertEqual(self.request(token=None, headers={"Cookie": other_cookie})[0], 200)
+
+    def test_cloud_accounts_are_managed_by_cookie_and_keep_keys_in_database(self):
+        self.disable_fake()
+        cookie, session, _ = self.login()
+        headers = {"Cookie": cookie, "Origin": self.base_url,
+                   "X-CSRF-Token": session["csrf_token"]}
+        for type_id in ("opencode_go", "ollama_cloud"):
+            with self.subTest(type_id=type_id):
+                status, _, row = self.request(method="POST", token=None, headers=headers,
+                    data={"type": type_id, "enabled": True, "api_key": "fixture-cloud-secret",
+                          "config": {"refresh_seconds": 120}})
+                self.assertEqual(status, 201)
+                path = "/api/admin/sources/" + row["id"]
+                self.assertTrue(row["has_key"])
+                self.assertEqual(row["config"]["refresh_seconds"], 120)
+                self.assertNotIn("fixture-cloud-secret", json.dumps(row))
+                status, _, kept = self.request(path, "PUT", token=None, headers=headers,
+                    data={"revision": row["revision"], "api_key": "", "name": "Renamed account"})
+                self.assertEqual(status, 200)
+                record = next(r for r in self.storage.source_instances() if r["id"] == row["id"])
+                self.assertEqual(self.manager.cipher.decrypt(record["id"], record["credential"]),
+                                 "fixture-cloud-secret")
+                status, _, replaced = self.request(path, "PUT", token=None, headers=headers,
+                    data={"revision": kept["revision"], "api_key": "replacement-cloud-secret"})
+                self.assertEqual(status, 200)
+                record = next(r for r in self.storage.source_instances() if r["id"] == row["id"])
+                self.assertEqual(self.manager.cipher.decrypt(record["id"], record["credential"]),
+                                 "replacement-cloud-secret")
+                status, _, cleared = self.request(path, "PUT", token=None, headers=headers,
+                    data={"revision": replaced["revision"], "clear_key": True})
+                self.assertEqual(status, 200)
+                self.assertFalse(cleared["has_key"])
+                self.assertEqual(self.request(path, "DELETE", token=None, headers=headers,
+                    data={"revision": cleared["revision"]})[0], 200)
+
+    def test_expired_malformed_and_replaced_sessions_are_rejected(self):
+        cookie, session, _ = self.login()
+        for value in ("", "unknown=value", cookie.split("=", 1)[0] + "=invalid", "x" * 4097):
+            self.assertEqual(self.request(token=None, headers={"Cookie": value})[0], 401)
+        replacement, _, _ = self.login(cookie)
+        self.assertEqual(self.request(token=None, headers={"Cookie": cookie})[0], 401)
+        self.assertEqual(self.request(token=None, headers={"Cookie": replacement})[0], 200)
+        with patch("presto_ai_dash.admin_sessions.time.time", return_value=session["expires_at"] + 2):
+            status, headers, _ = self.request("/api/admin/session", token=None, headers={"Cookie": replacement})
+            self.assertEqual(status, 401)
+            self.assertIn("Max-Age=0", headers["Set-Cookie"])
+            self.assertEqual(self.request(token=None, headers={"Cookie": replacement})[0], 401)
+        self.assertEqual(self.storage._conn.execute("SELECT COUNT(*) FROM admin_sessions").fetchone()[0], 0)
+
+    def test_session_survives_reopened_database_and_rotated_startup_code(self):
+        cookie, session, _ = self.login()
+        port = self.admin.actual_port
+        self.admin.stop()
+        self.storage.close()
+        self.storage = Storage(self.database)
+        self.addCleanup(self.storage.close)
+        self.manager = SourceConfiguration(self.storage, self.config)
+        self.admin = AdminServer(port, self.manager, "different-startup-admin-code")
+        self.admin.start()
+        self.addCleanup(self.admin.stop)
+        self.assertEqual(self.request()[0], 401)  # Old startup token is no longer accepted.
+        self.assertEqual(self.request(token="different-startup-admin-code")[0], 200)
+        self.assertEqual(self.request(token=None, headers={"Cookie": cookie})[0], 200)
+        status, _, restored = self.request("/api/admin/session", token=None, headers={"Cookie": cookie})
+        self.assertEqual(status, 200)
+        self.assertEqual(restored, session)
+
     def test_crud_masks_credentials_preserves_blank_and_rotates(self):
         status, _, row = self.request(method="POST", data={
             "type": "litellm", "name": "One", "api_key": "test-secret"})
@@ -291,8 +430,11 @@ class AdminHttpTests(ManagementBase):
     def test_body_limits_errors_and_no_secret_echo(self):
         self.assertEqual(self.request(method="POST", raw=b"x=1",
                                       headers={"Content-Type": "application/x-www-form-urlencoded"})[0], 415)
-        self.assertEqual(self.request(method="POST", raw=b"x" * 65537,
-                                      headers={"Content-Type": "application/json"})[0], 413)
+        # Reject the declared length before reading. Sending the entire rejected
+        # body can cause Windows to reset the socket with unread bytes still queued.
+        self.assertEqual(self.request(method="POST", raw=b"",
+                                      headers={"Content-Type": "application/json",
+                                               "Content-Length": "65537"})[0], 413)
         self.assertEqual(self.request(method="POST", raw=b"{oops",
                                       headers={"Content-Type": "application/json"})[0], 400)
         status, _, body = self.request(method="POST", data={

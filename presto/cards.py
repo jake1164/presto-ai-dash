@@ -35,7 +35,7 @@ STATUS_ACCENT = {
 
 VALID_ACCENTS = ("green", "blue", "yellow", "red", "purple", "white", "grey")
 
-# Card order is fixed by the project plan (section 12).
+# Legacy/static payload order. Managed accounts use the daemon's sequence.
 CARD_ORDER = ("dash", "ollama", "litellm")
 
 UNKNOWN_STATUS = "offline"
@@ -189,7 +189,12 @@ def parse_cards(payload):
 
     cards = [Card.from_dict(item) for item in raw]
 
-    # Keep the plan's fixed order; unknown ids go on the end.
+    if payload.get("card_order") == "accounts":
+        # Keep configured account order, with Home first even after an edit.
+        cards.sort(key=lambda card: 0 if card.id == "dash" else 1)
+        return cards, None
+
+    # Older/static payloads retain their original order.
     def sort_key(card):
         try:
             return (0, CARD_ORDER.index(card.id))

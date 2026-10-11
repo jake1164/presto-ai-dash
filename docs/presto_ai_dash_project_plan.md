@@ -4,11 +4,14 @@
 
 **Presto AI Dash** (`presto-ai-dash`): A tiny AI usage dashboard for Pimoroni Presto with support for local and cloud AI providers.
 
-The daemon currently supports fake, Ollama, and LiteLLM sources, with local
-configuration and a connected Presto display. The next planned sources monitor
-OpenAI/Codex, Claude, and OpenCode Go subscription allowances; they are not yet
-implemented. Reporting readiness and reusable quota data come before adapters.
-The Home design preview shows labelled, fixed cloud quotas; it is not cloud telemetry.
+The daemon supports fake, local Ollama, LiteLLM, OpenCode Go and Codex quotas,
+and Ollama Cloud activity, with UI-managed account settings and encrypted
+SQLite API keys. Codex uses an existing provider-managed subscription login;
+its dashboard login workflow remains pending. Claude's terminal exporter is
+implemented and verified with live 5h/Weekly readings. The reusable quota contract and first
+cloud adapters and expanding live carousel are implemented and deployed. The
+Presto passes automated real-data/font/navigation checks; the user confirmed
+the bars and all five cards look good. The static Home preview remains labelled DEMO.
 See [milestones.md](milestones.md) for implementation status and
 [subscription monitoring](subscription-monitoring.md) for the next phase.
 
@@ -129,7 +132,7 @@ These are future placeholders, not part of the first build:
 - Prometheus/Grafana export
 - direct OpenAI/Anthropic API billing connectors
 - other ChatGPT subscription limits beyond verified Codex reporting
-- Ollama Cloud support
+- Ollama Cloud credit balance reporting beyond the currently verified activity API
 - OpenCode application/session analytics beyond Go quota monitoring
 - advanced analytics
 - application usage monitoring (separate future checkpoint after M5)
@@ -238,22 +241,23 @@ Do not scrape credentials or reverse-engineer private CLI state.
 
 Monitor OpenCode's own Go subscription, not usage of OpenAI or Claude through
 OpenCode. Its documented allowances include five-hour, weekly, and monthly
-windows. The supported retrieval path, authentication scope, and reset semantics
-remain unverified and must pass M6 before implementation. Do not invent an endpoint
-or reconstruct quota percentages from session logs.
+windows. [M6](m6-readiness.md) verified authenticated usage reads with the user's
+key and three percentages matching Console. Nonzero readings, reset/recovery,
+and other account/plan coverage need implementation acceptance checks. Do not
+reconstruct quota percentages from session logs or infer per-model breakdowns.
 
-### 7.4 Ollama Cloud (unscheduled)
+### 7.4 Ollama Cloud
 
-Future goal:
+Ollama Cloud is separate from local Ollama. Its current account UI uses monthly
+included credits, not session/weekly quota meters. The authorized reporting
+read returns dated requests/tokens/USD activity without monthly allowance,
+remaining balance, or reset. The implemented adapter reports that activity and
+marks the monthly credit meter unavailable. Do not infer percentages from public
+plan prices or scrape the account dashboard.
 
-```text
-show cloud usage/quota/status if there is a clean supported access path
-```
-
-Rules:
-
-- research before implementation
-- do not rely on brittle scraping as a default
+Accounts, keys, and refresh settings are managed in the local UI and stored in
+SQLite, with encrypted keys. No provider TOML file is required at runtime.
+See [the implemented contract and verification](quotas.md).
 
 OpenCode application/session telemetry remains separate future work. Subscription
 monitoring does not introduce a deep analytics parser.
@@ -477,11 +481,14 @@ cards. This preview does not add cloud sources or change the current API contrac
 
 M11 replaces preview values with verified subscription readings. Labels describe
 actual windows (such as 5h, Weekly, and Monthly); Daily is used only for a real
-daily window. Keep two bars in separate stacked lanes, with additional windows
-available in reusable details. OpenCode Go's monthly allowance must remain visible.
+daily window. Stack all reported bars in separate lanes under each account
+heading. OpenCode Go's monthly allowance remains visible on Home. Swipe cards
+expand to one per enabled account, including multiple accounts of one type.
+Preserve the selected account by ID across refreshes and return Home on removal.
 Show reset times and distinguish stale, unavailable, and unlimited readings;
 never fall back to demo quotas in live mode. Multiple accounts use the same renderer.
-The screens below describe the existing local/gateway foundation.
+Quota accounts lead the live Home list; ordinary local/gateway measurements
+follow. The account cards below are examples, not a fixed three-screen sequence.
 
 ### Screen 1: AI Dash
 
@@ -492,14 +499,14 @@ Purpose:
 Shows:
 
 ```text
-overall status
-total tokens today, if available
-LiteLLM status
-Ollama status
-current alert, if any
+overall status and configured account count
+each cloud account's actual quota windows and percentages
+stacked short-window / weekly / monthly bars
+explicit stale, unavailable, and unlimited states
+local/gateway activity below, with vertical scrolling
 ```
 
-### Screen 2: Ollama
+### Example account card: Ollama
 
 Purpose:
 
@@ -515,7 +522,7 @@ last request age
 prompt/output token count, if available
 ```
 
-### Screen 3: LiteLLM
+### Example account card: LiteLLM
 
 Purpose:
 
@@ -530,6 +537,14 @@ tokens today
 spend today, if available
 top model, if available
 ```
+
+### Example account cards: OpenCode Go and Ollama Cloud
+
+Go shows the account name, reported percentages, and UTC resets. Cloud shows
+dated requests/tokens/USD activity and the unavailable monthly-credit meter.
+New registered types receive a generic per-account card automatically; quota
+reports reuse the shared renderer. The live sequence expands and contracts
+with enabled source instances rather than the connector catalog itself.
 
 ### Interaction
 
@@ -797,6 +812,10 @@ Presto shows LiteLLM status and useful daily usage metrics.
 
 ### Milestone 6: Subscription reporting readiness
 
+Review result: [M6 readiness](m6-readiness.md). Codex reporting is verified for
+the observed account and Go quota reads match the user's Console meters. Claude
+export remains pending. No adapters were implemented during this review.
+
 Goal:
 
 Verify supported quota reporting for Codex, Claude, and OpenCode Go before implementation.
@@ -839,6 +858,11 @@ Percentages are not summed and cumulative quota snapshots are not added together
 
 ### Milestone 8: OpenAI/Codex subscription source
 
+Reporting checkpoint: [existing-login adapter and verification](codex.md)
+implemented on 2026-10-11. Real weekly quota reads work and all 269 tests pass.
+Dashboard-managed login/cancellation/logout and real additional-account and
+expired-login acceptance remain; M8 is not yet marked complete.
+
 Goal:
 
 Show verified Codex subscription allowances through supported account reporting.
@@ -857,6 +881,13 @@ Plan-dependent or missing windows remain explicit; other ChatGPT limits are not 
 ```
 
 ### Milestone 9: Claude subscription source
+
+Implementation checkpoint: [UI-managed terminal exporter](claude.md), direct
+SQLite telemetry and encrypted recovery of the previous status line. All 285
+tests pass. A real export during normal terminal use reports 5h 0% and Weekly
+34%; authenticated daemon and Presto Home/card checks pass with six accounts
+and seven cards. Terminal reporting is live verified. Graphical-panel coverage
+and a separate comparison against Claude's usage page remain unverified.
 
 Goal:
 
@@ -894,6 +925,22 @@ All reported Go windows match real readings, with authentication and freshness t
 If retrieval remains blocked, record the blocker and do not claim implementation complete.
 ```
 
+### Milestone 10a: Ollama Cloud activity and credits
+
+Goal:
+
+Monitor Ollama Cloud separately from local Ollama through a UI-managed account.
+
+Implemented: encrypted database credentials and refresh settings, fixed read-only
+HTTPS reporting, dated request/token/USD activity, safe failures and stale reads.
+The current response has no monthly allowance, remaining balance, or reset;
+these remain explicitly unavailable until a supported reporting path is verified.
+Do not invent a monthly percentage from public plan prices or activity totals.
+
+Acceptance: show measured activity, preserve its reporting range, and label the
+missing credit meter honestly. Account/key lifecycle must work entirely in the
+UI, with credentials absent from public API responses and Presto configuration.
+
 ### Milestone 11: Live quota Home on Presto
 
 Goal:
@@ -903,7 +950,8 @@ Make subscription allowances readable at a glance across multiple accounts.
 Tasks:
 
 - render scrolling account rows with a pinned header and separate stacked bars
-- label actual periods, expose reset times and additional windows in details
+- generate Home plus one swipe card per enabled account, preserving selection by ID
+- label actual periods, show every reported window on Home and reset times in details
 - preserve horizontal card navigation and show stale/unavailable states
 - verify multiple accounts, overflow, account changes, and touch behavior on hardware
 
@@ -1032,7 +1080,7 @@ Potential additions:
 
 ```text
 OpenCode application/session telemetry
-Ollama Cloud research/source
+Ollama Cloud monthly allowance/balance reporting beyond the verified activity API
 direct OpenAI / Anthropic API billing sources
 other ChatGPT subscription limit research
 MQTT output/input
@@ -1091,15 +1139,14 @@ Use generic icons and original code only. Do not ship provider logos.
 ## 19. Recommended next build sequence
 
 M0–M5 established the static demo, daemon, storage, and local/gateway sources.
-Keep their completed milestone scope unchanged. Continue in this order:
+Keep their completed milestone scope unchanged. M7, M10, and the activity part
+of M10a are implemented. M11 is deployed with automated device checks and user
+visual/touch confirmation complete. The remaining sequence is:
 
 ```text
-M6. Subscription reporting readiness (review only)
-M7. Reusable multi-account quota model
 M8. OpenAI/Codex subscription source
 M9. Claude subscription source
-M10. OpenCode Go subscription source, subject to verified retrieval
-M11. Live quota Home on Presto
+M10a. Ollama Cloud monthly allowance/balance, if a supported path is verified
 M12. LED/sound and quota alert polish
 M13. Documentation and demo release
 ```

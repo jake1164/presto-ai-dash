@@ -23,6 +23,7 @@ log = logging.getLogger(__name__)
 class Collector:
     def __init__(self, source, storage, config, stop_event):
         self.source = source
+        self.source.attach_storage(storage)
         self.storage = storage
         self.interval = config["daemon"]["poll_interval"]
         self.stop_event = stop_event

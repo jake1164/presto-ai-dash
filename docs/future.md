@@ -104,7 +104,7 @@ The intended approach follows its official [virtual-key documentation](https://d
 
 | Item | Notes |
 | --- | --- |
-| Ollama Cloud research | Research before implementation. No brittle scraping as a default. |
+| Ollama Cloud credit allowance reporting | Activity adapter is implemented in the [active cloud checkpoint](quotas.md); monthly balance/allowance remains unavailable. No scraping or guessed percentages. |
 | Direct OpenAI / Anthropic API billing sources | Separate from the prioritized subscription quotas. Official usage/cost APIs only, restricted keys where available, and no paid test calls or dashboard scraping. |
 | Other ChatGPT subscription limits | Codex quota reporting does not establish coverage of every ChatGPT model/message limit; research separately if requested. |
 | OpenCode application/session telemetry | Separate from Go subscription allowances. A supported helper/export can report app activity later; no deep analytics parser. |

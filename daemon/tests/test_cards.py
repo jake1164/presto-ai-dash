@@ -169,6 +169,16 @@ class TestParseCards(unittest.TestCase):
         cards, _ = parse_cards(payload)
         self.assertEqual([c.id for c in cards], ["dash", "zzz"])
 
+    def test_managed_accounts_preserve_server_sequence_with_home_first(self):
+        payload = {"card_order": "accounts", "cards": [
+            {"id": "go-account", "title": "Go", "status": "ok"},
+            {"id": "litellm", "title": "Gateway", "status": "ok"},
+            {"id": "dash", "title": "Home", "status": "ok"},
+            {"id": "ollama", "title": "Desktop", "status": "ok"}]}
+        cards, error = parse_cards(payload)
+        self.assertIsNone(error)
+        self.assertEqual([c.id for c in cards], ["dash", "go-account", "litellm", "ollama"])
+
     def test_non_dict_payload_is_an_error(self):
         cards, error = parse_cards("nope")
         self.assertIsNotNone(error)

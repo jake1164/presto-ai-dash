@@ -1,19 +1,25 @@
 "use strict";
 (() => {
   const element = (id) => document.getElementById(id);
-  let token = "", catalog = [], sources = [], editing = null;
+  let csrfToken = "", unlocked = false, catalog = [], sources = [], editing = null;
   let busy = false;
   function message(text, error = false) {
     element("message").textContent = text;
     element("message").classList.toggle("error", error);
   }
-  async function request(path, method = "GET", data) {
-    const headers = { Authorization: "Bearer " + token };
+  async function request(path, method = "GET", data, adminToken) {
+    const headers = {};
+    if (adminToken) headers.Authorization = "Bearer " + adminToken;
+    else if (method !== "GET" && csrfToken) headers["X-CSRF-Token"] = csrfToken;
     if (data !== undefined) headers["Content-Type"] = "application/json";
-    const response = await fetch(path, { method, headers, cache: "no-store",
+    const response = await fetch(path, { method, headers, cache: "no-store", credentials: "same-origin",
       body: data === undefined ? undefined : JSON.stringify(data) });
     const body = await response.json();
-    if (!response.ok) throw new Error(body.error || "Configuration request failed");
+    if (!response.ok) {
+      if (response.status === 401 && unlocked) lock();
+      const error = new Error(body.error || "Configuration request failed");
+      error.status = response.status; throw error;
+    }
     return body;
   }
   function selectedType() {
@@ -22,6 +28,13 @@
   function renderFields(settings = {}) {
     const type = selectedType();
     element("source-fields").replaceChildren();
+    element("source-help").textContent = type?.id === "ollama" ?
+      "Monitors local Ollama health and loaded models. The local API needs no key; this does not monitor Ollama Cloud subscription quotas." :
+      type?.id === "opencode_go" ? "Read-only subscription meters for your OpenCode Go account. This does not make model requests or sum tokens into quotas." :
+      type?.id === "ollama_cloud" ? "Reads dated cloud activity. Monthly allowance and remaining credits are not returned by the current API; local Ollama is a separate source." :
+      type?.id === "codex" ? "Reads Codex subscription quotas using your existing ChatGPT login in Codex. Leave both paths blank for automatic discovery and the default profile. Separate accounts need separate signed-in Codex profile directories. OAuth stays with Codex; no pay-per-use API key is needed. Browser sign-in from this page is not implemented yet." :
+      type?.id === "claude" ? "Claude Code exports 5h/weekly subscription quotas after normal terminal responses. Save this source, then set up its exporter below. Readings go straight to the database; existing status-line output is preserved. No API key is needed. Idle readings become stale; VS Code graphical-panel coverage is unverified." :
+      type?.id === "fake" ? "Synthetic demo/test data. Disable it before enabling a live source." : "";
     if (!type) return;
     for (const field of type.fields) {
       const label = document.createElement("label");
@@ -78,9 +91,73 @@
       button.addEventListener("click", () => { if (!busy) edit(source); });
       head.append(name, button);
       const detail = document.createElement("p");
+      const type = catalog.find((item) => item.id === source.type);
+      const keyStatus = source.has_key ? "key stored" :
+        type && !type.has_secret ? (source.type === "claude" ? "Claude Code quota export" :
+          source.type === "codex" ? "Codex-managed subscription login" :
+          source.type === "ollama" ? "local API · no key required" :
+          "no API key required") : "no stored key";
       detail.textContent = source.type + " · " + (source.enabled ? source.status : "disabled") +
-        " · " + (source.has_key ? "key stored" : "no stored key");
-      row.append(head, detail); list.append(row);
+        " · " + keyStatus;
+      row.append(head, detail);
+      if (source.type === "claude") {
+        const setup = document.createElement("button");
+        setup.textContent = source.export_installed ? "Remove Claude export setup" : "Set up Claude export";
+        setup.addEventListener("click", async () => {
+          if (busy) return;
+          busy = true; setup.disabled = true;
+          try {
+            await request("/api/admin/sources/" + source.id + "/claude-export", "POST",
+              {revision: source.revision, action: source.export_installed ? "remove" : "install"});
+            await reload();
+            message(source.export_installed ? "Claude export removed; previous status line restored where applicable." :
+              "Claude export configured. Reopen Claude Code in this profile and use it normally; quotas appear after a response.");
+          } catch (error) { message(error.message, true); }
+          finally { busy = false; setup.disabled = false; }
+        });
+        row.append(setup);
+      }
+      if (source.quota) {
+        for (const quota of source.quota.windows) {
+          const meter = document.createElement("div"); meter.className = "quota " + quota.state;
+          const text = document.createElement("p");
+          const percentage = typeof quota.used_percent === "number" ? quota.used_percent.toFixed(1) + "%" : "";
+          text.textContent = quota.label + " · " + (quota.state === "available" ? percentage :
+            quota.state === "stale" ? percentage + " (stale)" : quota.state);
+          if (quota.currency && typeof quota.used_amount === "number") {
+            text.textContent += " · $" + quota.used_amount.toFixed(2);
+            if (typeof quota.limit_amount === "number") text.textContent += " / $" + quota.limit_amount.toFixed(2);
+          }
+          meter.append(text);
+          if (percentage && (quota.state === "available" || quota.state === "stale")) {
+            const bar = document.createElement("progress"); bar.max = 100; bar.value = quota.used_percent;
+            bar.setAttribute("aria-label", quota.label + " allowance used"); meter.append(bar);
+          }
+          if (quota.resets_at) {
+            const reset = document.createElement("p"); reset.className = "note";
+            reset.textContent = "Reset: " + new Date(quota.resets_at).toLocaleString(); meter.append(reset);
+          }
+          row.append(meter);
+        }
+        if (source.quota.error) {
+          const error = document.createElement("p"); error.textContent = source.quota.error; row.append(error);
+        }
+        if (source.quota.activity) {
+          const activity = source.quota.activity;
+          const summary = document.createElement("p");
+          summary.textContent = (activity.state === "stale" ? "Stale activity: " : "Reported activity: ") + activity.request_count + " requests · $" +
+            activity.usage_usd.toFixed(6) + " · " + (activity.input_tokens + activity.output_tokens) + " tokens";
+          row.append(summary);
+          const range = document.createElement("p"); range.className = "note";
+          range.textContent = "Period: " + new Date(activity.from).toLocaleString() + " – " +
+            new Date(activity.until).toLocaleString(); row.append(range);
+        }
+        if (source.quota.note) {
+          const note = document.createElement("p"); note.className = "note";
+          note.textContent = source.quota.note; row.append(note);
+        }
+      }
+      list.append(row);
     }
   }
   async function reload() {
@@ -88,26 +165,48 @@
     catalog = data.types; sources = data.sources; renderList();
   }
   function lock() {
-    token = ""; sources = []; catalog = []; editing = null;
+    csrfToken = ""; unlocked = false; sources = []; catalog = []; editing = null;
     element("admin-token").value = ""; element("source-form").reset();
     element("source-list").replaceChildren(); element("source-fields").replaceChildren();
     element("workspace").hidden = true; element("login-panel").hidden = false;
     element("logout").hidden = true; message("Configuration locked.");
   }
-  element("login-form").addEventListener("submit", async (event) => {
-    event.preventDefault(); token = element("admin-token").value.trim();
-    try {
-      await reload();
-      element("source-type").replaceChildren(...catalog.map((type) => {
+  async function unlock() {
+    await reload();
+    element("source-type").replaceChildren(...catalog.map((type) => {
         const option = document.createElement("option"); option.value = type.id;
-        option.textContent = type.name; return option;
+        option.textContent = type.id === "fake" ? "Fake (demo/test data)" : type.name; return option;
       }));
-      edit(); element("admin-token").value = "";
-      element("login-panel").hidden = true; element("workspace").hidden = false;
-      element("logout").hidden = false; message("Configuration unlocked.");
-    } catch (error) { token = ""; message(error.message, true); }
+    const planned = document.createElement("optgroup"); planned.label = "Planned — not implemented";
+    for (const [id, name] of [["codex", "OpenAI / Codex subscription"], ["claude", "Claude subscription"],
+      ["opencode_go", "OpenCode Go subscription"], ["ollama_cloud", "Ollama Cloud credits"]]) {
+      if (catalog.some(type => type.id === id)) continue;
+      const option = document.createElement("option"); option.textContent = name;
+      option.disabled = true; planned.append(option);
+    }
+    element("source-type").append(planned);
+    edit(); element("admin-token").value = ""; unlocked = true;
+    element("login-panel").hidden = true; element("workspace").hidden = false;
+    element("logout").hidden = false; message("Configuration unlocked. Login remembered for seven days.");
+  }
+  element("login-form").addEventListener("submit", async (event) => {
+    event.preventDefault(); if (busy) return;
+    busy = true; element("unlock").disabled = true;
+    try {
+      const session = await request("/api/admin/session", "POST", undefined,
+        element("admin-token").value.trim());
+      csrfToken = session.csrf_token; element("admin-token").value = "";
+      await unlock();
+    } catch (error) { lock(); message(error.message, true); }
+    finally { busy = false; element("unlock").disabled = false; }
   });
-  element("logout").addEventListener("click", lock);
+  element("logout").addEventListener("click", async () => {
+    if (busy) return;
+    busy = true;
+    try { await request("/api/admin/session", "DELETE"); lock(); }
+    catch (error) { message(error.message, true); }
+    finally { busy = false; }
+  });
   element("add-source").addEventListener("click", () => { if (!busy) { edit(); message(""); } });
   element("source-type").addEventListener("change", () => {
     element("source-name").value = selectedType()?.name ?? "";
@@ -146,5 +245,17 @@
     } catch (error) { message(error.message, true); }
     finally { busy = false; }
   });
-  setInterval(() => { if (token && !busy) reload().catch((error) => message(error.message, true)); }, 10000);
+  setInterval(() => { if (unlocked && !busy) reload().catch((error) => message(error.message, true)); }, 10000);
+  async function restoreLogin() {
+    busy = true; element("unlock").disabled = true;
+    try {
+      const session = await request("/api/admin/session");
+      csrfToken = session.csrf_token; await unlock();
+    } catch (error) {
+      lock();
+      message(error.status === 401 ? "Enter the admin token shown at startup." : error.message,
+        error.status !== 401);
+    } finally { busy = false; element("unlock").disabled = false; }
+  }
+  restoreLogin();
 })();

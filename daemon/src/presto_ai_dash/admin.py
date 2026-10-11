@@ -2,6 +2,7 @@
 
 import hmac
 from http.server import BaseHTTPRequestHandler
+from http.cookies import CookieError, SimpleCookie
 from importlib.resources import files
 import json
 import logging
@@ -9,6 +10,7 @@ import re
 from urllib.parse import urlsplit
 
 from .api import ApiServer
+from .admin_sessions import AdminSessions, SESSION_SECONDS
 from .storage import ConfigurationConflict
 
 log = logging.getLogger(__name__)
@@ -21,6 +23,7 @@ ASSETS = {"/": ("index.html", "text/html; charset=utf-8"),
 def make_admin_handler(manager, token):
     if not token:
         raise ValueError("admin API requires a token")
+    sessions = AdminSessions(manager.storage)
 
     class AdminHandler(BaseHTTPRequestHandler):
         def setup(self):
@@ -30,7 +33,7 @@ def make_admin_handler(manager, token):
         def log_message(self, *_):
             pass
 
-        def _send(self, status, body, content_type="application/json"):
+        def _send(self, status, body, content_type="application/json", cookie=None):
             if content_type == "application/json":
                 body = json.dumps(body).encode("utf-8")
             self.send_response(status)
@@ -44,6 +47,8 @@ def make_admin_handler(manager, token):
                              "connect-src 'self'; frame-ancestors 'none'; "
                              "base-uri 'none'; form-action 'none'")
             self.send_header("Connection", "close")
+            if cookie is not None:
+                self.send_header("Set-Cookie", cookie)
             if status == 401:
                 self.send_header("WWW-Authenticate", "Bearer")
             self.end_headers()
@@ -55,25 +60,66 @@ def make_admin_handler(manager, token):
             hosts = {"127.0.0.1:%d" % port, "localhost:%d" % port}
             host = self.headers.get("Host", "").lower()
             origin = self.headers.get("Origin")
-            return host in hosts and (origin is None or
-                                      origin in {"http://" + name for name in hosts})
+            return host in hosts and (origin is None or origin == "http://" + host)
 
-        def _authorized(self):
+        def _cookie_name(self):
+            # Cookies have no port isolation; keep separate daemon ports independent.
+            return "presto_admin_session_%d" % self.server.server_address[1]
+
+        def _cookie_value(self):
+            raw = self.headers.get("Cookie", "")
+            if len(raw) > 4096:
+                return None
+            try:
+                cookie = SimpleCookie(raw)
+                morsel = cookie.get(self._cookie_name())
+                return morsel.value if morsel else None
+            except CookieError:
+                return None
+
+        def _session_cookie(self, credential=""):
+            # This listener is HTTP on loopback only, so Secure is intentionally
+            # omitted. Host-only, API-only cookies never contain the admin code.
+            return ("%s=%s; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age=%d" %
+                    (self._cookie_name(), credential, SESSION_SECONDS if credential else 0))
+
+        def _authorized(self, bearer_only=False):
             if not self._allowed_host():
                 self._send(403, {"error": "origin or host is not allowed"})
                 return False
             parts = self.headers.get("Authorization", "").split()
-            if (len(parts) != 2 or parts[0].lower() != "bearer" or
-                    not hmac.compare_digest(parts[1].encode("utf-8"), token.encode("utf-8"))):
-                self._send(401, {"error": "admin token required"})
-                return False
-            return True
+            if parts:
+                if (len(parts) == 2 and parts[0].lower() == "bearer" and
+                        hmac.compare_digest(parts[1].encode("utf-8"), token.encode("utf-8"))):
+                    return True
+            elif not bearer_only:
+                session = sessions.read(self._cookie_value())
+                if session:
+                    if self.command != "GET":
+                        origin = self.headers.get("Origin")
+                        csrf = self.headers.get("X-CSRF-Token", "")
+                        if (origin != "http://" + self.headers.get("Host", "").lower() or
+                                not hmac.compare_digest(csrf.encode("utf-8"),
+                                                        session["csrf_token"].encode("ascii"))):
+                            self._send(403, {"error": "reload configuration before making changes"})
+                            return False
+                    return True
+            self._send(401, {"error": "admin token required; browser session absent or expired"})
+            return False
 
         def do_GET(self):
             if not self._allowed_host():
                 self._send(403, {"error": "origin or host is not allowed"})
                 return
             path = urlsplit(self.path).path
+            if path == "/api/admin/session":
+                session = sessions.read(self._cookie_value())
+                if session:
+                    self._send(200, session)
+                else:
+                    self._send(401, {"error": "enter the current startup admin token to unlock"},
+                               cookie=self._session_cookie())
+                return
             if path in ASSETS:
                 name, content_type = ASSETS[path]
                 self._send(200, files("presto_ai_dash").joinpath("web", name).read_bytes(),
@@ -94,7 +140,8 @@ def make_admin_handler(manager, token):
                 return
             path = urlsplit(self.path).path
             match = re.fullmatch(r"/api/admin/sources/([A-Za-z0-9_-]{1,80})", path)
-            if ((method == "POST" and path != "/api/admin/sources") or
+            export = re.fullmatch(r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/claude-export", path)
+            if ((method == "POST" and path != "/api/admin/sources" and export is None) or
                     (method != "POST" and match is None)):
                 self._send(404, {"error": "not found"})
                 return
@@ -116,7 +163,9 @@ def make_admin_handler(manager, token):
                 self._send(400, {"error": "invalid JSON"})
                 return
             try:
-                if method == "DELETE":
+                if export:
+                    result = manager.configure_claude_export(export[1], data)
+                elif method == "DELETE":
                     if not isinstance(data, dict) or set(data) != {"revision"}:
                         raise ValueError("delete requires the current revision")
                     manager.delete(match[1], data["revision"])
@@ -135,12 +184,27 @@ def make_admin_handler(manager, token):
                 self._send(500, {"error": "configuration could not be saved"})
 
         def do_POST(self):
+            if urlsplit(self.path).path == "/api/admin/session":
+                if self._authorized(bearer_only=True):
+                    try:
+                        credential, session = sessions.create()
+                        sessions.revoke(self._cookie_value())
+                        self._send(201, session, cookie=self._session_cookie(credential))
+                    except Exception:
+                        log.error("admin session creation failed")
+                        self._send(500, {"error": "browser login could not be saved"})
+                return
             self._mutation("POST")
 
         def do_PUT(self):
             self._mutation("PUT")
 
         def do_DELETE(self):
+            if urlsplit(self.path).path == "/api/admin/session":
+                if self._authorized():
+                    sessions.revoke(self._cookie_value())
+                    self._send(200, {"logged_out": True}, cookie=self._session_cookie())
+                return
             self._mutation("DELETE")
 
     return AdminHandler

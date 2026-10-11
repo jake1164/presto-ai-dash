@@ -96,7 +96,8 @@ def load_config(path=None):
         raise ConfigError("admin token must be different from the device shared token")
     if type(config["sources"]["fake"]["enabled"]) is not bool:
         raise ConfigError("sources.fake.enabled must be a boolean")
-    supported_sources = ("fake", "ollama", "litellm")
+    from .sources import available_sources, source_type
+    supported_sources = available_sources()
     for name, section in config["sources"].items():
         if not isinstance(section, dict):
             raise ConfigError("sources.%s must be a table" % name)
@@ -109,6 +110,17 @@ def load_config(path=None):
         if type(section.get("enabled", False)) is not bool:
             raise ConfigError("sources.%s.enabled must be a boolean" % name)
         if name == "fake":
+            continue
+        if name not in ("ollama", "litellm"):
+            from .management import validate_settings
+            cls = source_type(name)
+            try:
+                validate_settings(cls, {field["key"]: section.get(field["key"], field["default"])
+                                        for field in cls.config_fields})
+            except ValueError as exc:
+                raise ConfigError("sources.%s: %s" % (name, exc)) from exc
+            if cls.secret_field and not isinstance(section.get(cls.secret_field, ""), str):
+                raise ConfigError("sources.%s key must be a string" % name)
             continue
         timeout = section.get("timeout")
         if type(timeout) is not int or timeout < 1:
@@ -131,7 +143,7 @@ def load_config(path=None):
     if key_env and os.environ.get(key_env):
         config["sources"]["litellm"]["api_key"] = os.environ[key_env]
     if config["sources"]["fake"].get("enabled") and any(
-        config["sources"][name].get("enabled") for name in ("ollama", "litellm")
+        section.get("enabled") for name, section in config["sources"].items() if name != "fake"
     ):
         raise ConfigError("disable sources.fake when enabling a live source")
     level = config["logging"]["level"]

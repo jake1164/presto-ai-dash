@@ -209,13 +209,19 @@ class LiteLLMTests(unittest.TestCase):
                               "total_prompt_tokens": 100, "total_completion_tokens": 20},
              }):
             snapshot = source.collect()
-        self.assertEqual(snapshot.status, "warning")
+        self.assertEqual(snapshot.status, "ok")
+        self.assertEqual(snapshot.alerts, [])
         self.assertEqual(snapshot.metrics["database"], "connected")
         self.assertEqual(snapshot.metrics["requests_today"], 4)
         self.assertEqual(snapshot.metrics["tokens_today"], 120)
         self.assertEqual(snapshot.metrics["spend_today"], 1.25)
         self.assertEqual(snapshot.metrics["top_model"], "gpt-x")
         self.assertEqual(snapshot.metrics["errors_today"], 1)
+        card = build_status_payload({"litellm": snapshot})["cards"][2]
+        self.assertEqual(card["status"], "ok")
+        self.assertEqual(card["accent"], "green")
+        self.assertIn("Errors today: 1", card["detail"])
+        self.assertIsNone(card["alert"])
 
     def test_unknown_metrics_are_unavailable_not_fabricated_zero(self):
         source = LiteLLMSource()
@@ -246,6 +252,28 @@ class LiteLLMTests(unittest.TestCase):
         self.assertEqual(snapshot.status, "warning")
         self.assertEqual(snapshot.metrics["usage"], UNAVAILABLE)
         self.assertIn("rejected the API key", snapshot.alerts[0]["message"])
+
+    def test_current_permission_warning_clears_with_historical_errors_retained(self):
+        source = LiteLLMSource()
+        with patch.object(source, "_liveliness", return_value="alive"), \
+             patch.object(source, "_readiness", return_value={"db": "connected"}), \
+             patch.object(source, "_daily_activity", side_effect=[
+                 HttpError(403, "route denied"),
+                 {"results": [{"metrics": {"api_requests": 3,
+                                            "failed_requests": 2}}]},
+             ]):
+            denied = source.collect()
+            recovered = source.collect()
+        self.assertEqual(denied.status, "warning")
+        self.assertEqual(denied.metrics["usage"], UNAVAILABLE)
+        self.assertIn("lacks permission", denied.alerts[0]["message"])
+        self.assertEqual(recovered.status, "ok")
+        self.assertEqual(recovered.alerts, [])
+        self.assertEqual(recovered.metrics["errors_today"], 2)
+        with patch.object(source, "_liveliness", side_effect=HttpError(503, "unhealthy")):
+            unhealthy = source.collect()
+        self.assertEqual(unhealthy.status, "critical")
+        self.assertEqual(unhealthy.alerts[0]["severity"], "critical")
 
 
 class LiveDashboardTests(unittest.TestCase):

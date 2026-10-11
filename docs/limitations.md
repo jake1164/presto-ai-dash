@@ -64,6 +64,10 @@ future source can emit them properly.
 `GET /user/daily/activity` returns `failed_requests` — a number for the day.
 It does not return the individual failures. `GET /spend/logs` would, but that
 is out of scope for a glanceable desk display.
+The count remains visible as `Errors today`; it does not by itself trigger a
+warning because it cannot distinguish earlier failures from current ones.
+Detecting an ongoing request-failure incident needs a future rule based on
+recent failures rather than the whole day's total.
 
 ## LiteLLM endpoints are a moving target
 

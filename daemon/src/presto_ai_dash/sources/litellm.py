@@ -158,13 +158,17 @@ class LiteLLMSource(Source):
         try:
             activity = self._daily_activity(start, end)
         except HttpError as exc:
-            # 401 means the key is wrong; 404 means the endpoint moved. Neither
-            # is fatal to the card, but both are worth surfacing.
+            # Authentication and route permissions are separate problems.
+            # Neither is fatal to the card, but both are worth surfacing.
             log.warning("litellm daily activity returned HTTP %s", exc.status)
             metrics["usage"] = UNAVAILABLE
-            if exc.status in (401, 403):
+            if exc.status == 401:
                 alerts.append(Alert("warning",
                                     "LiteLLM rejected the API key").to_dict())
+            elif exc.status == 403:
+                alerts.append(Alert(
+                    "warning",
+                    "LiteLLM key lacks permission to read usage").to_dict())
             elif exc.status == 404:
                 alerts.append(Alert(
                     "warning",
@@ -264,6 +268,8 @@ class LiteLLMSource(Source):
 
         metrics["requests_today"] = totals["api_requests"] if seen["api_requests"] else UNAVAILABLE
         metrics["tokens_today"] = totals["total_tokens"] if seen["total_tokens"] else UNAVAILABLE
+        # A daily total cannot establish whether failures are happening now.
+        # Keep it visible as history without making a healthy proxy yellow all day.
         metrics["errors_today"] = totals["failed_requests"] if seen["failed_requests"] else UNAVAILABLE
         if top:
             metrics["top_model"] = top
@@ -276,8 +282,3 @@ class LiteLLMSource(Source):
             # No database configured, or no priced requests. Either way this is
             # unknown, not zero.
             metrics["spend_today"] = UNAVAILABLE
-
-        if seen["failed_requests"] and totals["failed_requests"]:
-            alerts.append(Alert(
-                "warning",
-                "%d failed requests today" % totals["failed_requests"]).to_dict())

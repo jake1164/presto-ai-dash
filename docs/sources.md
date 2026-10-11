@@ -152,6 +152,11 @@ errors_today         from metrics.failed_requests
 - **Fail-soft by design.** An unavailable endpoint or missing field makes that
   metric unavailable and does not take down the daemon. Response metadata
   totals are preferred when present; absent fields are never reported as zero.
+- **Daily failures are history.** `Errors today` stays visible, but a nonzero
+  daily count alone does not change a healthy source to warning. Current usage
+  authentication/permission failures still warn, and liveness failures still
+  report offline or critical. HTTP 403 reports missing usage permissions;
+  HTTP 401 reports a rejected key.
 
 ### What is deliberately not reported
 

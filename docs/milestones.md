@@ -115,12 +115,12 @@ tests and the on-device clipped-layout/navigation checks pass.
 | `test_presto_structure.py` | 7 |
 | `test_m2.py` | 31 |
 | `test_m3.py` | 15 |
-| `test_sources.py` | 12 |
+| `test_sources.py` | 13 |
 | `test_management.py` | 17 |
 | `test_live.py` | 12 |
 | `test_ui.py` | 4 |
 | `test_home.py` | 19 |
-| **Total** | **228** |
+| **Total** | **229** |
 
 ## Milestone 2 detail
 
@@ -157,7 +157,12 @@ passing tests on Windows / Python 3.13. M4/M5 add 12 source tests, including a
 localhost HTTP fixture that exercises both provider clients without connecting
 to real providers. The configuration checkpoint adds 17 management tests;
 the connected Presto checkpoint adds 12 live tests. The current complete suite
-has 228 passing tests.
+has 229 passing tests after the LiteLLM warning-policy regression check.
+
+LiteLLM's daily failure count now remains visible as history without keeping
+a healthy source in warning all day. Current authentication and permission
+failures still warn; liveness failures remain offline or critical. HTTP 403
+now identifies missing usage permissions rather than a rejected key.
 
 The [local configuration checkpoint](configuration.md) adds reusable source
 instances, a separate loopback-only admin listener/token, encrypted credentials

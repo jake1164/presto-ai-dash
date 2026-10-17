@@ -8,6 +8,7 @@ import sys
 from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
+from envutil import clean_env
 
 import presto_path
 from cards import parse_cards
@@ -122,7 +123,7 @@ class AsyncHttpTests(unittest.IsolatedAsyncioTestCase):
     async def test_real_managed_fake_daemon_contract(self):
         from presto_ai_dash.app import Daemon
         from presto_ai_dash.config import load_config
-        with patch.dict(os.environ, {}, clear=True):
+        with clean_env():
             config = load_config()
             config['daemon'].update(host='127.0.0.1', port=0, database=':memory:', shared_token='device-token')
             config['admin'].update(enabled=True, port=0, token='admin-token')

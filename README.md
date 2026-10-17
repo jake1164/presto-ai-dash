@@ -62,8 +62,8 @@ Out of scope for v0, and deliberately so:
 See [Future Features](docs/future.md) for where those live. The optional tray,
 Docker image, and binary installers are also outside v0.
 OpenAI/Codex, Claude, OpenCode Go, and Ollama Cloud monitoring is in the active
-plan, gated by supported reporting paths. The existing DEMO bars and LiteLLM
-token/spend metrics do not establish real subscription allowance usage.
+plan, gated by supported reporting paths. LiteLLM token/spend metrics do not
+establish real subscription allowance usage; only the quota sources do.
 
 [Application usage monitoring](docs/future.md#application-usage-monitoring) is
 planned as a separate checkpoint after M5: multiple configured apps, reusable
@@ -103,31 +103,27 @@ tray support, pipx validation, and binary packaging are not implemented yet.
 
 ## v0 in one paragraph
 
-**Current delivery: M1–M5 are complete.** The daemon uses fake data by default;
-configure Ollama or LiteLLM and disable fake to collect live source data.
-The [local configuration page](docs/configuration.md) supports multiple source
-instances and stores provider keys encrypted in SQLite. Enable it with
-`--admin`; its separate listener uses localhost and an admin token.
-Browser login is remembered for seven days across daemon restarts; **Lock
-configuration** revokes that browser session. Local Ollama needs no stored key.
-The Presto Home preview stacks daily and weekly quota bars for OpenAI,
-Claude, Ollama Cloud, and OpenCode.ai using fixed values labelled **DEMO**,
-alongside the static Ollama and LiteLLM cards. These cloud names do not indicate
-integrations.
-Drag up/down to scroll the Home list; swipe left/right to switch cards.
-SQLite stores UTC-normalized snapshot history and alert observations for
-72 hours.
-The connected app uses authenticated polling when `STATIC_DEMO = False`.
-Live Home lists daemon source instances and measured usage. Wi-Fi hardware
-acceptance is tracked in [milestones](docs/milestones.md). History is internal;
-trends remain future work.
+**Current delivery: M0–M5, the configuration UI, connected Presto, the reusable
+quota model (M7), OpenCode Go (M10), and the grouped quota Home (M11) are done.**
+Codex (M8) reports live with an existing login, and Claude (M9) reports through a
+UI-managed terminal exporter; both have acceptance work left. Alert polish (M12)
+and the demo release (M13) are not started. See [milestones](docs/milestones.md).
 
-Five connector types (`fake`, `ollama`, `litellm`, `opencode_go`, `ollama_cloud`)
-feed one daemon, with multiple UI-managed accounts per type. The daemon serves
-`GET /api/v1/status` behind a shared bearer token. The Presto polls it, shows
-Home plus one swipe card per enabled account, colours its LEDs by status, and can
-chirp on a warning. Snapshots are kept in SQLite for 72 hours; history stays
-internal with no trend calculations or history endpoints.
+The daemon uses fake data by default; add sources in the
+[local configuration page](docs/configuration.md), which supports multiple
+accounts per connector and stores keys encrypted in SQLite. Enable it with
+`--admin`; its separate listener uses localhost and an admin token. Browser login
+is remembered for seven days; **Lock configuration** revokes that session.
+
+Seven connector types (`fake`, `ollama`, `litellm`, `opencode_go`, `ollama_cloud`,
+`codex`, and `claude`, the last two provider-managed subscription sources) feed one
+daemon. It serves `GET /api/v1/status` behind a shared bearer token. The Presto
+(with `STATIC_DEMO = False`) polls it, shows a Home with grouped stacked quota bars
+using real period labels (`5h`, `Weekly`, `Monthly`), plus one swipe card per
+enabled account. Drag up/down to scroll Home; swipe left/right to switch cards.
+Failed refreshes keep the last good cards marked STALE until `OFFLINE_AFTER_S`.
+Snapshots are kept in SQLite for 72 hours; history stays internal with no trends.
+The static demo mode still uses fixed values labelled **DEMO**.
 
 ## Quick start
 
@@ -164,6 +160,9 @@ presto-ai-dash/
     limitations.md              what is honestly not measurable
     future.md                   what is deliberately deferred
     implementation-readiness.md the pre-build readiness pass
+    quotas.md                   quota model and API contract
+    codex.md  claude.md         subscription source setup and status
+    subscription-monitoring.md  subscription plan and acceptance
   daemon/
     pyproject.toml
     src/presto_ai_dash/        Python daemon with encrypted configuration

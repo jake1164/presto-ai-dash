@@ -3,9 +3,10 @@
 The daemon supports fake data, Ollama health, and LiteLLM routed usage. The
 Presto app supports authenticated daemon polling and a separate static preview
 mode. On-device Wi-Fi, authenticated polling, and recovery are verified in
-`milestones.md`. Trends and provider-specific quota limits are deferred.
-Live Home shows source instances
-and measured usage; the cloud quota bars are static demo values only.
+`milestones.md`. Trends are deferred. Live Home shows real subscription quota
+bars (Codex, Claude, OpenCode Go) and Ollama Cloud activity; only the static
+preview mode uses fixed values, labelled DEMO. Known gaps: Codex dashboard
+sign-in, Claude graphical-panel coverage, and Ollama Cloud credit balance.
 
 Things this project honestly cannot do, and why. If a number on the Presto
 looks wrong or missing, it is probably here.

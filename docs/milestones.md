@@ -114,6 +114,18 @@ verified stale Home/card rendering, persistent-error behavior, and real recovery
 is running and COM3 released. The user's underlying intermittent response failure
 was not reproduced during either 20-poll probe; its cause remains unconfirmed.
 
+## Housekeeping checkpoint — 2026-10-17
+
+Fixed the one failing host test. On Windows the Claude status-line helper located
+Git Bash by assuming `git.exe` sat in `cmd/`; with `ucrt64/bin/git.exe` first on
+PATH it fell back to PowerShell, where a quoted command string was never invoked,
+so a chained prior status line produced no output. `_git_bash()` now walks up from
+`git.exe` to find `bin/bash.exe`, and the PowerShell fallback runs the command with
+`&`. All **288 host tests pass**. Removed ignored build cruft (stray
+`%SystemDrive%` directories created by a bad path expansion, temp databases,
+`build/`, `.uv-cache/`, `__pycache__`). Local data, keys, backups, and the virtualenv
+were kept. README and limitations refreshed to match the current state.
+
 ## Milestone 1 detail
 
 Acceptance criterion from the plan:

@@ -11,6 +11,7 @@ import threading
 import time
 import unittest
 from unittest.mock import patch
+from envutil import clean_env
 from urllib.error import HTTPError
 from urllib.request import Request, build_opener, ProxyHandler
 
@@ -29,7 +30,7 @@ from presto_ai_dash.storage import Storage
 
 class ConfigTests(unittest.TestCase):
     def setUp(self):
-        self.env = patch.dict(os.environ, {}, clear=True)
+        self.env = clean_env()
         self.env.start()
         self.addCleanup(self.env.stop)
         self.temp = tempfile.TemporaryDirectory()
@@ -315,7 +316,7 @@ class ApiTests(unittest.TestCase):
 
 class DaemonTests(unittest.TestCase):
     def test_daemon_collects_serves_and_stops(self):
-        with patch.dict(os.environ, {}, clear=True):
+        with clean_env():
             config = load_config()
         config["daemon"].update(host="127.0.0.1", port=0, database=":memory:",
                                 shared_token="test-token", poll_interval=1)
@@ -338,7 +339,7 @@ class DaemonTests(unittest.TestCase):
         daemon.wait()  # already stopped: must return immediately
 
     def test_cleanup_before_server_start_does_not_hang(self):
-        with patch.dict(os.environ, {}, clear=True):
+        with clean_env():
             config = load_config()
         config["daemon"].update(host="127.0.0.1", port=0, database=":memory:",
                                 shared_token="test-token")

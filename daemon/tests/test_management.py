@@ -9,6 +9,7 @@ import tempfile
 import time
 import unittest
 from unittest.mock import patch
+from envutil import clean_env
 from urllib.error import HTTPError
 from urllib.request import Request, build_opener, ProxyHandler
 
@@ -35,7 +36,7 @@ class ManagementBase(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.database = Path(self.temp.name) / "dash.db"
         self.master = Fernet.generate_key().decode("ascii")
-        env = patch.dict(os.environ, {"DASH_ENCRYPTION_KEY": self.master}, clear=True)
+        env = clean_env(DASH_ENCRYPTION_KEY=self.master)
         env.start()
         self.addCleanup(env.stop)
         self.config = load_config()
@@ -108,7 +109,7 @@ class EncryptedConfigurationTests(ManagementBase):
         with patch.dict(os.environ, {"DASH_ENCRYPTION_KEY": Fernet.generate_key().decode("ascii")}):
             with self.assertRaisesRegex(ValueError, "cannot be decrypted"):
                 SourceConfiguration(self.storage, self.config)
-        with patch.dict(os.environ, {}, clear=True):
+        with clean_env():
             with self.assertRaisesRegex(ValueError, "missing"):
                 SourceConfiguration(self.storage, self.config)
         ciphertext = next(row["credential"] for row in self.storage.source_instances() if row["id"] == first["id"])
@@ -125,7 +126,7 @@ class EncryptedConfigurationTests(ManagementBase):
         self.assertEqual(len(self.storage.source_instances()), 5)
 
     def test_key_file_round_trip_and_no_silent_replacement(self):
-        with patch.dict(os.environ, {}, clear=True):
+        with clean_env():
             key_file = Path(self.temp.name) / "separate.key"
             first = load_cipher(str(self.database), str(key_file))
             blob = first.encrypt("source-one", "value")

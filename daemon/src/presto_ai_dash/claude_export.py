@@ -162,11 +162,21 @@ def configure_bridge(manager, record, action):
     return {"export_installed": True}
 
 
+def _git_bash():
+    """Locate Git for Windows' bash by walking up from git.exe (cmd/, bin/ or ucrt64/bin/)."""
+    git = shutil.which("git")
+    if git:
+        for parent in Path(git).resolve().parents[:4]:
+            bash = parent / "bin" / "bash.exe"
+            if bash.is_file():
+                return bash
+    return None
+
+
 def _previous_output(command, raw):
     if os.name == "nt":
-        git = shutil.which("git")
-        bash = Path(git).resolve().parents[1] / "bin/bash.exe" if git else Path("/missing")
-        argv = [str(bash), "-c", command] if bash.is_file() else ["powershell", "-NoProfile", "-Command", command]
+        bash = _git_bash()
+        argv = [str(bash), "-c", command] if bash else ["powershell", "-NoProfile", "-Command", "& " + command]
     else:
         argv = ["/bin/sh", "-c", command]
     result = subprocess.run(argv, input=raw, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,

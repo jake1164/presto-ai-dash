@@ -25,11 +25,14 @@ does not read or copy credential files into its database. This is an explicit
 exception for provider-managed OAuth, rather than a second source-settings
 store. See [Codex authentication](https://learn.chatgpt.com/docs/auth).
 
-Browser/device-code sign-in, cancellation, and logout from this dashboard are
-**not implemented yet**. If no subscription login is present, sign into the
-selected profile using Codex's normal ChatGPT login flow. An API-key login is
-rejected for this source because it cannot report subscription allowances.
-Do not paste OAuth credentials into source settings.
+Browser and device-code sign-in, cancellation, and logout are now available from
+the dashboard for a selected Codex source profile. The daemon starts a bounded
+app-server process, returns an authorization URL or verification code, and
+does not store OAuth credentials; Codex owns its credential cache. If no
+subscription login is present, sign in through one of those flows or Codex's
+normal ChatGPT login flow. An API-key login is rejected for this source
+because it cannot report subscription allowances. Do not paste OAuth
+credentials into source settings.
 
 ## Reporting behavior
 

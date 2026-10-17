@@ -125,6 +125,17 @@ def make_admin_handler(manager, token):
                 self._send(200, files("presto_ai_dash").joinpath("web", name).read_bytes(),
                            content_type)
                 return
+            login_status = re.fullmatch(r"/api/admin/codex-logins/([A-Za-z0-9_-]{1,80})", path)
+            if login_status:
+                if self._authorized():
+                    try:
+                        self._send(200, manager.codex_login_status(login_status[1]))
+                    except KeyError:
+                        self._send(404, {"error": "login not found"})
+                    except Exception:
+                        log.error("codex login status failed")
+                        self._send(500, {"error": "login status could not be read"})
+                return
             if path != "/api/admin/sources":
                 self._send(404, {"error": "not found"})
                 return
@@ -193,6 +204,49 @@ def make_admin_handler(manager, token):
                     except Exception:
                         log.error("admin session creation failed")
                         self._send(500, {"error": "browser login could not be saved"})
+                return
+            path = urlsplit(self.path).path
+            login_cancel = re.fullmatch(r"/api/admin/codex-logins/([A-Za-z0-9_-]{1,80})/cancel", path)
+            codex_login = re.fullmatch(r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/codex-login", path)
+            codex_logout = re.fullmatch(r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/codex-logout", path)
+            if login_cancel or codex_login or codex_logout:
+                if not self._authorized():
+                    return
+                # read body
+                if (self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json"
+                        or self.headers.get("Transfer-Encoding")):
+                    self._send(415, {"error": "send an application/json body"})
+                    return
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                except ValueError:
+                    self._send(400, {"error": "invalid body length"})
+                    return
+                if not 2 <= length <= MAX_BODY:
+                    self._send(413, {"error": "invalid or oversized request body"})
+                    return
+                try:
+                    data = json.loads(self.rfile.read(length))
+                except (ValueError, UnicodeError):
+                    self._send(400, {"error": "invalid JSON"})
+                    return
+                try:
+                    if login_cancel:
+                        result = manager.cancel_codex_login(login_cancel[1])
+                    elif codex_login:
+                        result = manager.start_codex_login(codex_login[1], data)
+                    else:
+                        result = manager.logout_codex(codex_logout[1])
+                    self._send(200, result)
+                except ConfigurationConflict as exc:
+                    self._send(409, {"error": str(exc)})
+                except KeyError:
+                    self._send(404, {"error": "source or login not found"})
+                except ValueError as exc:
+                    self._send(400, {"error": str(exc)})
+                except Exception:
+                    log.error("codex login operation failed")
+                    self._send(500, {"error": "codex login operation failed"})
                 return
             self._mutation("POST")
 

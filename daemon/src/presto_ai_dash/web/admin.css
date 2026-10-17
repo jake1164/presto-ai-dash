@@ -7,9 +7,12 @@ h1 { font-size: clamp(1.6rem, 4vw, 2.2rem); margin: 0; }
 h2 { margin: 0 0 14px; font-size: 1.2rem; }
 p { color: #b1c2d7; line-height: 1.5; }
 .eyebrow { font-size: .7rem; letter-spacing: .18em; color: #7ce6da; margin: 0 0 8px; }
-main { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 20px; }
+main { display: block; margin-top: 20px; }
 .panel { background: #152034; border: 1px solid #2a3b53; border-radius: 14px; padding: 24px; }
 #login-panel { max-width: 560px; margin-top: 28px; }
+.modal { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.5); z-index: 10; }
+.modal[hidden] { display: none; }
+.modal-card { max-width: 520px; width: min(92vw, 520px); max-height: 88vh; overflow: auto; }
 label { display: block; margin-top: 18px; margin-bottom: 7px; font-weight: 600; }
 input, select, button { font: inherit; }
 input:not([type=checkbox]), select { width: 100%; background: #0c1422; border: 1px solid #627894; border-radius: 7px; color: #e3edf8; padding: 11px; }

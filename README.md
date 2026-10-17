@@ -171,6 +171,7 @@ presto-ai-dash/
     config.example.py
     home.py  net.py  cards.py  gestures.py  alerts.py  ui.py
     launcher/ai_dash.py          entry for the firmware carousel
+  tools/presto_preview/         host-side screen preview (PNG + viewer)
   examples/
     sample-status.json          the API shape, as static data
     config.example.toml
@@ -199,6 +200,33 @@ python -m unittest discover -s tests -v
 The daemon suite is pure CPython and uses localhost HTTP only. The Presto logic suite
 runs on the host too; only the thin hardware layer in `presto/main.py` needs a
 real device. See `docs/limitations.md` for what cannot be automated.
+
+## Previewing the Presto screen
+
+```bash
+python tools/presto_preview/live.py          # live dash: http://127.0.0.1:8790/
+python tools/presto_preview/live.py --demo   # STATIC_DEMO Home, no network
+python tools/presto_preview/render.py        # one PNG per card -> .preview/
+```
+
+`live.py` runs the real `presto/main.py` App loop on the host, polling the
+daemon from `presto/config.py`. Only the hardware is faked: an emulated
+240x240 RGB565 PicoGraphics framebuffer using the firmware's bitmap6/bitmap8
+fonts (shown at the panel's 480x480), the mouse as the touch panel, and
+always-connected Wi-Fi. Drag to swipe or scroll, click to tap, hold to mute;
+arrow keys, Enter and M do the same. "Simulate network failure" exercises the
+real stale/offline/recovery timers. Saving any `presto/*.py` restarts the app
+with fresh code; exceptions appear over the screen.
+
+For agents: `GET /frame.png?scale=2` is the current screen, `GET /state` the
+frame number and LED colour, and in Playwright `await presto.gesture("left")`
+(also `right`, `up`, `down`, `tap`, `long`). `render.py` writes every card
+without a browser (`--payload live|sample|demo|file.json`, `--stale`,
+`--offline`, `--muted`).
+
+Not emulated: sound, LED hardware beyond a glow hint, memory, CPU speed and
+Wi-Fi joining. Non-ASCII text draws blank (the device remaps some accented
+characters).
 
 ## Licence
 

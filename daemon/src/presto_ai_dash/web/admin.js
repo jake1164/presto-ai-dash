@@ -32,7 +32,7 @@
       "Monitors local Ollama health and loaded models. The local API needs no key; this does not monitor Ollama Cloud subscription quotas." :
       type?.id === "opencode_go" ? "Read-only subscription meters for your OpenCode Go account. This does not make model requests or sum tokens into quotas." :
       type?.id === "ollama_cloud" ? "Reads dated cloud activity. Monthly allowance and remaining credits are not returned by the current API; local Ollama is a separate source." :
-      type?.id === "codex" ? "Reads Codex subscription quotas using your existing ChatGPT login in Codex. Leave both paths blank for automatic discovery and the default profile. Separate accounts need separate signed-in Codex profile directories. OAuth stays with Codex; no pay-per-use API key is needed. Browser sign-in from this page is not implemented yet." :
+      type?.id === "codex" ? "Reads Codex subscription quotas using your ChatGPT login in Codex. Leave both paths blank for automatic discovery and the default profile. Separate accounts need separate Codex profile directories. OAuth stays with Codex; no pay-per-use API key is needed. Browser and device-code sign-in, cancellation, and logout are available through the Codex login controls." :
       type?.id === "claude" ? "Claude Code exports 5h/weekly subscription quotas after normal terminal responses. Save this source, then set up its exporter below. Readings go straight to the database; existing status-line output is preserved. No API key is needed. Idle readings become stale; VS Code graphical-panel coverage is unverified." :
       type?.id === "fake" ? "Synthetic demo/test data. Disable it before enabling a live source." : "";
     if (!type) return;
@@ -49,6 +49,16 @@
       element("source-fields").append(label, input);
     }
     element("key-section").hidden = !type.has_secret;
+  }
+  function openEditor(source = null) {
+    edit(source);
+    element("editor-modal").hidden = false;
+  }
+  function closeEditor() {
+    editing = null;
+    element("editor-modal").hidden = true;
+    element("source-form").reset();
+    element("source-fields").replaceChildren();
   }
   function edit(source = null) {
     editing = source ? { id: source.id, revision: source.revision } : null;
@@ -88,7 +98,7 @@
       const head = document.createElement("div"); head.className = "source-head";
       const name = document.createElement("strong"); name.textContent = source.name;
       const button = document.createElement("button"); button.textContent = "Edit";
-      button.addEventListener("click", () => { if (!busy) edit(source); });
+      button.addEventListener("click", () => { if (!busy) openEditor(source); });
       head.append(name, button);
       const detail = document.createElement("p");
       const type = catalog.find((item) => item.id === source.type);
@@ -169,7 +179,7 @@
     element("admin-token").value = ""; element("source-form").reset();
     element("source-list").replaceChildren(); element("source-fields").replaceChildren();
     element("workspace").hidden = true; element("login-panel").hidden = false;
-    element("logout").hidden = true; message("Configuration locked.");
+    element("logout").hidden = true; element("editor-modal").hidden = true; message("Configuration locked.");
   }
   async function unlock() {
     await reload();
@@ -207,7 +217,8 @@
     catch (error) { message(error.message, true); }
     finally { busy = false; }
   });
-  element("add-source").addEventListener("click", () => { if (!busy) { edit(); message(""); } });
+  element("add-source").addEventListener("click", () => { if (!busy) { openEditor(); message(""); } });
+  element("close-editor").addEventListener("click", () => { if (!busy) closeEditor(); });
   element("source-type").addEventListener("change", () => {
     element("source-name").value = selectedType()?.name ?? "";
     element("api-key").value = ""; element("clear-key").checked = false; renderFields();
@@ -241,7 +252,7 @@
     busy = true;
     try {
       await request("/api/admin/sources/" + editing.id, "DELETE", {revision: editing.revision});
-      await reload(); edit(); message("Source deleted.");
+      await reload(); closeEditor(); message("Source deleted.");
     } catch (error) { message(error.message, true); }
     finally { busy = false; }
   });

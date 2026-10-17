@@ -30,3 +30,7 @@ presto/config.py
 .idea/
 .DS_Store
 Thumbs.db
+
+# Presto preview renders and Playwright MCP output
+.preview/
+.playwright-mcp/

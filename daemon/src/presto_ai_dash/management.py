@@ -6,6 +6,7 @@ import time
 from urllib.parse import urlsplit
 from uuid import uuid4
 
+from .codex_login import CodexLoginManager
 from .credentials import load_cipher
 from .dashboard import build_instance_payload
 from .sources import source_catalog, source_type
@@ -83,7 +84,7 @@ class SourceConfiguration:
         for record in storage.source_instances():
             if record["credential"] is not None:
                 self.cipher.decrypt(record["id"], record["credential"])
-
+        self.codex_logins = CodexLoginManager(self)
     def list_sources(self):
         records = self.storage.source_instances()
         snapshots = self.storage.latest_snapshots()
@@ -181,6 +182,31 @@ class SourceConfiguration:
             if record["revision"] != data["revision"]:
                 raise ConfigurationConflict("source changed; reload before configuring export")
             return configure_bridge(self, record, data["action"])
+
+    def start_codex_login(self, instance_id, data):
+        from .codex_login import configure_codex_login
+        record = next((r for r in self.storage.source_instances() if r["id"] == instance_id), None)
+        if not record:
+            raise KeyError(instance_id)
+        if record["type"] != "codex":
+            raise ValueError("Codex login is only available for Codex sources")
+        if not isinstance(data, dict):
+            raise ValueError("invalid login request")
+        return configure_codex_login(self, instance_id, data)
+
+    def codex_login_status(self, session_id):
+        return self.codex_logins.status(session_id)
+
+    def cancel_codex_login(self, session_id):
+        return self.codex_logins.cancel(session_id)
+
+    def logout_codex(self, instance_id):
+        record = next((r for r in self.storage.source_instances() if r["id"] == instance_id), None)
+        if not record:
+            raise KeyError(instance_id)
+        if record["type"] != "codex":
+            raise ValueError("Codex logout is only available for Codex sources")
+        return self.codex_logins.logout(instance_id)
 
     def status_payload(self):
         with self.storage._lock:

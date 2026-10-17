@@ -53,6 +53,12 @@ class PreviewTests(unittest.TestCase):
 
 
 class LivePreviewTests(unittest.TestCase):
+    def test_offline_screen_is_the_devices_connection_error(self):
+        png = live.offline_png()
+        self.assertEqual(png[1:4], b"PNG")
+        self.assertEqual(struct.unpack(">II", png[16:24]), (240, 240))
+        self.assertGreater(len(png), 400)  # text and accent bar, not a blank frame
+
     def test_demo_app_runs_and_responds_to_a_swipe(self):
         runner = live.Runner(demo=True)
         self.addCleanup(runner.stop)

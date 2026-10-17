@@ -127,7 +127,7 @@ The static demo mode still uses fixed values labelled **DEMO**.
 
 ## Quick start
 
-In VS Code, select **Daemon + configuration** in **Run and Debug**: **F5**
+In VS Code, select **Daemon + admin page** in **Run and Debug**: **F5**
 debugs and **Ctrl+F5** runs it. Open `http://127.0.0.1:8788` and use the admin
 token printed in the terminal. See [IDE setup](docs/setup.md#vs-code-run-and-debug)
 for the root `.venv` and private `dash.toml` used by this profile.

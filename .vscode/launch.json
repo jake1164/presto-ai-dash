@@ -2,7 +2,7 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Daemon + configuration",
+      "name": "Daemon + admin page",
       "type": "debugpy",
       "request": "launch",
       "module": "presto_ai_dash.app",
@@ -11,11 +11,87 @@
         "python": "${workspaceFolder}/.venv/Scripts/python.exe"
       },
       "cwd": "${workspaceFolder}",
-      "args": ["--config", "${workspaceFolder}/dash.toml", "--admin"],
+      "args": [
+        "--config",
+        "${workspaceFolder}/dash.toml",
+        "--admin"
+      ],
       "console": "integratedTerminal",
       "justMyCode": true,
       "env": {
         "PYTHONUNBUFFERED": "1"
+      },
+      "serverReadyAction": {
+        "pattern": "configuration page: (https?://[0-9A-Za-z.:/_-]+)",
+        "uriFormat": "%s",
+        "action": "openExternally"
+      },
+      "presentation": {
+        "group": "2",
+        "order": 1
+      }
+    },
+    {
+      "name": "Daemon + admin page (no browser; used by the compound)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "presto_ai_dash.app",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "windows": {
+        "python": "${workspaceFolder}/.venv/Scripts/python.exe"
+      },
+      "cwd": "${workspaceFolder}",
+      "args": [
+        "--config",
+        "${workspaceFolder}/dash.toml",
+        "--admin"
+      ],
+      "console": "integratedTerminal",
+      "justMyCode": true,
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "presentation": {
+        "hidden": true
+      }
+    },
+    {
+      "name": "Presto preview only",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/tools/presto_preview/live.py",
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "windows": {
+        "python": "${workspaceFolder}/.venv/Scripts/python.exe"
+      },
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "args": [
+        "--open",
+        "--open-first",
+        "http://127.0.0.1:8788/"
+      ],
+      "justMyCode": false,
+      "env": {
+        "PYTHONUNBUFFERED": "1"
+      },
+      "presentation": {
+        "group": "2",
+        "order": 2
+      }
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Daemon + admin page + Presto preview",
+      "configurations": [
+        "Daemon + admin page (no browser; used by the compound)",
+        "Presto preview only"
+      ],
+      "stopAll": true,
+      "presentation": {
+        "group": "1",
+        "order": 1
       }
     }
   ]

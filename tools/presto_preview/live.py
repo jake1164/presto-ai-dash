@@ -2,6 +2,7 @@
 
     python tools/presto_preview/live.py            # polls the daemon in presto/config.py
     python tools/presto_preview/live.py --demo     # STATIC_DEMO Home, no network
+    python tools/presto_preview/live.py --open     # also open the default browser
     open http://127.0.0.1:8790/
 
 The real presto/main.py App loop runs here, with only the hardware faked:
@@ -159,6 +160,22 @@ class Runner(object):
             self.publish(None, None, traceback.format_exc())
 
 
+def offline_png():
+    """The Presto's connection-error screen, drawn by the device's own code.
+
+    Mirrors App._render for an unreachable daemon, so the page can show it when
+    this server is gone and nothing can be rendered.
+    """
+    render._load_app_modules(real_sleep=True)  # puts presto/ on sys.path
+    from alerts import rgb_for_accent
+    from ui import Palette, draw_message
+    display = Framebuffer()
+    draw_message(display, Palette(display), "Daemon offline", "Check daemon and LAN address",
+                 accent_rgb=rgb_for_accent("red"),
+                 detail=["Retrying...", "RESET returns to carousel"])
+    return encode_png(display.pixels, 240, 240, 1)
+
+
 def watch(runner):
     def mtimes():
         stamps = {}
@@ -192,6 +209,8 @@ def make_handler(runner):
                 with runner.cond:
                     pixels = runner.pixels
                 return self._send(200, encode_png(pixels, 240, 240, scale), "image/png")
+            if parts.path == "/offline.png":
+                return self._send(200, offline_png(), "image/png")
             if parts.path == "/state":
                 after = int(query.get("after", ["-1"])[0])
                 return self._json(runner.snapshot(after))
@@ -255,15 +274,16 @@ body { margin: 0; padding: 16px; background: #0b0d10; color: #c9d1d9;
 #error { display: none; position: absolute; inset: 22px; overflow: auto; margin: 0; padding: 12px;
   background: rgba(60,0,0,.92); color: #ffd7d7; font: 12px ui-monospace, monospace; white-space: pre-wrap; }
 .controls { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 14px; align-items: center; justify-content: center; }
+label, button { cursor: help; }
 button { font: inherit; background: #21262d; color: #c9d1d9; border: 1px solid #30363d;
   border-radius: 6px; padding: 6px 12px; cursor: pointer; }
 .hint, #status { color: #8b949e; font-size: 12px; margin-top: 10px; text-align: center; }
 </style></head><body>
 <div id="bezel"><img id="screen" alt="Presto screen" draggable="false" src="/frame.png"><pre id="error"></pre></div>
 <div class="controls">
-  <label><input type="checkbox" id="demo"> Static demo</label>
-  <label><input type="checkbox" id="netfail"> Simulate network failure</label>
-  <button id="restart" type="button">Restart app</button>
+  <label id="demo-label" title="Runs the app the way the device does when STATIC_DEMO is on: it never contacts the daemon. Home shows built-in sample quotas (OpenAI, Claude, Ollama Cloud, OpenCode.ai) marked DEMO, and the cards come from the built-in sample data. Use it to work on the layout without real accounts or a running daemon. Untick to go back to live data."><input type="checkbox" id="demo"> Static demo</label>
+  <label id="netfail-label" title="Makes every daemon request fail, as if the daemon were off or unreachable. The app keeps its last good data marked 'STALE - retrying', then after 30 seconds switches to the red 'Daemon offline' screen, exactly as the device does. Untick to watch it recover. Your real daemon is not affected. Not available in static demo, which makes no requests."><input type="checkbox" id="netfail"> Simulate network failure</label>
+  <button id="restart" type="button" title="Restarts the app from boot, back on Home, with the current presto/*.py code. Saving a presto file already does this automatically, so use it to reset the app's state, such as scroll position, mute, or a stuck screen.">Restart app</button>
 </div>
 <div class="hint">Drag to swipe or scroll &middot; click to tap &middot; hold 0.7s to mute.
   Keys: &larr; &rarr; cards, &uarr; &darr; scroll, Enter tap, M mute.</div>
@@ -273,7 +293,13 @@ button { font: inherit; background: #21262d; color: #c9d1d9; border: 1px solid #
   const screen = document.getElementById("screen");
   const errorBox = document.getElementById("error");
   const status = document.getElementById("status");
-  let frame = -1, sending = Promise.resolve(), down = false;
+  let frame = -1, sending = Promise.resolve(), down = false, offlineUrl = null;
+  // Keep the device's offline screen in the page: once the server is gone nothing can render it.
+  async function cacheOffline() {
+    try {
+      offlineUrl = URL.createObjectURL(await (await fetch("/offline.png")).blob());
+    } catch (e) {}
+  }
 
   const post = (path, body) => fetch(path, {method: "POST",
     headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)});
@@ -339,16 +365,22 @@ button { font: inherit; background: #21262d; color: #c9d1d9; border: 1px solid #
         }
         errorBox.style.display = state.error ? "block" : "none";
         errorBox.textContent = state.error || "";
+        if (!offlineUrl) cacheOffline();
         document.getElementById("demo").checked = state.demo;
+        document.getElementById("netfail").disabled = state.demo;
         document.getElementById("netfail").checked = state.network_fail;
         status.textContent = (state.demo ? "static demo" : "live daemon") + " · frame " + frame +
           (state.network_fail ? " · network failing" : "");
       } catch (e) {
+        if (offlineUrl) screen.src = offlineUrl;
+        frame = -1;  // redraw from the live frame when the server returns
+        document.body.style.setProperty("--led", "rgb(89,14,10)");
         status.textContent = "preview server unreachable; retrying";
         await wait(1000);
       }
     }
   }
+  cacheOffline();
   loop();
 })();
 </script>
@@ -356,10 +388,44 @@ button { font: inherit; background: #21262d; color: #c9d1d9; border: 1px solid #
 """
 
 
+def open_tabs(first, preview_url, wait=30):
+    """Open other pages, then the preview, so tab order and focus are fixed."""
+    try:
+        import socket
+        import webbrowser
+        from urllib.parse import urlsplit
+
+        def show(url):
+            # Say what happened: a silent failure here looks like "nothing opens".
+            print("opening %s -> %s" % (url, "ok" if webbrowser.open(url) else "NO BROWSER FOUND"),
+                  flush=True)
+
+        for url in first:
+            parts = urlsplit(url)
+            end = time.monotonic() + wait
+            while time.monotonic() < end:
+                try:
+                    socket.create_connection((parts.hostname, parts.port or 80), 1).close()
+                    break
+                except OSError:
+                    time.sleep(0.5)
+            else:
+                print("%s did not answer within %ds; opening it anyway" % (url, wait), flush=True)
+            show(url)
+            time.sleep(1)  # let the browser take this tab before the next
+        show(preview_url)
+    except BaseException:
+        traceback.print_exc()
+
+
 def main_cli(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--demo", action="store_true", help="STATIC_DEMO Home; no network")
     parser.add_argument("--port", type=int, default=8790)
+    parser.add_argument("--open", action="store_true", help="open the page in the default browser")
+    parser.add_argument("--open-first", action="append", default=[], metavar="URL",
+                        help="with --open, open this URL first, once its port accepts "
+                             "connections (repeatable); the preview opens last, in front")
     args = parser.parse_args(argv)
     runner = Runner(demo=args.demo)
     runner.restart()
@@ -367,7 +433,10 @@ def main_cli(argv=None):
     # Loopback only: the live dash shows account names and quotas.
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(runner))
     server.daemon_threads = True
-    print("Presto live preview on http://127.0.0.1:%d/" % args.port)
+    url = "http://127.0.0.1:%d/" % args.port
+    print("Presto live preview on " + url, flush=True)
+    if args.open:
+        threading.Thread(target=open_tabs, args=(args.open_first, url), daemon=True).start()
     server.serve_forever()
 
 

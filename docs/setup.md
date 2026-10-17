@@ -17,7 +17,7 @@ for the future direct Python/pipx, optional Docker, tray, and binary targets.
 
 ### VS Code run and debug
 
-Open the repository root in VS Code. The checked-in **Daemon + configuration**
+Open the repository root in VS Code. The checked-in **Daemon + admin page**
 launch profile uses a virtual environment at the repository root and a private
 root `dash.toml`. On this Windows workspace the environment is already installed
 and the config has been copied from the example. For a fresh Windows checkout:
@@ -30,7 +30,7 @@ if (!(Test-Path dash.toml)) { Copy-Item examples/config.example.toml dash.toml }
 
 Install the recommended Microsoft Python and Python Debugger extensions if they
 are missing. Open **Run and Debug** (`Ctrl+Shift+D`) and select
-**Daemon + configuration**. Press **F5** to debug with breakpoints, or
+**Daemon + admin page**. Press **F5** to debug with breakpoints, or
 **Ctrl+F5** to run without debugging. Logs and generated tokens appear in the
 integrated terminal. These controls follow the
 [VS Code Python debugging workflow](https://code.visualstudio.com/docs/python/debugging).

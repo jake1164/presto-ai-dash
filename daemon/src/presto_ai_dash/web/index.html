@@ -27,7 +27,10 @@
       <div class="section-title"><h2>Your sources</h2><button id="add-source">Add source</button></div>
       <p>Manage accounts, keys, and refresh settings here. Changes are saved in the database.
         Disable demo data before enabling a live source.</p>
-      <div id="source-list"></div>
+      <p class="note">Drag an account by its grip to change the order, or use the arrow buttons.
+        Order saves automatically and appears on Presto Home and swipe cards on the next poll.
+        Uncheck Enabled to pause a source and hide it on Presto; its settings, key, and position are kept.</p>
+      <div id="source-list" aria-label="Accounts in display order"></div>
       <p class="note">Changes apply automatically after any current probe finishes.</p>
       <h2>Cloud and subscription sources</h2>
       <p class="note">Available subscription connectors show current allowance meters in your source list.

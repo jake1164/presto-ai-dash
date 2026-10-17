@@ -5,6 +5,8 @@ import struct
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import presto_path
 
@@ -15,9 +17,28 @@ if PREVIEW_DIR not in sys.path:
 from framebuffer import Framebuffer  # noqa: E402
 import live  # noqa: E402
 import render  # noqa: E402
+from presto_bundle import app_files, snapshot  # noqa: E402
 
 
 class PreviewTests(unittest.TestCase):
+    def test_source_loader_uses_snapshot_bytes_even_if_the_file_changes(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = os.path.join(folder, "helper.py")
+            with open(path, "wb") as handle:
+                handle.write(b"value = 'old'\n")
+            loader = render._AppSourceLoader("helper", path, b"value = 'new'\n")
+            namespace = {}
+            exec(loader.get_code("helper"), namespace)
+            self.assertEqual(namespace["value"], "new")
+
+    def test_preview_entry_is_the_exact_source_used_for_device_deployment(self):
+        with patch.dict(sys.modules, {"main": SimpleNamespace(App="unrelated module")}):
+            app, _ = render._load_app_modules()
+        deployed_entry = next(path for path, target in app_files().items()
+                              if target == "/ai_dash_files/ai_dash_app.py")
+        self.assertEqual(os.path.realpath(app.__file__), os.path.realpath(deployed_entry))
+        self.assertTrue(callable(app.App))
+
     def test_measure_text_matches_firmware_fonts(self):
         display = Framebuffer()
         display.set_font("bitmap8")
@@ -67,6 +88,8 @@ class LivePreviewTests(unittest.TestCase):
         while state["frame"] < 2 and state["error"] is None:
             state = runner.snapshot(state["frame"], timeout=5)
         self.assertIsNone(state["error"])
+        self.assertEqual(state["code_revision"], snapshot()["revision"])
+        self.assertIn("status", state["device_sync"])
         home = runner.pixels
         runner.presto.touch.feed([("down", 200, 130), ("move", 120, 130), ("up", 40, 130)])
         state = runner.snapshot(state["frame"], timeout=5)

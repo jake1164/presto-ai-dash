@@ -54,6 +54,12 @@ The equivalent Windows terminal command, from the repository root, is:
 .\.venv\Scripts\python.exe -m presto_ai_dash.app --config dash.toml --admin
 ```
 
+Run one daemon at a time: stop a terminal/background daemon before launching
+the VS Code profile. The status listener (8787) and admin listener (8788)
+belong to that same process; PSL (8790) is a separate preview process that
+polls the daemon. Daemon listeners use exclusive port binding on Windows so
+a second start fails instead of serving competing responses on the same ports.
+
 For macOS/Linux, create the same root `.venv`, install with
 `.venv/bin/python -m pip install -e daemon`, and copy the example to root
 `dash.toml` before using the profile.
@@ -127,6 +133,58 @@ database while the daemon is stopped to reset demo history.
 Prefer these for anything secret so it never lands in a file.
 
 ## 2. Flash and configure the Presto
+
+### Keeping PSL and the device in sync
+
+There is one app implementation in `presto/`. PSL imports its real App, cards,
+Home, networking, gestures, alerts, and drawing code. Only the display, touch,
+LED and Wi-Fi hardware interfaces are emulated. The physical device runs copies
+of those same files; it cannot see edits on your PC until you sync them.
+
+For an already configured Presto, use **Terminal → Run Task → Sync Presto** in
+VS Code and enter its USB port (currently COM3). This is an explicit action;
+saving a file never writes to hardware. **Check Presto sync** checks the actual
+installed hashes without uploading code. Both commands interrupt the device
+app and relaunch AI Dash, resetting its navigation/mute state. Close Thonny or
+other serial tools first. The sync tool refuses automatic board selection and
+checks that the selected board identifies as a Pimoroni Presto.
+
+The equivalent Windows commands from the repository root are:
+
+```powershell
+.venv/Scripts/python tools/presto_device.py plan
+.venv/Scripts/python tools/presto_device.py check --port COM3
+.venv/Scripts/python tools/presto_device.py sync --port COM3
+```
+
+`plan` does not connect to hardware. Off Windows, use `.venv/bin/python` and
+the device's explicit USB path. To install the official USB tool in a fresh
+environment, use `.venv/Scripts/python -m pip install -e "daemon[device]"`.
+The commands use [MicroPython's mpremote](https://docs.micropython.org/en/latest/reference/mpremote.html).
+
+The shared inventory in `tools/presto_bundle.py` discovers public app modules,
+maps `main.py` to `/ai_dash_files/ai_dash_app.py`, and includes the carousel
+entry. Newly added public modules join automatically. Sync freezes a source
+snapshot, uploads staged files, verifies every SHA-256, replaces installed
+files with rollback on write/rename failures, and verifies the installed bytes.
+App helpers removed from the source are detected and retired as non-importable
+`.presto-prev` backups on the device, so an old helper cannot silently be used.
+PSL executes a frozen snapshot of source bytes and bypasses Python bytecode
+caches; its displayed revision identifies those loaded bytes.
+Re-running sync repairs an interrupted transfer; after USB/power loss, always
+verify or sync again. The firmware `/main.py`, private config/secrets, and
+daemon data are excluded. Initial Wi-Fi/daemon setup below remains separate.
+
+PSL's footer and `/state` show the app revision plus the **dated last USB
+verification**. This is a check of installed files, not live hardware telemetry.
+Changing app source afterward shows “App changed since USB verification”; a
+different installed hash shows “Device code differs”. A receipt under ignored
+`.preview/` contains only revision/status/time. USB checks do not prove physical
+display, Wi-Fi, memory or sound behavior. If PSL was already running when its
+host tooling changed, restart the usual VS Code preview/compound once to load
+the updated footer. Ordinary `presto/*.py` edits continue to reload automatically.
+
+### First installation
 
 The Presto ships with MicroPython and a launcher preinstalled. If you do not
 see the launcher, download the latest `with-filesystem` `.uf2` from the

@@ -151,9 +151,10 @@ def make_admin_handler(manager, token):
                 return
             path = urlsplit(self.path).path
             match = re.fullmatch(r"/api/admin/sources/([A-Za-z0-9_-]{1,80})", path)
+            reorder = method == "PUT" and path == "/api/admin/source-order"
             export = re.fullmatch(r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/claude-export", path)
             if ((method == "POST" and path != "/api/admin/sources" and export is None) or
-                    (method != "POST" and match is None)):
+                    (method != "POST" and match is None and not reorder)):
                 self._send(404, {"error": "not found"})
                 return
             if (self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json"
@@ -174,7 +175,9 @@ def make_admin_handler(manager, token):
                 self._send(400, {"error": "invalid JSON"})
                 return
             try:
-                if export:
+                if reorder:
+                    result = manager.reorder(data)
+                elif export:
                     result = manager.configure_claude_export(export[1], data)
                 elif method == "DELETE":
                     if not isinstance(data, dict) or set(data) != {"revision"}:

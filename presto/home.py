@@ -30,9 +30,10 @@ def source_rows(payload):
     sources = payload.get("sources")
     if not isinstance(sources, list):
         return None  # Older daemons still render their ordinary summary card.
-    # Put allowance meters on the first screen; local/gateway activity follows.
-    sources = sorted(sources, key=lambda source: 0 if isinstance(source, dict) and
-                     isinstance(source.get("quota"), dict) else 1)
+    # Managed accounts follow the saved order on Home and in the carousel.
+    if payload.get("card_order") != "accounts":
+        sources = sorted(sources, key=lambda source: 0 if isinstance(source, dict) and
+                         isinstance(source.get("quota"), dict) else 1)
     rows = []
     for source in sources:
         if not isinstance(source, dict):

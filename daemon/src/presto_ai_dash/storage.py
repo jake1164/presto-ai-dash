@@ -50,7 +50,7 @@ def _validated_alerts(value):
 
 
 class Storage:
-    SCHEMA_VERSION = 4
+    SCHEMA_VERSION = 5
     MAX_HISTORY_LIMIT = 1000
 
     def __init__(self, path):
@@ -124,7 +124,11 @@ class Storage:
                 instance_id TEXT PRIMARY KEY REFERENCES source_instances(id) ON DELETE CASCADE,
                 settings_path TEXT NOT NULL UNIQUE, previous BLOB NOT NULL, command TEXT NOT NULL
             )""")
-            self._conn.execute("PRAGMA user_version = 4")
+            columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(source_instances)")}
+            if "position" not in columns:
+                self._conn.execute("ALTER TABLE source_instances ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
+                self._conn.execute("UPDATE source_instances SET position = rowid")
+            self._conn.execute("PRAGMA user_version = 5")
             self._conn.commit()
         except Exception:
             self._conn.rollback()
@@ -219,7 +223,7 @@ class Storage:
         """Internal records; callers must strip encrypted credential blobs for public output."""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM source_instances ORDER BY rowid").fetchall()
+                "SELECT * FROM source_instances ORDER BY position, rowid").fetchall()
         return [{**dict(row), "enabled": bool(row["enabled"]),
                  "config": json.loads(row["config"])} for row in rows]
 
@@ -229,10 +233,11 @@ class Storage:
                 if self.configuration_marker() is not None:
                     return
                 self._conn.executemany(
-                    "INSERT INTO source_instances (id, type, name, enabled, config, credential) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO source_instances (id, type, name, enabled, config, credential, position) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     [(record["id"], record["type"], record["name"], record["enabled"],
-                      json.dumps(record["config"]), record["credential"]) for record in records])
+                      json.dumps(record["config"]), record["credential"], position)
+                     for position, record in enumerate(records)])
                 self._conn.execute(
                     "INSERT INTO configuration_meta (name, value) VALUES ('vault_check', ?)",
                     (vault_check,))
@@ -261,12 +266,31 @@ class Storage:
                     if any(record["type"] == "fake" or row["type"] == "fake" for row in others):
                         raise ValueError("disable demo sources before enabling live sources")
                 self._conn.execute(
-                    "INSERT INTO source_instances (id, type, name, enabled, config, credential, revision) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET "
+                    "INSERT INTO source_instances (id, type, name, enabled, config, credential, revision, position) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(position), -1) + 1 FROM source_instances)) "
+                    "ON CONFLICT(id) DO UPDATE SET "
                     "name=excluded.name, enabled=excluded.enabled, config=excluded.config, "
                     "credential=excluded.credential, revision=excluded.revision",
                     (record["id"], record["type"], record["name"], record["enabled"],
                      json.dumps(record["config"]), record["credential"], expected_revision + 1))
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def reorder_source_instances(self, order, expected_order):
+        """Save a complete sequence atomically, rejecting stale browser lists."""
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                current = [row["id"] for row in self._conn.execute(
+                    "SELECT id FROM source_instances ORDER BY position, rowid")]
+                if current != expected_order:
+                    raise ConfigurationConflict("account list changed; reload before reordering")
+                if len(order) != len(current) or set(order) != set(current):
+                    raise ValueError("order must include every account exactly once")
+                self._conn.executemany("UPDATE source_instances SET position = ? WHERE id = ?",
+                                       enumerate(order))
                 self._conn.commit()
             except Exception:
                 self._conn.rollback()

@@ -290,6 +290,11 @@ class ApiTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             ApiServer("127.0.0.1", 0, self.storage, "")
 
+    def test_second_server_cannot_share_listening_port(self):
+        with self.assertRaises(OSError):
+            duplicate = ApiServer("127.0.0.1", self.api.actual_port, self.storage, "other-token")
+            self.addCleanup(duplicate.stop)
+
     def test_storage_failure_returns_generic_error(self):
         with patch.object(self.storage, "latest_snapshots", side_effect=RuntimeError("private")):
             with self.assertLogs("presto_ai_dash.api", level="ERROR"):

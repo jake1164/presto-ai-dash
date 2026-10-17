@@ -158,6 +158,18 @@ class SourceConfiguration:
             self.changed.set()
             return next(row for row in self.list_sources()["sources"] if row["id"] == record_id)
 
+    def reorder(self, data):
+        if not isinstance(data, dict) or set(data) != {"order", "expected_order"}:
+            raise ValueError("reorder requires order and expected_order")
+        for order in (data["order"], data["expected_order"]):
+            if (not isinstance(order, list) or
+                    any(not isinstance(value, str) for value in order) or
+                    len(order) != len(set(order))):
+                raise ValueError("account order must be a list of unique IDs")
+        with self._edit_lock:
+            self.storage.reorder_source_instances(data["order"], data["expected_order"])
+            return self.list_sources()
+
     def delete(self, instance_id, revision):
         if type(revision) is not int or revision < 1:
             raise ValueError("reload the source before deleting it")

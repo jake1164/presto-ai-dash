@@ -27,6 +27,17 @@ input[type=checkbox] { accent-color: #7ce6da; width: 18px; height: 18px; }
 #login-form button { margin-top: 20px; }
 .source { padding: 16px 0; border-bottom: 1px solid #2a3b53; }
 .source strong { overflow-wrap: anywhere; }
+.source-head strong { flex: 1; min-width: 0; }
+.source-enabled { margin: 0; white-space: nowrap; cursor: pointer; min-height: 44px; }
+.source-enabled input { cursor: pointer; flex-shrink: 0; }
+.source.is-disabled .source-head strong { color: #91a3b9; }
+.order-controls { display: flex; gap: 6px; }
+.drag-handle, .move-account { background: #23344c; color: #c4d6eb; padding: 8px 12px; min-width: 40px; min-height: 40px; }
+.drag-handle { cursor: grab; touch-action: none; font-size: 1.3rem; }
+.move-account:disabled { cursor: default; opacity: .3; }
+.source.dragging { background: #20354a; outline: 2px solid #7ce6da; outline-offset: 4px; opacity: .8; }
+.source.dragging .drag-handle { cursor: grabbing; }
+#source-list[aria-busy=true] { opacity: .7; pointer-events: none; }
 .source p { margin: 7px 0 0; font-size: .9rem; }
 .badge { color: #7ce6da; font-size: .85rem; }
 #message { min-height: 1.5em; margin: 18px 0 0; color: #7ce6da; }
@@ -38,3 +49,4 @@ main > .panel { min-width: 0; }
 .quota.stale { border-color: #b1c2d7; }
 .quota.stale progress { opacity: .4; }
 @media (max-width: 760px) { main { grid-template-columns: 1fr; } body { padding: 18px; } header { align-items: flex-start; } }
+@media (max-width: 600px) { .source-head { gap: 8px; flex-wrap: wrap; } .source-head strong { flex-basis: calc(100% - 56px); } .source-enabled { margin-left: 48px; } }

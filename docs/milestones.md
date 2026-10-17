@@ -126,6 +126,57 @@ so a chained prior status line produced no output. `_git_bash()` now walks up fr
 `build/`, `.uv-cache/`, `__pycache__`). Local data, keys, backups, and the virtualenv
 were kept. README and limitations refreshed to match the current state.
 
+## Account ordering checkpoint — 2026-10-17
+
+The admin account list now supports drag grips, up/down buttons, and arrow
+keys on a focused grip. Order saves atomically in SQLite schema v5, survives
+restarts, and follows through to both Presto Home and the account carousel on
+the next successful poll. Disabled accounts retain their position, new ones
+append, and stale reorder requests return 409. Ordering leaves source revisions,
+credentials, and in-flight observations intact. Older databases retain their
+existing sequence during migration.
+
+All **299 host tests pass**. Browser checks verified dragging, keyboard moves,
+and persistence after a page reload; the live PSL showed the reordered Home
+and first account card. Test moves were restored to the original order. Physical
+device deployment remains with the user; the updated `presto/home.py` is needed
+for Home to follow the saved order instead of grouping quota accounts first.
+
+The admin list also has an Enabled checkbox on each row. Toggling it saves
+immediately without opening the editor and retains the source's settings,
+key, history, and position. Browser checks verified disabling, persistence
+after reload, and re-enabling; PSL hid the source on its next poll. All 299
+host tests pass.
+
+Duplicate-daemon follow-up: a background verification daemon remained running
+when the VS Code profile started another. Both could bind 8787/8788 because
+Windows permits overlapping listeners with `SO_REUSEADDR`. The extra background
+process was stopped, preserving the VS Code daemon and PSL. API/admin servers
+now use exclusive Windows socket binding and disable shared-port reuse. Two
+regression tests reject duplicate status/admin listeners; all **301 tests pass**,
+including restart/session persistence checks. PSL continues receiving live data.
+
+## Shared app and explicit USB sync checkpoint — 2026-10-17
+
+PSL already ran the real device App and renderer. The remaining drift was the
+physical device's uploaded copy. One public source inventory now drives the
+PSL loader and USB deployment; PSL executes a frozen source snapshot, bypassing
+bytecode caches, and shows its revision plus the dated last USB verification.
+Source changes invalidate a prior matching check. New modules join automatically;
+removed helpers are detected and retired from the device import path.
+
+VS Code tasks **Sync Presto** and **Check Presto sync** use an explicit USB port.
+Sync stages and hashes all app files before replacement, rolls back ordinary
+write/rename failures, verifies installed hashes, and relaunches AI Dash. Device
+config/secrets and firmware `/main.py` are excluded. OS locking prevents overlapping
+USB operations. No automatic save-to-device behavior was added.
+
+All **318 host tests pass**, including source selection, snapshot loading, drift,
+private-file preservation, failed staging, rollback, relaunch failures and locking.
+The actual hash-only COM3 check succeeded and found only `home.py` different;
+no app files were uploaded. AI Dash was relaunched. The revision/drift footer and
+live Home were visually verified. Explicit deployment remains with the user.
+
 ## Milestone 1 detail
 
 Acceptance criterion from the plan:

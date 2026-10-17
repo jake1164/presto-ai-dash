@@ -1,0 +1,33 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Sync Presto",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "windows": { "command": "${workspaceFolder}/.venv/Scripts/python.exe" },
+      "args": ["${workspaceFolder}/tools/presto_device.py", "sync", "--port", "${input:prestoPort}"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "runOptions": { "instanceLimit": 1 }
+    },
+    {
+      "label": "Check Presto sync",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "windows": { "command": "${workspaceFolder}/.venv/Scripts/python.exe" },
+      "args": ["${workspaceFolder}/tools/presto_device.py", "check", "--port", "${input:prestoPort}"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "runOptions": { "instanceLimit": 1 }
+    }
+  ],
+  "inputs": [
+    {
+      "id": "prestoPort",
+      "type": "promptString",
+      "description": "Presto USB port (sync/check restarts AI Dash)",
+      "default": "COM3"
+    }
+  ]
+}

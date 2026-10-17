@@ -12,6 +12,9 @@ to the 480x480 panel. Output: one PNG per screen, manifest.json and index.html
 
 import argparse
 import html
+import importlib.abc
+import importlib.machinery
+import importlib.util
 import json
 import os
 import re
@@ -21,9 +24,39 @@ from urllib.request import Request, urlopen
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
+if os.path.dirname(HERE) not in sys.path:
+    sys.path.append(os.path.dirname(HERE))
+from presto_bundle import app_files, snapshot  # noqa: E402
+
 PRESTO_DIR = os.path.join(REPO_ROOT, "presto")
 DEFAULT_OUT = os.path.join(REPO_ROOT, ".preview")
 PAYLOADS = ("sample", "live", "demo")
+
+
+class _AppSourceLoader(importlib.machinery.SourceFileLoader):
+    """Execute frozen source bytes, never timestamp-based .pyc cache entries."""
+    def __init__(self, name, path, data):
+        super().__init__(name, str(path))
+        self.data = data
+
+    def get_code(self, fullname):
+        return self.source_to_code(self.data, self.path)
+
+
+class _AppImports(importlib.abc.MetaPathFinder):
+    def __init__(self):
+        self.sources = {}
+
+    def find_spec(self, fullname, path=None, target=None):
+        source = self.sources.get(fullname)
+        if source:
+            filename, data = source
+            return importlib.util.spec_from_file_location(fullname, filename,
+                loader=_AppSourceLoader(fullname, filename, data))
+        return None
+
+
+_APP_IMPORTS = _AppImports()
 
 
 def _load_app_modules(real_sleep=False):
@@ -34,7 +67,27 @@ def _load_app_modules(real_sleep=False):
     # Appended, as in the tests, so presto/secrets.py never shadows stdlib.
     if PRESTO_DIR not in sys.path:
         sys.path.append(PRESTO_DIR)
-    import main
+    # Resolve the entry from the deployment inventory, not an unrelated `main`
+    # cached elsewhere on sys.path. All helper code still imports from presto/.
+    inventory = app_files()
+    bundle = snapshot()
+    entry = next(path for path, target in inventory.items() if target == "/ai_dash_files/ai_dash_app.py")
+    sources = {path.stem: (path, bundle["files"][target]) for path, target in inventory.items()
+               if path != entry and target.startswith("/ai_dash_files/")}
+    for name, (path, _) in sources.items():
+        loaded = sys.modules.get(name)
+        if loaded is not None:
+            if os.path.realpath(getattr(loaded, "__file__", "")) != os.path.realpath(path):
+                raise RuntimeError("app module name conflicts with another module: " + name)
+            sys.modules.pop(name)
+    _APP_IMPORTS.sources = sources
+    if _APP_IMPORTS not in sys.meta_path:
+        sys.meta_path.insert(0, _APP_IMPORTS)
+    spec = importlib.util.spec_from_file_location("_presto_preview_app", entry,
+        loader=_AppSourceLoader("_presto_preview_app", entry, bundle["files"][inventory[entry]]))
+    main = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(main)
+    main.__presto_revision__ = bundle["revision"]
     import net
     return main, net
 
@@ -120,7 +173,8 @@ def render(payload="sample", out=DEFAULT_OUT, stale=False, offline=False, muted=
             break  # Every card shows the same connection screen.
 
     state = {"payload": payload if payload in PAYLOADS else os.path.basename(payload),
-             "stale": stale, "offline": offline, "muted": muted}
+             "stale": stale, "offline": offline, "muted": muted,
+             "code_revision": main.__presto_revision__}
     with open(os.path.join(out, "manifest.json"), "w") as handle:
         json.dump({"state": state, "screens": screens}, handle, indent=2)
     with open(os.path.join(out, "index.html"), "w", encoding="utf-8") as handle:

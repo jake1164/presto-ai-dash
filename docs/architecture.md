@@ -15,6 +15,14 @@ authenticated fake-data polling, and recovery are verified in `milestones.md`.
 Trend calculations remain later work. Static preview mode remains available
 through `STATIC_DEMO`.
 
+The simulator is a host adapter around the same `presto/` App and renderer.
+`tools/presto_bundle.py` is the shared source/deployment inventory; no separate
+simulator UI exists. The explicit `tools/presto_device.py` USB command copies
+and verifies those app bytes on the device while preserving its configuration
+and firmware. PSL reports its source revision and the dated last USB check,
+so working-source changes after deployment are visible. Code parity does not
+assert identical Wi-Fi, memory, CPU, sound or LED hardware behavior.
+
 ```text
                  +-------------------+
                  |  Pimoroni Presto  |

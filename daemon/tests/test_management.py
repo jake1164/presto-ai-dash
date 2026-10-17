@@ -57,6 +57,59 @@ class ManagementBase(unittest.TestCase):
 
 
 class EncryptedConfigurationTests(ManagementBase):
+    def test_account_order_survives_restart_edits_and_new_accounts(self):
+        self.disable_fake()
+        first = self.add_litellm("First", enabled=True)
+        second = self.add_litellm("Second", enabled=True)
+        original = [row["id"] for row in self.manager.list_sources()["sources"]]
+        order = [second["id"], *[key for key in original if key != second["id"]]]
+        before = {r["id"]: r for r in self.storage.source_instances()}
+        self.manager.reorder({"order": order, "expected_order": original})
+        after = {r["id"]: r for r in self.storage.source_instances()}
+        for key in before:
+            self.assertEqual(before[key]["revision"], after[key]["revision"])
+            self.assertEqual(before[key]["credential"], after[key]["credential"])
+        payload = self.manager.status_payload()
+        self.assertEqual([r["id"] for r in payload["sources"]], [second["id"], first["id"]])
+        self.assertEqual([r["id"] for r in payload["cards"]], ["dash", second["id"], first["id"]])
+        # Ordering alone must not discard a provider result that is in flight.
+        self.manager.save_observation(before[first["id"]], SourceSnapshot(first["id"], "ok"))
+        self.assertIn(first["id"], self.storage.latest_snapshots())
+        self.manager.save({"revision": first["revision"], "name": "Renamed"}, first["id"])
+        added = self.add_litellm("Appended")
+        self.storage.close()
+        self.storage = Storage(self.database)
+        self.addCleanup(self.storage.close)
+        restarted = SourceConfiguration(self.storage, self.config)
+        self.assertEqual([r["id"] for r in restarted.list_sources()["sources"]], order + [added["id"]])
+
+    def test_reorder_rejects_invalid_or_stale_lists_atomically(self):
+        self.add_litellm()
+        original = [r["id"] for r in self.manager.list_sources()["sources"]]
+        for order in (original[:-1], original + ["unknown"], [original[0]] * len(original), [None], "bad"):
+            with self.subTest(order=order), self.assertRaises(ValueError):
+                self.manager.reorder({"order": order, "expected_order": original})
+            self.assertEqual([r["id"] for r in self.storage.source_instances()], original)
+        reversed_order = original[::-1]
+        self.manager.reorder({"order": reversed_order, "expected_order": original})
+        with self.assertRaises(ConfigurationConflict):
+            self.manager.reorder({"order": original, "expected_order": original})
+        self.assertEqual([r["id"] for r in self.storage.source_instances()], reversed_order)
+        self.add_litellm("Added in another browser")
+        with self.assertRaises(ConfigurationConflict):
+            self.manager.reorder({"order": original, "expected_order": reversed_order})
+
+    def test_version_four_order_migration_preserves_existing_sequence(self):
+        self.add_litellm()
+        original = [r["id"] for r in self.storage.source_instances()]
+        with self.storage._conn:
+            self.storage._conn.execute("ALTER TABLE source_instances DROP COLUMN position")
+            self.storage._conn.execute("PRAGMA user_version = 4")
+        self.storage.close()
+        self.storage = Storage(self.database)
+        self.addCleanup(self.storage.close)
+        self.assertEqual([r["id"] for r in self.storage.source_instances()], original)
+
     def test_version_two_migration_preserves_configuration_credentials_and_history(self):
         row = self.add_litellm()
         self.storage.save_snapshot(SourceSnapshot(row["id"], "ok", metrics={"requests_today": 9}))
@@ -251,6 +304,29 @@ class EncryptedConfigurationTests(ManagementBase):
 
 
 class AdminHttpTests(ManagementBase):
+    def test_second_admin_server_cannot_share_listening_port(self):
+        with self.assertRaises(OSError):
+            duplicate = AdminServer(self.admin.actual_port, self.manager, "other-admin-token")
+            self.addCleanup(duplicate.stop)
+
+    def test_account_order_endpoint_auth_csrf_and_conflicts(self):
+        self.add_litellm()
+        original = [r["id"] for r in self.manager.list_sources()["sources"]]
+        data = {"order": original[::-1], "expected_order": original}
+        path = "/api/admin/source-order"
+        self.assertEqual(self.request(path, "PUT", data, token="device-token")[0], 401)
+        cookie, session, _ = self.login()
+        headers = {"Cookie": cookie, "Origin": self.base_url}
+        self.assertEqual(self.request(path, "PUT", data, token=None, headers=headers)[0], 403)
+        headers["X-CSRF-Token"] = session["csrf_token"]
+        status, _, result = self.request(path, "PUT", data, token=None, headers=headers)
+        self.assertEqual(status, 200)
+        self.assertEqual([r["id"] for r in result["sources"]], original[::-1])
+        self.assertNotIn("credential", json.dumps(result))
+        self.assertNotIn("test-provider-key", json.dumps(result))
+        self.assertEqual(self.request(path, "PUT", data)[0], 409)
+        self.assertEqual(self.request(path, "PUT", {"order": []})[0], 400)
+
     def setUp(self):
         super().setUp()
         self.admin = AdminServer(0, self.manager, "unit-secret-admin-token")

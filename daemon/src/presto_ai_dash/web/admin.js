@@ -3,6 +3,7 @@
   const element = (id) => document.getElementById(id);
   let csrfToken = "", unlocked = false, catalog = [], sources = [], editing = null;
   let busy = false;
+  let dragging = null;
   function message(text, error = false) {
     element("message").textContent = text;
     element("message").classList.toggle("error", error);
@@ -87,19 +88,160 @@
       message("This source type is unavailable. Restore its module or delete this source.", true);
     }
   }
+  async function saveOrder(order, focusId) {
+    const expected = sources.map(source => source.id);
+    if (order.every((id, index) => id === expected[index])) return;
+    busy = true;
+    element("source-list").setAttribute("aria-busy", "true");
+    message("Saving account order...");
+    try {
+      const data = await request("/api/admin/source-order", "PUT", {order, expected_order: expected});
+      catalog = data.types; sources = data.sources;
+      message("Account order saved. Presto will update on its next poll.");
+    } catch (error) {
+      if (unlocked) {
+        try { await reload(); } catch (_) { /* Keep the last confirmed list. */ }
+      }
+      message(error.message + ". Could not confirm the move; showing the last confirmed account order.", true);
+    } finally {
+      busy = false;
+      element("source-list").removeAttribute("aria-busy");
+      renderList();
+      focusAccount(focusId);
+    }
+  }
+  function focusAccount(id, action = "reorder") {
+    const row = [...element("source-list").children].find(row => row.dataset.id === id);
+    row?.querySelector('[data-action="' + action + '"]')?.focus({preventScroll: true});
+  }
+  async function setEnabled(source, checkbox) {
+    if (busy) { checkbox.checked = source.enabled; return; }
+    const enabled = checkbox.checked;
+    busy = true; checkbox.disabled = true;
+    element("source-list").setAttribute("aria-busy", "true");
+    message("Saving source status...");
+    try {
+      const saved = await request("/api/admin/sources/" + source.id, "PUT",
+        {enabled, revision: source.revision});
+      sources = sources.map(item => item.id === saved.id ? saved : item);
+      message(source.name + (enabled ? " enabled." : " disabled. Settings and key kept.") +
+        " Presto will update on its next poll.");
+    } catch (error) {
+      if (unlocked) {
+        try { await reload(); } catch (_) { /* Keep the last confirmed state. */ }
+      }
+      message(error.message + ". Showing the last confirmed source status.", true);
+    } finally {
+      busy = false; element("source-list").removeAttribute("aria-busy");
+      renderList(); focusAccount(source.id, "enabled");
+    }
+  }
+  function moveAccount(id, direction) {
+    if (busy) return;
+    const order = sources.map(source => source.id), index = order.indexOf(id);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= order.length) return;
+    [order[index], order[target]] = [order[target], order[index]];
+    saveOrder(order, id);
+  }
+  function updateDrag() {
+    const drag = dragging;
+    if (!drag?.active) return;
+    if (drag.y < 80) window.scrollBy(0, -12);
+    else if (drag.y > window.innerHeight - 80) window.scrollBy(0, 12);
+    const target = document.elementFromPoint(drag.x, drag.y)?.closest(".source");
+    if (target && target !== drag.row) {
+      const box = target.getBoundingClientRect();
+      target.parentNode.insertBefore(drag.row,
+        drag.y < box.top + box.height / 2 ? target : target.nextSibling);
+    }
+    drag.frame = requestAnimationFrame(updateDrag);
+  }
+  function finishDrag(cancel = false) {
+    const drag = dragging;
+    if (!drag) return;
+    dragging = null; cancelAnimationFrame(drag.frame);
+    const list = element("source-list");
+    if (list.hasPointerCapture(drag.pointerId)) list.releasePointerCapture(drag.pointerId);
+    drag.row.classList.remove("dragging");
+    busy = false;
+    if (cancel) { renderList(); focusAccount(drag.row.dataset.id); message("Account move cancelled."); return; }
+    const order = [...element("source-list").children].map(row => row.dataset.id);
+    saveOrder(order, drag.row.dataset.id);
+  }
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && dragging) { event.preventDefault(); finishDrag(true); }
+  });
+  element("source-list").addEventListener("pointermove", event => {
+    if (!dragging || event.pointerId !== dragging.pointerId) return;
+    dragging.x = event.clientX; dragging.y = event.clientY;
+    if (!dragging.active && Math.abs(event.clientY - dragging.startY) > 5) {
+      dragging.active = true; dragging.row.classList.add("dragging"); updateDrag();
+    }
+  });
+  element("source-list").addEventListener("pointerup", event => {
+    if (event.pointerId === dragging?.pointerId) finishDrag();
+  });
+  element("source-list").addEventListener("pointercancel", event => {
+    if (event.pointerId === dragging?.pointerId) finishDrag(true);
+  });
+  element("source-list").addEventListener("lostpointercapture", () => { if (dragging) finishDrag(true); });
   function renderList() {
-    const list = element("source-list"); list.replaceChildren();
+    const list = element("source-list"), active = document.activeElement;
+    const focusedId = list.contains(active) ? active.closest(".source")?.dataset.id : null;
+    const focusedAction = active?.dataset.action;
+    list.replaceChildren();
     if (!sources.length) {
       const empty = document.createElement("p"); empty.textContent = "No sources configured. Add your first source.";
       list.append(empty);
     }
-    for (const source of sources) {
+    for (const [index, source] of sources.entries()) {
       const row = document.createElement("div"); row.className = "source";
+      row.classList.toggle("is-disabled", !source.enabled);
+      row.dataset.id = source.id;
       const head = document.createElement("div"); head.className = "source-head";
+      const handle = document.createElement("button"); handle.className = "drag-handle";
+      handle.dataset.action = "reorder";
+      handle.type = "button"; handle.textContent = "\u283f";
+      handle.setAttribute("aria-label", "Reorder " + source.name + ", position " + (index + 1) +
+        " of " + sources.length + ". Drag or use Up and Down arrow keys.");
+      handle.title = "Drag to reorder, or use Up / Down arrow keys";
+      handle.disabled = sources.length < 2;
+      handle.addEventListener("keydown", event => {
+        if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+          event.preventDefault(); moveAccount(source.id, event.key === "ArrowUp" ? -1 : 1);
+        }
+      });
+      handle.addEventListener("pointerdown", event => {
+        if (busy || event.button !== 0 || sources.length < 2) return;
+        event.preventDefault(); handle.focus(); busy = true;
+        dragging = {row, handle, pointerId: event.pointerId, x: event.clientX, y: event.clientY,
+          startY: event.clientY, active: false};
+        // Capture on the stable list: moving a captured row would lose capture.
+        element("source-list").setPointerCapture(event.pointerId);
+      });
       const name = document.createElement("strong"); name.textContent = source.name;
+      const enabledLabel = document.createElement("label"); enabledLabel.className = "check source-enabled";
+      const enabled = document.createElement("input"); enabled.type = "checkbox";
+      enabled.checked = source.enabled; enabled.dataset.action = "enabled";
+      enabled.setAttribute("aria-label", "Enable " + source.name);
+      enabled.addEventListener("change", () => setEnabled(source, enabled));
+      enabledLabel.append(enabled, document.createTextNode("Enabled"));
+      const ordering = document.createElement("div"); ordering.className = "order-controls";
+      for (const [direction, label, text] of [[-1, "up", "\u2191"], [1, "down", "\u2193"]]) {
+        const move = document.createElement("button"); move.type = "button";
+        move.className = "move-account"; move.textContent = text;
+        move.dataset.action = label;
+        move.title = "Move " + source.name + " " + label;
+        move.setAttribute("aria-label", move.title);
+        move.disabled = direction < 0 ? index === 0 : index === sources.length - 1;
+        move.addEventListener("click", () => moveAccount(source.id, direction));
+        ordering.append(move);
+      }
       const button = document.createElement("button"); button.textContent = "Edit";
+      button.dataset.action = "edit";
       button.addEventListener("click", () => { if (!busy) openEditor(source); });
-      head.append(name, button);
+      head.append(handle, name, enabledLabel, ordering, button);
       const detail = document.createElement("p");
       const type = catalog.find((item) => item.id === source.type);
       const keyStatus = source.has_key ? "key stored" :
@@ -169,9 +311,11 @@
       }
       list.append(row);
     }
+    if (focusedId && focusedAction) focusAccount(focusedId, focusedAction);
   }
-  async function reload() {
+  async function reload(poll = false) {
     const data = await request("/api/admin/sources");
+    if (poll && busy) return;
     catalog = data.types; sources = data.sources; renderList();
   }
   function lock() {
@@ -256,7 +400,7 @@
     } catch (error) { message(error.message, true); }
     finally { busy = false; }
   });
-  setInterval(() => { if (unlocked && !busy) reload().catch((error) => message(error.message, true)); }, 10000);
+  setInterval(() => { if (unlocked && !busy) reload(true).catch((error) => message(error.message, true)); }, 10000);
   async function restoreLogin() {
     busy = true; element("unlock").disabled = true;
     try {

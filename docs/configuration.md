@@ -36,6 +36,19 @@ connection settings, an enabled flag, and an optional encrypted key. For
 example, two LiteLLM instances can use different gateways or keys. Their usage
 is reported separately because two keys may observe overlapping traffic.
 
+Drag an account by its grip to reorder it. The up/down buttons also move it
+one place; a focused grip accepts the Up/Down arrow keys. The order saves
+automatically in SQLite and survives restarts. Presto Home and the account
+swipe cards follow it on their next successful poll, with Home always first.
+Disabled accounts keep their saved position but are hidden on Presto. New
+accounts are appended. Press Escape to cancel a drag. If another browser
+changes the account list or order, a conflicting move reloads the saved list.
+
+Each account row has an **Enabled** checkbox. Uncheck it to stop collection and
+hide the account on Presto without deleting it. Check it again to resume.
+Changes save immediately; the settings, stored key, history, and display
+position are retained. Presto updates on its next successful poll.
+
 Disable the fake source before enabling a live source. Only one demo instance
 can be enabled, and it cannot run with live sources. Fake remains an available
 **demo/test** connector for hardware and connection checks. Delete its saved
@@ -93,7 +106,8 @@ Deleting every source does not re-import the defaults on restart.
 `--check` validates bootstrap TOML; it does not unlock or validate the database.
 Remove provider keys from plaintext TOML after importing them.
 
-SQLite schema version 4 adds Claude export/setup storage; version 3 added
+SQLite schema version 5 adds account positions, preserving the existing order
+during migration. Version 4 added Claude export/setup storage; version 3 added
 browser sessions to the version 2 configuration
 tables; existing source instances, encrypted credentials, and history are preserved.
 Only credential values are encrypted. Ordinary source settings and usage
@@ -138,6 +152,7 @@ The admin port serves the page plus:
 | GET | `/api/admin/sources` | Connector field descriptions and saved instances; only `has_key` is returned |
 | POST | `/api/admin/sources` | Add an instance |
 | PUT | `/api/admin/sources/{id}` | Edit, replace/remove key, enable/disable |
+| PUT | `/api/admin/source-order` | Save a complete account order, including disabled accounts |
 | DELETE | `/api/admin/sources/{id}` | Delete the instance and its saved key |
 | POST | `/api/admin/session` | Exchange the current admin bearer token for a seven-day browser session |
 | GET | `/api/admin/session` | Restore a valid cookie session and obtain its CSRF token |
@@ -149,6 +164,10 @@ Cookie-authenticated mutations also require the exact page Origin and the
 require JSON and are capped at 64 KiB. Host/Origin checks, absence of cross-origin permissions, and the
 separate listener protect browser access. Updates/deletes require the current
 `revision`; conflicting edits return 409 and require a reload.
+Reordering accepts `order` and `expected_order` arrays of account IDs. Each
+account must appear exactly once in `order`; `expected_order` must match the
+current sequence, otherwise the request returns 409. A reorder is atomic and
+does not change account revisions or discard in-flight provider readings.
 
 The cookie is host-only, restricted to `/api/admin`, and named for the admin
 port. The loopback listener uses HTTP, so it does not set the HTTPS-only Secure
@@ -162,8 +181,8 @@ In managed live mode, the device endpoint returns Home plus one swipe card per
 enabled source instance and a `sources` array of independent measurements.
 Multiple accounts of one type have separate cards and usage. With
 `STATIC_DEMO = False`, the Presto polls the endpoint and groups each quota
-account's actual windows into stacked, labelled bars on Home. Quota accounts
-appear before local/gateway activity. Additional accounts/windows scroll; swipe
+account's actual windows into stacked, labelled bars on Home. All accounts
+follow the saved admin order. Additional accounts/windows scroll; swipe
 cards show details and UTC resets. Names, enable/disable changes, and accounts
 appear on the next successful poll. Refreshes preserve the selected card by
 instance ID; removing it returns to Home. Static samples remain DEMO.

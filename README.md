@@ -224,6 +224,12 @@ frame number and LED colour, and in Playwright `await presto.gesture("left")`
 without a browser (`--payload live|sample|demo|file.json`, `--stale`,
 `--offline`, `--muted`).
 
+Edit the app only in `presto/`: PSL runs these source files, and the **Sync
+Presto** VS Code task installs the same files on the physical device. **Check
+Presto sync** compares actual device file hashes. PSL shows its source revision
+and the dated result of the last USB check; saving app code after a successful
+check marks the device as needing sync. See [the sync workflow](docs/setup.md#keeping-psl-and-the-device-in-sync).
+
 Not emulated: sound, LED hardware beyond a glow hint, memory, CPU speed and
 Wi-Fi joining. Non-ASCII text draws blank (the device remaps some accented
 characters).

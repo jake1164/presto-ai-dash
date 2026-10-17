@@ -3,6 +3,8 @@
 import hmac
 import json
 import logging
+import os
+import socket
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
@@ -64,11 +66,23 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None):
     return StatusHandler
 
 
+class _ExclusiveHTTPServer(ThreadingHTTPServer):
+    # On Windows SO_REUSEADDR lets two daemons listen on the same port.
+    # Keep normal restart behavior elsewhere, without allowing shared listeners.
+    allow_reuse_address = os.name != "nt"
+    allow_reuse_port = False
+
+    def server_bind(self):
+        if os.name == "nt":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 class ApiServer:
     def __init__(self, host, port, storage, shared_token, source_ids=None,
                  status_provider=None, handler_class=None):
         self.host = host
-        self._server = ThreadingHTTPServer(
+        self._server = _ExclusiveHTTPServer(
             (host, port), handler_class or make_handler(
                 storage, shared_token, source_ids, status_provider))
         self._server.daemon_threads = False

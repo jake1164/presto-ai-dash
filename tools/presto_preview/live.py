@@ -30,6 +30,7 @@ if HERE not in sys.path:
 
 import render  # noqa: E402
 from framebuffer import Framebuffer, encode_png  # noqa: E402
+from presto_bundle import sync_status  # noqa: E402
 
 WATCHED = (render.PRESTO_DIR, HERE)
 
@@ -103,6 +104,7 @@ class Runner(object):
         self._stop = None
         self._thread = None
         self._restart_lock = threading.Lock()
+        self.code_revision = None
 
     def publish(self, pixels, led, error=None):
         with self.cond:
@@ -116,7 +118,9 @@ class Runner(object):
         with self.cond:
             self.cond.wait_for(lambda: self.frame != after, timeout)
             return {"frame": self.frame, "led": self.led, "error": self.error,
-                    "demo": self.demo, "network_fail": self.network_fail}
+                    "demo": self.demo, "network_fail": self.network_fail,
+                    "code_revision": self.code_revision,
+                    "device_sync": sync_status(self.code_revision)}
 
     def stop(self):
         if self._thread:
@@ -136,6 +140,7 @@ class Runner(object):
     def _run(self, stop):
         try:
             main, net = render._load_app_modules(real_sleep=True)
+            self.code_revision = main.__presto_revision__
             from ui import Palette, draw_boot
             display = Framebuffer()
             presto = LivePresto(display, stop, self.publish)
@@ -183,18 +188,25 @@ def watch(runner):
             for name in os.listdir(folder):
                 if name.endswith(".py"):
                     try:
-                        stamps[name] = os.stat(os.path.join(folder, name)).st_mtime
+                        path = os.path.join(folder, name)
+                        stat = os.stat(path)
+                        stamps[path] = (stat.st_mtime_ns, stat.st_size)
                     except OSError:
                         pass
         return stamps
 
     seen = mtimes()
+    receipt_seen = sync_status(runner.code_revision)
     while True:
         time.sleep(0.5)
         current = mtimes()
         if current != seen:
             seen = current
             runner.restart()
+        receipt = sync_status(runner.code_revision)
+        if receipt != receipt_seen:
+            receipt_seen = receipt
+            runner.publish(runner.pixels, runner.led, runner.error)
 
 
 def make_handler(runner):
@@ -288,6 +300,7 @@ button { font: inherit; background: #21262d; color: #c9d1d9; border: 1px solid #
 <div class="hint">Drag to swipe or scroll &middot; click to tap &middot; hold 0.7s to mute.
   Keys: &larr; &rarr; cards, &uarr; &darr; scroll, Enter tap, M mute.</div>
 <div id="status">connecting&hellip;</div>
+<div id="code-status" class="hint" role="status">Shared app code: checking&hellip;</div>
 <script>
 (() => {
   const screen = document.getElementById("screen");
@@ -371,6 +384,15 @@ button { font: inherit; background: #21262d; color: #c9d1d9; border: 1px solid #
         document.getElementById("netfail").checked = state.network_fail;
         status.textContent = (state.demo ? "static demo" : "live daemon") + " · frame " + frame +
           (state.network_fail ? " · network failing" : "");
+        const sync = state.device_sync || {status: "not_checked"};
+        const revision = (state.code_revision || "unknown").slice(0, 12);
+        const labels = {not_checked: "Device not checked — run Check Presto sync",
+          unverified: "USB sync not verified — run Check Presto sync",
+          different: "Device code differs — run Sync Presto",
+          source_changed: "App changed since USB verification — run Sync Presto",
+          matched: "Device files matched at last USB verification"};
+        document.getElementById("code-status").textContent = "Shared app " + revision + " · " +
+          labels[sync.status] + (sync.checked_at ? " · " + new Date(sync.checked_at).toLocaleString() : "");
       } catch (e) {
         if (offlineUrl) screen.src = offlineUrl;
         frame = -1;  // redraw from the live frame when the server returns
@@ -431,7 +453,16 @@ def main_cli(argv=None):
     runner.restart()
     threading.Thread(target=watch, args=(runner,), daemon=True).start()
     # Loopback only: the live dash shows account names and quotas.
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(runner))
+    # Use the same exclusive binding as the daemon: no overlapping PSL processes.
+    daemon_src = os.path.join(render.REPO_ROOT, "daemon", "src")
+    if daemon_src not in sys.path:
+        sys.path.append(daemon_src)
+    from presto_ai_dash.api import _ExclusiveHTTPServer
+    try:
+        server = _ExclusiveHTTPServer(("127.0.0.1", args.port), make_handler(runner))
+    except OSError:
+        runner.stop()
+        raise SystemExit("PSL is already running or its port is unavailable; use the existing preview.")
     server.daemon_threads = True
     url = "http://127.0.0.1:%d/" % args.port
     print("Presto live preview on " + url, flush=True)

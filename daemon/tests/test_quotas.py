@@ -276,6 +276,15 @@ class QuotaDeviceTests(unittest.TestCase):
         self.assertIn("Monthly credits unavailable", [text for text, *_ in display.rows])
         self.assertFalse(any(args[3] == 5 and color != PANEL for color, args in display.rectangles))
 
+    def test_managed_home_keeps_saved_order_across_local_and_quota_accounts(self):
+        report, _ = OllamaCloudSource().parse(cloud_response(), NOW)
+        sources = [{"id": "local", "name": "Local", "type": "ollama", "status": "ok"},
+                   {"id": "cloud", "name": "Cloud", "type": "ollama_cloud", "status": "ok",
+                    "quota": present_quota(report, NOW)}]
+        for order in (sources, sources[::-1]):
+            rows = source_rows({"card_order": "accounts", "sources": order})
+            self.assertEqual([row["id"] for row in rows], [source["id"] for source in order])
+
 
 class ReportingRedirectTests(unittest.TestCase):
     def test_read_only_client_does_not_forward_key_to_redirect_target(self):

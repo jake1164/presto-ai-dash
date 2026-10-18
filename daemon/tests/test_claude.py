@@ -12,7 +12,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from presto_ai_dash.claude_export import normalized_export, helper_command
+from presto_ai_dash.claude_export import build_envelope, normalized_export, helper_command
+from presto_ai_dash.ingest import ingest
 from presto_ai_dash.management import ManagedCollector, SourceConfiguration
 from presto_ai_dash.models import SourceSnapshot
 from presto_ai_dash.quotas import present_quota
@@ -91,19 +92,20 @@ class ClaudeDatabaseTests(ManagementBase):
         return self.manager.configure_claude_export(row["id"], {"action": action, "revision": row["revision"]})
 
     def export(self, data=None, observed=NOW, row=None):
-        report, evidence = normalized_export(data or payload(), observed)
-        return self.storage.save_claude_export((row or self.row)["id"], report, evidence)
+        envelope = build_envelope(data or payload(), "fixture-host", client_time=observed)
+        return ingest(self.storage, (row or self.row)["id"], envelope, observed)
 
     def test_cached_redraw_preserves_observation_and_idle_reset_becomes_stale(self):
         self.export()
         self.export(observed=NOW + timedelta(minutes=10))
-        report = self.storage.claude_export(self.row["id"])
-        self.assertEqual(report["windows"][0]["observed_at"], NOW.isoformat())
+        report = self.storage.observation(self.row["id"])["report"]
+        self.assertEqual(datetime.fromisoformat(report["windows"][0]["observed_at"]), NOW)
         self.assertEqual(present_quota(report, NOW + timedelta(minutes=16))["windows"][0]["state"], "stale")
         changed = payload(); changed["context_window"]["total_output_tokens"] += 1
         self.export(changed, NOW + timedelta(minutes=20))
-        current = self.storage.claude_export(self.row["id"])
-        self.assertEqual(current["windows"][0]["observed_at"], (NOW + timedelta(minutes=20)).isoformat())
+        current = self.storage.observation(self.row["id"])["report"]
+        self.assertEqual(datetime.fromisoformat(current["windows"][0]["observed_at"]),
+                         NOW + timedelta(minutes=20))
         self.assertEqual(present_quota(current, NOW + timedelta(days=8))["windows"][0]["state"], "stale")
 
     def test_window_freshness_is_independent_without_response_markers(self):
@@ -111,9 +113,9 @@ class ClaudeDatabaseTests(ManagementBase):
         self.export(first)
         first["rate_limits"]["five_hour"]["used_percentage"] = 30
         self.export(first, NOW + timedelta(minutes=5))
-        windows = self.storage.claude_export(self.row["id"])["windows"]
-        self.assertEqual(windows[0]["observed_at"], (NOW + timedelta(minutes=5)).isoformat())
-        self.assertEqual(windows[1]["observed_at"], NOW.isoformat())
+        windows = self.storage.observation(self.row["id"])["report"]["windows"]
+        self.assertEqual(datetime.fromisoformat(windows[0]["observed_at"]), NOW + timedelta(minutes=5))
+        self.assertEqual(datetime.fromisoformat(windows[1]["observed_at"]), NOW)
 
     def test_export_and_collector_multiple_accounts_survive_restart(self):
         other = self.manager.save({"type": "claude", "name": "Claude work", "enabled": True,
@@ -185,8 +187,8 @@ class ClaudeDatabaseTests(ManagementBase):
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(b"5h 23.5%", result.stdout)
-        self.assertIsNotNone(self.storage.claude_export(self.row["id"]))
-        self.assertNotIn("private", json.dumps(self.storage.claude_export(self.row["id"])))
+        self.assertIsNotNone(self.storage.observation(self.row["id"])["report"])
+        self.assertNotIn("private", json.dumps(self.storage.observation(self.row["id"])["report"]))
 
     def test_prior_statusline_command_receives_original_input(self):
         prior_script = Path(self.temp.name) / "prior.py"
@@ -198,7 +200,7 @@ class ClaudeDatabaseTests(ManagementBase):
         result = subprocess.run(command.split() if os.name == "nt" else ["/bin/sh", "-c", command],
                                 input=json.dumps(payload()).encode(), stdout=subprocess.PIPE, timeout=10)
         self.assertEqual(result.stdout.strip(), b"kept:2.1.296")
-        self.assertIsNotNone(self.storage.claude_export(self.row["id"]))
+        self.assertIsNotNone(self.storage.observation(self.row["id"])["report"])
 
 
 class ClaudeAdminTests(unittest.TestCase):

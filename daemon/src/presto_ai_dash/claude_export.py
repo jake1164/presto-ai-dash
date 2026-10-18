@@ -2,14 +2,12 @@
 
 import argparse
 import base64
-from datetime import datetime, timezone
-import hashlib
 import json
-import math
 import os
 from pathlib import Path
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -18,59 +16,29 @@ import tempfile
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from presto_ai_dash.collectors.claude_statusline import MAX_INPUT, build_envelope, normalize
 from presto_ai_dash.credentials import load_cipher
-from presto_ai_dash.models import now_utc
-from presto_ai_dash.quotas import quota_report, quota_window
+from presto_ai_dash.ingest import ingest
+from presto_ai_dash.models import iso, now_utc
+from presto_ai_dash.quotas import quota_report
 from presto_ai_dash.storage import Storage
-
-WINDOWS = (("five_hour", "5h", 300), ("seven_day", "Weekly", 10080))
-MAX_INPUT = 65536
 
 
 def normalized_export(data, observed=None):
-    """Whitelist quota fields; fingerprints prevent cached redraws inventing freshness."""
-    if not isinstance(data, dict):
-        raise ValueError("invalid status-line input")
-    limits = data.get("rate_limits")
-    if limits is None:
-        return None  # Before a normal response: don't erase earlier telemetry.
-    if not isinstance(limits, dict):
-        raise ValueError("invalid quota fields")
+    """Whitelist quota fields; fingerprints prevent cached redraws inventing freshness.
+
+    A thin wrapper over the shared collector normalization: the daemon adds the
+    observation timestamp and report framing, the collector owns the parsing.
+    """
+    normalized = normalize(data)
+    if normalized is None:
+        return None
+    windows, evidence, _progress, version = normalized
     observed = observed or now_utc()
-    # Wall-clock/session duration and prompt IDs can change without a response.
-    # Use only API-response progress. Store hashes, never session identity.
-    markers = []
-    for section, keys in (("cost", ("total_api_duration_ms",)),
-                          ("context_window", ("total_input_tokens", "total_output_tokens"))):
-        value = data.get(section)
-        if isinstance(value, dict):
-            for key in keys:
-                marker = value.get(key)
-                if type(marker) in (int, float) and math.isfinite(marker) and marker >= 0:
-                    markers.append((section + "." + key, marker))
-    progress = [data.get("session_id") if isinstance(data.get("session_id"), str) else None,
-                markers] if markers else None
-    windows, evidence = [], {}
-    for key, label, minutes in WINDOWS:
-        value = limits.get(key)
-        if value is None:
-            window = quota_window(key, label, None, None, observed, minutes, state="unavailable")
-        else:
-            if not isinstance(value, dict):
-                raise ValueError("invalid quota window")
-            percent, reset = value.get("used_percentage"), value.get("resets_at")
-            if percent is None or type(reset) not in (int, float) or not math.isfinite(reset):
-                raise ValueError("incomplete quota window")
-            window = quota_window(key, label, percent, datetime.fromtimestamp(reset, timezone.utc),
-                                  observed, minutes)
-        windows.append(window)
-        signal = [window["state"], window["used_percent"], window["resets_at"],
-                  progress if window["state"] == "available" else None]
-        evidence[key] = hashlib.sha256(json.dumps(signal, sort_keys=True).encode()).hexdigest()
-    report = quota_report("anthropic", "Claude", windows, 900)
+    report = quota_report("anthropic", "Claude",
+                          [dict(window, observed_at=iso(observed)) for window in windows], 900)
     report["note"] = "Claude Code terminal export; idle readings become stale. VS Code panel coverage is unverified."
-    version = data.get("version")
-    if isinstance(version, str) and len(version) <= 64 and all(c.isdigit() or c in ".-abcdefghijklmnopqrstuvwxyz" for c in version):
+    if version is not None:
         report["collector_version"] = version
     return report, evidence
 
@@ -206,14 +174,15 @@ def main(argv=None):
                 except (OSError, subprocess.TimeoutExpired):
                     pass
         if len(raw) <= MAX_INPUT:
-            normalized = normalized_export(json.loads(raw.decode("utf-8-sig")))
-            if normalized:
-                report, evidence = normalized
-                storage.save_claude_export(args.instance, report, evidence)
+            envelope = build_envelope(json.loads(raw.decode("utf-8-sig")), socket.gethostname())
+            if envelope and envelope.get("windows"):
+                # Before a normal response nothing is stored, as today; live
+                # liveness heartbeats are a remote-collector signal only.
+                ingest(storage, args.instance, envelope, now_utc())
                 if output.startswith("Claude quota export waiting"):
-                    output = "Claude " + " / ".join(w["label"] + " " +
-                        ("%g%%" % w["used_percent"] if w["used_percent"] is not None else "unavailable")
-                        for w in report["windows"]) + "\n"
+                    output = "Claude " + " / ".join(window["label"] + " " +
+                        ("%g%%" % window["used_percent"] if window["used_percent"] is not None else "unavailable")
+                        for window in envelope["windows"]) + "\n"
     except Exception:
         # A bridge must never reflect full input/provider errors or break Claude.
         pass

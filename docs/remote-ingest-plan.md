@@ -169,6 +169,8 @@ token posts again within 2 seconds. The response body never echoes input.
 
 ### Phase 1: storage and the ingest function (daemon only)
 
+Done 2026-10-18: implemented with tests; the `ingest_tokens` table was left for Phase 3, which owns tokens.
+
 - Schema v6 migration: table `observations(instance_id PK REFERENCES
   source_instances ON DELETE CASCADE, report TEXT, evidence TEXT,
   collector_seen_at TEXT, collector_host TEXT, collector_version TEXT,
@@ -194,6 +196,8 @@ token posts again within 2 seconds. The response body never echoes input.
   the newest reading wins; deleting the instance deletes its observation.
 
 ### Phase 2: standalone collector
+
+Done 2026-10-18: implemented with tests; normalization moved into the collector module and `claude_export.py` reuses it.
 
 - New file `daemon/src/presto_ai_dash/collectors/claude_statusline.py`,
   **stdlib only, Python 3.8+**, runnable as a script and importable by the

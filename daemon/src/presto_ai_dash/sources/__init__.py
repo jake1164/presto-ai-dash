@@ -27,6 +27,15 @@ class Source(object):
     name = "Base"
     config_fields = ()
     secret_field = None
+    # Quota reports composed by ingest() carry these; None for non-quota sources.
+    provider = None
+    product = None
+    stale_after_seconds = 180
+    report_note = None
+    # Remote collectors may push readings only when a source opts in, and only
+    # for the window ids it publishes.
+    accepts_push = False
+    push_window_ids = None
 
     def __init__(self, config=None):
         self.config = config or {}

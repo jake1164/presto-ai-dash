@@ -15,6 +15,13 @@ WINDOWS = (("five_hour", "5h", 300), ("seven_day", "Weekly", 10080))
 class ClaudeSource(Source):
     id = "claude"
     name = "Claude"
+    provider = "anthropic"
+    product = "Claude"
+    stale_after_seconds = 900
+    report_note = ("Claude Code terminal export; idle readings become stale. "
+                   "VS Code panel coverage is unverified.")
+    accepts_push = True
+    push_window_ids = ("five_hour", "seven_day")
     config_fields = (
         {"key": "settings_path", "label": "Claude Code settings file (one profile per account)",
          "type": "string", "default": str(Path.home() / ".claude" / "settings.json")},
@@ -26,15 +33,17 @@ class ClaudeSource(Source):
         self.storage = storage
 
     def collect(self):
-        report = self.storage.claude_export(self.id) if hasattr(self, "storage") else None
+        observation = self.storage.observation(self.id) if hasattr(self, "storage") else None
+        report = deepcopy(observation["report"]) if observation else None
         if report is None:
-            report = quota_report("anthropic", "Claude", [
+            report = quota_report(self.provider, self.product, [
                 quota_window(key, label, None, None, now_utc(), minutes, state="unavailable")
                 for key, label, minutes in WINDOWS])
             report["note"] = "Awaiting quota export from normal Claude Code terminal use"
             return self.snapshot("warning", metrics={"quota": report})
-        report = deepcopy(report)
         report["stale_after_seconds"] = self.config.get("stale_after_seconds", 900)
+        for key in ("collector_seen_at", "collector_host", "collector_version", "last_progress_at"):
+            report[key] = observation[key]
         available = [w for w in report["windows"] if w["state"] == "available"]
         status = ("rate_limited" if any(w["used_percent"] >= 100 for w in available)
                   else "ok" if available else "warning")

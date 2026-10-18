@@ -6,7 +6,7 @@ import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
 
-from .models import STATUS_ORDER, SourceSnapshot
+from .models import STATUS_ORDER, SourceSnapshot, now_utc
 
 
 def _utc(moment):
@@ -50,7 +50,7 @@ def _validated_alerts(value):
 
 
 class Storage:
-    SCHEMA_VERSION = 5
+    SCHEMA_VERSION = 6
     MAX_HISTORY_LIMIT = 1000
 
     def __init__(self, path):
@@ -129,6 +129,23 @@ class Storage:
                 self._conn.execute("ALTER TABLE source_instances ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
                 self._conn.execute("UPDATE source_instances SET position = rowid")
             self._conn.execute("PRAGMA user_version = 5")
+            # v6: provider-neutral observations replace the Claude-only export
+            # table. last_activity_at is created now (unused until Phase 5) so
+            # activity support will not need another migration.
+            self._conn.execute("""CREATE TABLE IF NOT EXISTS observations (
+                instance_id TEXT PRIMARY KEY REFERENCES source_instances(id) ON DELETE CASCADE,
+                report TEXT, evidence TEXT,
+                collector_seen_at TEXT, collector_host TEXT, collector_version TEXT,
+                last_progress_at TEXT, progress TEXT, last_activity_at TEXT
+            )""")
+            exports = self._conn.execute(
+                "SELECT instance_id, report, evidence FROM claude_exports").fetchall()
+            for export in exports:
+                self._conn.execute(
+                    "INSERT INTO observations (instance_id, report, evidence) VALUES (?, ?, ?)",
+                    (export["instance_id"], export["report"], export["evidence"]))
+            self._conn.execute("DROP TABLE claude_exports")
+            self._conn.execute("PRAGMA user_version = 6")
             self._conn.commit()
         except Exception:
             self._conn.rollback()
@@ -146,35 +163,84 @@ class Storage:
                 "SELECT value FROM configuration_meta WHERE name = 'vault_check'").fetchone()
             return bytes(row["value"]) if row else None
 
-    def claude_export(self, instance_id):
+    def observation(self, instance_id):
+        """The newest pushed observation for an instance, or None if it never reported."""
         with self._lock:
-            row = self._conn.execute("SELECT report FROM claude_exports WHERE instance_id = ?",
+            row = self._conn.execute("SELECT * FROM observations WHERE instance_id = ?",
                                      (instance_id,)).fetchone()
-        return json.loads(row["report"]) if row else None
+        if row is None:
+            return None
+        return {"report": json.loads(row["report"]) if row["report"] is not None else None,
+                "evidence": json.loads(row["evidence"]) if row["evidence"] is not None else {},
+                "collector_seen_at": row["collector_seen_at"],
+                "collector_host": row["collector_host"],
+                "collector_version": row["collector_version"],
+                "last_progress_at": row["last_progress_at"],
+                "progress": row["progress"],
+                "last_activity_at": row["last_activity_at"]}
 
-    def save_claude_export(self, instance_id, report, evidence):
-        """Atomic account routing and freshness preservation across helper processes."""
+    def save_observation(self, instance_id, report, evidence, collector_host=None,
+                         collector_version=None, progress=None, now=None):
+        """Atomic account routing and freshness preservation across helper processes.
+
+        The daemon owns time: a window's observed_at becomes this receive time
+        unless its evidence hash matches the stored one, which keeps the old
+        timestamp, and collector_seen_at is this receive time too — never the
+        client's clock. A changed progress hash updates last_progress_at. A
+        None report is a heartbeat: collector connectivity only, quota
+        untouched.
+        """
         result = deepcopy(report)
         with self._lock:
             try:
                 self._conn.execute("BEGIN IMMEDIATE")
                 account = self._conn.execute("SELECT type, enabled FROM source_instances WHERE id = ?",
                                              (instance_id,)).fetchone()
-                if not account or account["type"] != "claude" or not account["enabled"]:
+                if not account or not account["enabled"]:
                     self._conn.rollback()
                     return False
-                previous = self._conn.execute("SELECT report, evidence FROM claude_exports WHERE instance_id = ?",
-                                              (instance_id,)).fetchone()
-                if previous:
-                    old_evidence = json.loads(previous["evidence"])
-                    old_windows = {w["id"]: w for w in json.loads(previous["report"])["windows"]}
-                    for window in result["windows"]:
-                        key = window["id"]
-                        if key in old_windows and old_evidence.get(key) == evidence.get(key):
-                            window["observed_at"] = old_windows[key]["observed_at"]
-                self._conn.execute("INSERT INTO claude_exports VALUES (?, ?, ?) "
-                    "ON CONFLICT(instance_id) DO UPDATE SET report=excluded.report, evidence=excluded.evidence",
-                    (instance_id, json.dumps(result), json.dumps(evidence)))
+                previous = self._conn.execute(
+                    "SELECT report, evidence, progress, last_progress_at FROM observations"
+                    " WHERE instance_id = ?", (instance_id,)).fetchone()
+                observed = _stored_time(now) if now is not None else _stored_time(now_utc())
+                if result is None:
+                    # Heartbeat: the collector is alive; quota is untouched.
+                    if previous is None:
+                        self._conn.execute(
+                            "INSERT INTO observations (instance_id, collector_seen_at,"
+                            " collector_host, collector_version) VALUES (?, ?, ?, ?)",
+                            (instance_id, observed, collector_host, collector_version))
+                    else:
+                        self._conn.execute(
+                            "UPDATE observations SET collector_seen_at = ?, collector_host = ?,"
+                            " collector_version = ? WHERE instance_id = ?",
+                            (observed, collector_host, collector_version, instance_id))
+                    self._conn.commit()
+                    return True
+                old_evidence = json.loads(previous["evidence"]) if previous and previous["evidence"] else {}
+                old_windows = ({window["id"]: window
+                                for window in json.loads(previous["report"])["windows"]}
+                               if previous and previous["report"] else {})
+                for window in result["windows"]:
+                    key = window["id"]
+                    if key in old_windows and old_evidence.get(key) == (evidence or {}).get(key):
+                        window["observed_at"] = old_windows[key]["observed_at"]
+                    else:
+                        window["observed_at"] = observed
+                last_progress_at = previous["last_progress_at"] if previous else None
+                if progress is not None and progress != (previous["progress"] if previous else None):
+                    last_progress_at = observed
+                self._conn.execute(
+                    "INSERT INTO observations (instance_id, report, evidence, collector_seen_at,"
+                    " collector_host, collector_version, last_progress_at, progress, last_activity_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)"
+                    " ON CONFLICT(instance_id) DO UPDATE SET report=excluded.report,"
+                    " evidence=excluded.evidence, collector_seen_at=excluded.collector_seen_at,"
+                    " collector_host=excluded.collector_host,"
+                    " collector_version=excluded.collector_version,"
+                    " last_progress_at=excluded.last_progress_at, progress=excluded.progress",
+                    (instance_id, json.dumps(result), json.dumps(evidence or {}),
+                     observed, collector_host, collector_version, last_progress_at, progress))
                 self._conn.commit()
                 return True
             except Exception:

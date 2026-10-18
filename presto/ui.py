@@ -37,6 +37,11 @@ PANEL = (28, 31, 38)
 DAILY = (65, 225, 255)
 WEEKLY = (135, 62, 210)
 MONTHLY = (255, 169, 56)
+LIMIT = (255, 64, 64)
+
+# Live Home rows: a name line, then a bars/reset line.
+MARKER = 8
+BARS_H = 11
 
 
 class Palette(object):
@@ -148,75 +153,181 @@ def draw_home(display, palette, quotas, index, total, muted=False,
         _text(display, palette, "MUTED", width - 58, FOOTER_Y, INK_DIM, scale=1)
 
 
-def draw_sources(display, palette, rows, index, total, status="offline",
-                 muted=False, width=240, height=240, scroll=0, stale=False):
-    """Live Home: measured source instances, with no illustrative quota values."""
+def _window_rgb(window, dim):
+    """Cyan for a day or less, purple for longer, orange monthly; red at limit."""
+    if dim or window["state"] != "available":
+        return INK_DIM
+    if (window["percent"] or 0) >= 100:
+        return LIMIT
+    period = window.get("period_minutes")
+    if not period:
+        return MONTHLY
+    return DAILY if period <= 1440 else WEEKLY
+
+
+def _marker(display, palette, row, x, y, size, stale):
+    """Status colour; solid only when the daemon reports the source active."""
     from alerts import rgb_for_accent
     from cards import accent_for
-    from home import LIST_TOP, LIST_HEIGHT, source_row_height, scroll_limit, quota_width, quota_label
+    rgb = INK_DIM if stale else rgb_for_accent(accent_for(row["status"]))
+    display.set_pen(palette.pen(rgb))
+    display.rectangle(x, y, size, size)
+    if row["status"] != "active":
+        display.set_pen(palette.pen(BACKGROUND))
+        display.rectangle(x + 2, y + 2, size - 4, size - 4)
+    return rgb
+
+
+def _freshness(row, stale):
+    """Line-1 note: labelled reset countdown, or why there is none."""
+    from home import reset_label, window_tag
+    binding = row.get("binding")
+    if binding is None:
+        return "", INK_DIM
+    window = row["windows"][binding]
+    if stale or window["state"] == "stale":
+        # Never present an old reading, or a passed reset, as current.
+        # The daemon's age says nothing about how long the device lost it.
+        ago = "" if stale else reset_label(window.get("age"))
+        return ("last known " + ago + " ago") if ago else "last known", INK_DIM
+    reset_in = window.get("reset_in")
+    if reset_in is None:
+        return "", INK_DIM
+    if reset_in <= 0:
+        return "awaiting refresh", INK_DIM
+    return "%s resets %s" % (window_tag(window), reset_label(reset_in)), _window_rgb(window, stale)
+
+
+def _draw_quota_row(display, palette, row, y, row_width, stale):
+    """Name and reset; big labelled percentages; one stacked bar per window."""
+    from home import quota_label, quota_width, home_windows, window_tag
+    right = 14 + row_width
+    _marker(display, palette, row, 14, y, MARKER, stale)
+    note, note_rgb = _freshness(row, stale)
+    display.set_font("bitmap8")
+    # Firmware wraps at the exact width, so leave slack after the note.
+    note_w = display.measure_text(note, 1) + 2 if note else 0
+    _text(display, palette, row["name"], 14 + MARKER + 4, y, INK, scale=1,
+          max_width=max(0, row_width - MARKER - 4 - note_w - 8))
+    if note:
+        _text(display, palette, note, right - note_w, y, note_rgb, scale=1)
+
+    windows = home_windows(row)
+    cells = [(window_tag(w), quota_label(w["percent"]), _window_rgb(w, stale)) for w in windows]
+    scale = 2
+    if sum(display.measure_text(t, 1) + 2 + display.measure_text(v, 2) + 10
+           for t, v, _ in cells) - 10 > row_width:
+        scale = 1
+    x = 14
+    value_y = y + 11
+    for tag, value, rgb in cells:
+        _text(display, palette, tag, x, value_y + 8 * scale - 8, INK_DIM, scale=1)
+        x += display.measure_text(tag, 1) + 2
+        _text(display, palette, value, x, value_y, rgb, scale=scale)
+        x += display.measure_text(value, scale) + 10
+
+    bars_y = value_y + 8 * scale + 3
+    measured = [w for w in windows if w["percent"] is not None]
+    if not measured:
+        # Nothing measured: say what is known instead of drawing empty bars.
+        text = row.get("activity") or (windows[0]["label"] + " " + windows[0]["state"]
+                                       if windows else "")
+        display.set_font("bitmap6")
+        _text(display, palette, text, 14, bars_y + 2, INK_DIM, scale=1)
+        return
+    bar_h = min(5, max(2, (BARS_H - (len(windows) - 1)) // len(windows)))
+    for window in windows:
+        display.set_pen(palette.pen(PANEL))
+        display.rectangle(14, bars_y, row_width, bar_h)
+        filled = quota_width(window["percent"], row_width)
+        if filled:
+            display.set_pen(palette.pen(_window_rgb(window, stale)))
+            display.rectangle(14, bars_y, filled, bar_h)
+        bars_y += bar_h + 1
+
+
+def _draw_local_row(display, palette, row, y, row_width, stale):
+    """Fallback list row when no quota accounts exist: name/status, usage."""
+    rgb = _marker(display, palette, row, 14, y, MARKER, stale)
+    display.set_font("bitmap8")
+    status = row["status"].upper()
+    status_w = display.measure_text(status, 1)
+    _text(display, palette, row["name"], 14 + MARKER + 4, y, INK, scale=1,
+          max_width=max(0, row_width - MARKER - status_w - 12))
+    _text(display, palette, status, 14 + row_width - status_w, y, rgb, scale=1)
+    display.set_font("bitmap6")
+    _text(display, palette, row["usage"], 14, y + 13, INK_DIM, scale=1)
+
+
+def _draw_local_strip(display, palette, rows, y, row_width, stale):
+    """Local services on one line: they are health, not cloud allowance."""
+    from cards import accent_for
+    from alerts import rgb_for_accent
+    display.set_pen(palette.pen(PANEL))
+    display.rectangle(14, y - 5, row_width, 1)
+    display.set_font("bitmap8")
+    x, right = 14, 14 + row_width
+    for position, row in enumerate(rows):
+        # A healthy service shows what it is doing; otherwise its status.
+        detail = (row["usage"].split(" / ")[0] if row["status"] in ("ok", "active")
+                  and row["usage"] != "Usage unavailable" else row["status"].upper())
+        width = (6 + 3 + display.measure_text(row["name"], 1) + 4 +
+                 display.measure_text(detail, 1))
+        more = "+%d" % (len(rows) - position)
+        if x + width > right - (0 if position == len(rows) - 1 else
+                                display.measure_text(more, 1) + 8):
+            _text(display, palette, more, x, y, INK_DIM, scale=1)
+            return
+        _marker(display, palette, row, x, y + 1, 6, stale)
+        x += 9
+        _text(display, palette, row["name"], x, y, INK, scale=1)
+        x += display.measure_text(row["name"], 1) + 4
+        rgb = INK_DIM if stale or row["status"] == "ok" else rgb_for_accent(accent_for(row["status"]))
+        _text(display, palette, detail, x, y, rgb, scale=1)
+        x += display.measure_text(detail, 1) + 10
+
+
+def draw_sources(display, palette, rows, index, total, status="offline",
+                 muted=False, width=240, height=240, scroll=0, stale=False):
+    """Live Home: cloud quota rows, then local services on one line."""
+    from alerts import rgb_for_accent
+    from cards import accent_for
+    from home import SOURCE_TOP, SOURCE_HEIGHT, SOURCE_ROW, LOCAL_Y, home_split, scroll_limit
     display.set_pen(palette.pen(BACKGROUND))
     display.clear()
     accent = rgb_for_accent(accent_for(status), 0.45 if muted else 1.0)
     display.set_pen(palette.pen(accent))
     display.rectangle(0, 0, 5, height)
-    display.set_font("bitmap8")
-    _text(display, palette, "Home", 14, TITLE_Y, INK, scale=2)
-    display.set_font("bitmap6")
-    badge = "FAKE" if rows and all(row["type"] == "fake" for row in rows) else "LIVE"
-    _text(display, palette, badge, width - 42, 12, INK_DIM, scale=1)
-    _text(display, palette, "%d source%s - %s" %
-          (len(set(row["id"] for row in rows)),
-           "" if len(set(row["id"] for row in rows)) == 1 else "s", status.upper()),
-          14, 34, accent, scale=1)
-    row_height = source_row_height(rows)
-    limit = scroll_limit(len(rows), row_height)
+
+    listed, local = home_split(rows)
+    limit = scroll_limit(len(listed), SOURCE_ROW, SOURCE_HEIGHT)
     scroll = max(0, min(limit, int(scroll)))
     row_width = width - 14 - MARGIN
-    display.set_clip(14, LIST_TOP, row_width, LIST_HEIGHT)
-    if not rows:
-        _text(display, palette, "No sources enabled", 14, LIST_TOP, INK_DIM, scale=1)
-    for position, row in enumerate(rows):
-        y = LIST_TOP + position * row_height - scroll
-        if y + row_height <= LIST_TOP or y >= LIST_TOP + LIST_HEIGHT:
-            continue
-        display.set_font("bitmap8")
-        _text(display, palette, row["name"], 14, y, INK, scale=2)
+    display.set_clip(14, SOURCE_TOP, row_width, SOURCE_HEIGHT)
+    if not listed:
         display.set_font("bitmap6")
-        windows = row.get("windows")
-        if windows:
-            for position_in_account, quota in enumerate(windows):
-                state = quota["state"]
-                rgb = DAILY if quota.get("period_minutes") and quota["period_minutes"] <= 1440 else (
-                    WEEKLY if quota.get("period_minutes") else MONTHLY)
-                rgb = INK_DIM if stale or state != "available" else rgb
-                value = quota_label(quota["percent"])
-                if state != "available":
-                    value = (value + " stale") if state == "stale" else state
-                line_y = y + 19 + position_in_account * 19
-                _text(display, palette, quota["label"] + " " + value, 14, line_y, rgb, scale=1)
-                display.set_pen(palette.pen(PANEL))
-                display.rectangle(14, line_y + 8, row_width, 5)
-                filled = quota_width(quota["percent"], row_width) if state in ("available", "stale") else 0
-                if filled:
-                    display.set_pen(palette.pen(rgb))
-                    display.rectangle(14, line_y + 8, filled, 5)
-            if row.get("activity"):
-                _text(display, palette, row["activity"], 14, y + 19 + len(windows) * 19,
-                      INK_DIM, scale=1)
+        _text(display, palette, "No sources enabled", 14, SOURCE_TOP, INK_DIM, scale=1)
+    for position, row in enumerate(listed):
+        y = SOURCE_TOP + position * SOURCE_ROW - scroll
+        if y + SOURCE_ROW <= SOURCE_TOP or y >= SOURCE_TOP + SOURCE_HEIGHT:
             continue
-        _text(display, palette, row["status"].upper(), 14, y + 19,
-              rgb_for_accent(accent_for(row["status"])), scale=1)
-        _text(display, palette, row["usage"], 14, y + 32, INK_DIM, scale=1)
+        draw = _draw_quota_row if "windows" in row else _draw_local_row
+        draw(display, palette, row, y, row_width, stale)
     display.remove_clip()
     if limit:
-        thumb = max(12, LIST_HEIGHT * LIST_HEIGHT // (len(rows) * row_height))
+        thumb = max(12, SOURCE_HEIGHT * SOURCE_HEIGHT // (len(listed) * SOURCE_ROW))
         display.set_pen(palette.pen(PANEL))
-        display.rectangle(width - 5, LIST_TOP, 2, LIST_HEIGHT)
+        display.rectangle(width - 5, SOURCE_TOP, 2, SOURCE_HEIGHT)
         display.set_pen(palette.pen(INK_DIM))
-        display.rectangle(width - 5, LIST_TOP + (LIST_HEIGHT - thumb) * scroll // limit, 2, thumb)
+        display.rectangle(width - 5, SOURCE_TOP + (SOURCE_HEIGHT - thumb) * scroll // limit,
+                          2, thumb)
+    if local:
+        _draw_local_strip(display, palette, local, LOCAL_Y, row_width, stale)
     display.set_font("bitmap6")
-    _text(display, palette, "STALE - retrying" if stale else "Swipe for resets / details",
-          14, 208, INK_DIM, scale=1)
+    if stale:
+        _text(display, palette, "STALE - retrying", 14, 210, INK_DIM, scale=1)
+    elif rows and all(row["type"] == "fake" for row in rows):
+        _text(display, palette, "FAKE DATA", 14, 210, INK_DIM, scale=1)
     _draw_dots(display, palette, index, total, accent, width, height)
     if muted:
         _text(display, palette, "MUTED", width - 58, FOOTER_Y, INK_DIM, scale=1)

@@ -85,9 +85,20 @@ M7 implements the [shared API/config contract](quotas.md) used by the first adap
 
 M11 connects the reusable windows to Home:
 
-- Reuse the scrolling account list, pinned header, and horizontal navigation.
-  Each account's actual windows remain visually separate in stacked lanes,
-  with percentages and period labels. Quota accounts lead the Home list.
+- Home has no header. Quota accounts fill it (four fit without scrolling;
+  more scroll). Each row: a status marker (solid only when the daemon reports
+  `active`; there is no last-used signal yet), the name, and on the right the
+  binding window's labelled reset (`Wk resets 4d19h`; the most-used window,
+  on a tie the longer one). Below, each window as a short tag and a large
+  percentage (`5h 72%  Wk 96%  Mo 41%`), coloured by period (cyan up to a day,
+  purple longer, orange monthly, red at limit), then one stacked bar per
+  window. Countdowns use the payload's `updated_at`, not the device clock.
+- Honest states: a stale window reads `last known 6d ago` (no age while the
+  device itself is cut off), a passed reset reads `awaiting refresh`, an
+  unknown window shows `--` (distinct from a measured `0%`), and an
+  unidentified empty window such as Codex's null `Secondary` stays off Home.
+- Local services (Ollama, LiteLLM) are health, not allowance: they share one
+  line under the cloud rows, or become the list when no quota account exists.
 - Show additional windows, such as Go's monthly allowance, in the same reusable
   grouped Home row. Do not drop them or label them as weekly to fit two bars.
 - Generate one swipe card per enabled account, including new source types and

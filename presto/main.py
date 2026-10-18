@@ -34,7 +34,8 @@ from gestures import (
     TAP,
     GestureRecogniser,
 )
-from home import DEMO_QUOTAS, HomeScroll, source_rows, source_row_height
+from home import (DEMO_QUOTAS, HomeScroll, SOURCE_HEIGHT, SOURCE_TOP, home_split,
+                  source_rows, source_row_height)
 from net import (
     StatusClient,
     StatusError,
@@ -185,8 +186,9 @@ class App(object):
             self.last_good_at = _now_ms()
             if not self.static_demo:
                 self.live_rows = source_rows(payload)
-                self.home_scroll.set_count(len(self.live_rows or []),
-                                           source_row_height(self.live_rows or []))
+                self.home_scroll.set_count(len(home_split(self.live_rows or [])[0]),
+                                           source_row_height(self.live_rows or []),
+                                           SOURCE_TOP, SOURCE_HEIGHT)
         self.index = next((i for i, card in enumerate(cards) if card.id == selected), 0)
         if selected is not None and self._current_card().id != selected:
             self.detail_open = False

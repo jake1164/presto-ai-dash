@@ -1,5 +1,7 @@
 """Render Home and per-account cards, preserving the original fake demo."""
 
+from datetime import datetime
+
 from . import __version__
 from .models import Card, iso, overall_status, severity
 from .quotas import QUOTA_SCHEMA_VERSION, present_quota, present_snapshot
@@ -154,9 +156,15 @@ def _account_card(row, snapshot):
         windows = report["windows"]
         primary = reading(windows[0]) if windows else "Usage unavailable"
         secondary = " / ".join(reading(w) for w in windows[1:])
-        details = [w["label"] + " reset: " +
-                   (w["resets_at"][5:16].replace("T", " ") + "Z" if w["resets_at"] else "unavailable")
-                   for w in windows]
+        def reset(window):
+            if not window["resets_at"]:
+                return window["label"] + " reset: unavailable"
+            # A passed reset says nothing about current use: flag it, don't assume 0%.
+            when = window["resets_at"][5:16].replace("T", " ") + "Z"
+            if datetime.fromisoformat(window["resets_at"]) <= snapshot.updated_at:
+                return window["label"] + " reset passed " + when
+            return window["label"] + " reset: " + when
+        details = [reset(w) for w in windows]
         activity = report.get("activity")
         if activity:
             primary = "%s requests" % activity["request_count"]

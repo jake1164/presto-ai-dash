@@ -171,7 +171,7 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
         texts = [row[0] for row in self.device.display.rows]
         self.assertIn('Gateway 0', texts)
         self.assertIn('12 req / 340 tok', texts)
-        self.assertIn('LIVE', texts)
+        self.assertEqual(texts[:2], ['Gateway 0', 'OK'])
         self.assertNotIn('OpenAI', texts)
 
     async def test_stale_then_offline_then_recovers(self):

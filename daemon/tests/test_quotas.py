@@ -19,7 +19,7 @@ from presto_ai_dash.sources.opencode_go import OpenCodeGoSource, USAGE_URL
 from presto_ai_dash.sources.ollama_cloud import OllamaCloudSource
 from test_management import ManagementBase
 import presto_path
-from home import source_rows, HomeScroll, source_row_height
+from home import source_rows, HomeScroll, source_row_height, SOURCE_TOP, SOURCE_HEIGHT
 from ui import Palette, draw_sources, PANEL
 from test_ui import Display
 import test_home
@@ -249,19 +249,89 @@ class QuotaDeviceTests(unittest.TestCase):
     def test_all_windows_and_accounts_have_scrollable_rows_with_real_labels(self):
         report, _ = OpenCodeGoSource().parse(go_response(), NOW)
         report = present_quota(report, NOW)
-        rows = source_rows({"sources": [{"id": key, "name": key, "type": "opencode_go", "status": "ok", "quota": report}
-                                       for key in ("Account one", "Account two", "Account three")]})
-        self.assertEqual(len(rows), 3)
+        rows = source_rows({"updated_at": NOW.isoformat(),
+                            "sources": [{"id": str(key), "name": "Account %d" % key, "type": "opencode_go",
+                                         "status": "ok", "quota": report} for key in range(8)]})
+        self.assertEqual(len(rows), 8)
         self.assertEqual([w["label"] for w in rows[0]["windows"]], ["5h", "Weekly", "Monthly"])
-        self.assertEqual(HomeScroll(len(rows), source_row_height(rows)).limit, 81)
-        for offset in (0, 25, 81):
+        scroll = HomeScroll(0)
+        scroll.set_count(len(rows), source_row_height(rows), SOURCE_TOP, SOURCE_HEIGHT)
+        self.assertEqual(scroll.limit, 8 * 46 - 184)
+        for offset in (0, 25, scroll.limit):
             with self.subTest(offset=offset):
                 display = Display()
                 draw_sources(display, Palette(display), rows, 0, 3, scroll=offset)
                 test_home.HomeLayoutTests().assert_layout(display)
-                self.assertTrue(any(text.startswith("3 sources") for text, *_ in display.rows))
-                self.assertIn("Monthly 14%", [text for text, *_ in display.rows])
+                texts = [text for text, *_ in display.rows]
+                # Labelled values per window, and the binding window's reset.
+                self.assertIn("12%", texts)
+                self.assertIn("14%", texts)
+                self.assertEqual(texts.count("5h"), texts.count("Mo"))
+                self.assertIn("Mo resets 2d0h", texts)
+        self.assertEqual(rows[0]["binding"], 2)
         self.assertTrue(all(w["percent"] is not None for row in rows for w in row["windows"]))
+
+    def test_reset_times_and_window_tags(self):
+        from home import iso_seconds, reset_label, binding_window, window_tag
+        self.assertEqual(iso_seconds("2026-10-17T17:24:42+00:00") - iso_seconds("2026-10-17T14:56:56.261073+00:00"),
+                         8866)
+        self.assertEqual(iso_seconds("2026-03-01T00:00:00Z") - iso_seconds("2026-02-28T23:00:00-01:00"), 0)
+        self.assertEqual(iso_seconds("2026-01-01T00:00:00+00:00") - iso_seconds("1970-01-01T00:00:00+00:00"),
+                         int(datetime(2026, 1, 1, tzinfo=timezone.utc).timestamp()))
+        self.assertIsNone(iso_seconds(None))
+        self.assertIsNone(iso_seconds("soon"))
+        self.assertEqual([reset_label(s) for s in (None, -5, 0, 59, 2700, 8866, 3 * 86400 + 7200, 12 * 86400)],
+                         ["", "", "", "1m", "45m", "2h28m", "3d2h", "12d"])
+        windows = [{"percent": 40, "state": "available", "period_minutes": 300},
+                   {"percent": 40, "state": "available", "period_minutes": 10080},
+                   {"percent": 90, "state": "unavailable", "period_minutes": None}]
+        self.assertEqual(binding_window(windows), 1)
+        self.assertIsNone(binding_window(windows[2:]))
+        self.assertEqual([window_tag({"label": label, "period_minutes": period}) for label, period in
+                          (("5h", 300), ("Daily", 1440), ("Weekly", 10080), ("Monthly", None),
+                           ("Monthly credits", None), ("Secondary", None), ("RPM", None))],
+                         ["5h", "24h", "Wk", "Mo", "Mo", "Se", "RPM"])
+
+    def test_detail_card_flags_a_passed_reset(self):
+        from presto_ai_dash.dashboard import _account_card
+        report = quota_report("claude", "Claude", [
+            quota_window("a", "5h", 10, (NOW - timedelta(hours=1)).isoformat(), NOW - timedelta(hours=3)),
+            quota_window("b", "Weekly", 34, RESET, NOW)])
+        card = _account_card({"id": "c", "name": "Claude", "type": "claude"},
+                             SourceSnapshot("c", "ok", NOW, {"quota": report}))
+        self.assertEqual(card.detail[:2], ["5h reset passed 10-11 13:00Z", "Weekly reset: 10-13 14:00Z"])
+
+    def test_home_separates_fresh_stale_passed_unknown_and_local(self):
+        """The reference rules: never show old data or a passed reset as current."""
+        def window(label, percent, period, resets, observed=NOW, state="available"):
+            return {"label": label, "used_percent": percent, "period_minutes": period, "state": state,
+                    "resets_at": resets and (NOW + resets).isoformat(), "observed_at": observed.isoformat()}
+        old = NOW - timedelta(days=6)
+        sources = [
+            {"id": "claude", "type": "claude", "name": "Claude", "status": "warning", "quota": {"windows": [
+                window("5h", 0, 300, -timedelta(days=5), old, "stale"),
+                window("Weekly", 34, 10080, -timedelta(days=2), old, "stale")]}},
+            {"id": "codex", "type": "codex", "name": "Codex", "status": "ok", "quota": {"windows": [
+                window("Weekly", 53, 10080, timedelta(days=4, hours=19)),
+                window("Secondary", None, None, None, state="unavailable")]}},
+            {"id": "go", "type": "opencode_go", "name": "Go", "status": "ok", "quota": {"windows": [
+                window("5h", None, 300, None, state="unavailable"),
+                window("Weekly", 0, 10080, -timedelta(minutes=5))]}},
+            {"id": "lite", "type": "litellm", "name": "LiteLLM", "status": "ok", "metrics": {"requests_today": 12}},
+            {"id": "llama", "type": "ollama", "name": "Ollama", "status": "active", "metrics": {}}]
+        rows = source_rows({"updated_at": NOW.isoformat(), "card_order": "accounts", "sources": sources})
+        display = Display()
+        draw_sources(display, Palette(display), rows, 0, 3)
+        test_home.HomeLayoutTests().assert_layout(display)
+        texts = [text for text, *_ in display.rows]
+        self.assertIn("last known 6d0h ago", texts)      # stale, not a passed countdown
+        self.assertIn("Wk resets 4d19h", texts)          # labelled future reset
+        self.assertIn("awaiting refresh", texts)         # passed reset is not zero
+        self.assertNotIn("Se", texts)                    # Codex null secondary stays off Home
+        self.assertIn("--", texts)                       # unknown 5h ...
+        self.assertIn("0%", texts)                       # ... is distinct from a measured 0%
+        self.assertEqual(texts[-4:], ["LiteLLM", "12 req", "Ollama", "ACTIVE"])
+        self.assertFalse(any(y >= 188 for text, x, y, *_ in display.rows if text in ("Claude", "Codex", "Go")))
 
     def test_missing_stale_and_cloud_activity_do_not_draw_fresh_zero_bars(self):
         report, _ = OllamaCloudSource().parse(cloud_response(), NOW)
@@ -271,6 +341,12 @@ class QuotaDeviceTests(unittest.TestCase):
         self.assertEqual([r["id"] for r in rows], ["cloud", "local"])
         self.assertEqual(rows[0]["windows"][0]["state"], "unavailable")
         self.assertIn("2 req", rows[0]["activity"])
+        display = Display()
+        draw_sources(display, Palette(display), rows, 0, 3)
+        texts = [text for text, *_ in display.rows]
+        self.assertIn("--", texts)
+        self.assertIn("2 req / $0.00002 in 7d", texts)
+        rows[0]["activity"] = ""
         display = Display()
         draw_sources(display, Palette(display), rows, 0, 3)
         self.assertIn("Monthly credits unavailable", [text for text, *_ in display.rows])

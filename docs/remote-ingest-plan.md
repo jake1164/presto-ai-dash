@@ -40,6 +40,11 @@ and off by default.
   the daemon does not try to police it. Its validation exists for data
   integrity, not to detect how a reading was collected.
 - Never launch Claude Code or make model requests to generate data.
+- The whole app is read-only toward providers (see AGENTS.md). Never call any
+  provider method that spends or changes anything, for example Codex
+  `ConsumeAccountRateLimitResetCredit`. The ingest endpoint only stores
+  observations: it cannot trigger a provider call, a login, a settings edit or
+  any other action, and nothing a remote collector sends can cause one.
 - Never store prompts, transcripts, tool contents, session IDs, account email
   or account UUIDs. Hashes of progress markers are allowed (as today).
 - Missing, expired or old readings are never shown as a fresh 0%.
@@ -142,6 +147,9 @@ the body never names one.
   sets `last_progress_at` to now. This is the "last response seen" signal.
 - `host` is a user-chosen label, at most 32 ASCII characters, used only to
   show which computer reported last.
+- Optional `reset_credits` (added by Phase 9; see there): spendable early
+  resets the provider reports. Absent means "not reported", which is different
+  from a count of 0.
 
 Validation (reject with 400, store nothing, on any failure):
 
@@ -339,6 +347,56 @@ service.
   Claude Code for these variables.
 - Tests: field whitelist (assert email and prompt attributes never reach
   storage), wrong event names ignored, size cap, token auth.
+
+### Phase 9: banked reset credits (Codex now, others if they gain it)
+
+**Do this after Phase 4.** Added 2026-10-18, after Phases 1-3 were already
+being built. It is deliberately a separate phase and an additive change: do not
+rework the envelope or validator from Phases 1-3 in place.
+
+Verified facts (Codex CLI 0.162.0-alpha.17.2, schema generated offline with
+`codex app-server generate-json-schema`; no login, no requests): the
+`account/rateLimits/read` response we already call carries
+`rateLimitResetCredits { availableCount, credits[] }`, where each credit has
+`expiresAt` (Unix seconds or null), `status` (`available`, `redeeming`,
+`redeemed`, `unknown`), `title`, `resetType`. `credits` is null when only the
+count is known. It also carries `credits { balance, hasCredits, unlimited }`
+and `planType`. All are nullable; confirm against a live response before
+relying on them, and treat any absent or malformed field as "not reported".
+Claude has no documented source for its banked reset (the figure exists only
+on the claude.ai usage page); do not scrape it. Its detail card says
+`Resets: not reported`.
+
+- **Normalization.** `quota_report` gains an optional
+  `reset_credits: {"available": <int 0..99 or null>, "expires_at":
+  [<ISO UTC, at most 8, earliest first>]}`. `available` null means not
+  reported. Count only rows with `status == "available"`; if `credits` is null,
+  keep the count and an empty list.
+- **Envelope.** Add `reset_credits` to the allowed top-level keys with the same
+  shape and caps. The validator currently rejects unknown keys, so this must
+  be added there explicitly. Optional `credits_balance` (string, at most 16
+  characters) and `credits_unlimited` (bool) may follow the same path; they
+  feed one detail line only.
+- **Codex source.** In `CodexSource.parse` read the fields from the response
+  already fetched; no extra call. Never call the consume method.
+- **Daemon.** Expose the object in the Codex account's quota report so it
+  reaches the status payload for free. Detail card lines, within the existing
+  six-line limit (drop the `Period:` style filler first, never a window line):
+  `Resets avail: 3`, `Next exp: 10-22 14:18Z (4d)`, and, when present,
+  `Credits: 0`. When `available` is null: `Resets: not reported`.
+- **Dashboard (Presto Home).** One small badge after the account name, ASCII
+  only: `R3` in the dim ink colour when `available > 0`. When the earliest
+  expiry is within 72 hours it turns amber and adds the time left: `R3 2d`.
+  `R0` is not drawn, and nothing is drawn when `available` is null, so unknown
+  is never shown as zero. Draw it only if it fits after the name without
+  overlapping the reset note; otherwise skip it (the detail card is the source
+  of truth). It is informational: no colour implies spending one.
+- **Tests.** Parse with count only, count plus rows, expired or `redeemed`
+  rows ignored, null everywhere, malformed values; validator accepts the new
+  keys and rejects a bad shape; card lines and the six-line limit; Home badge
+  states (hidden when null or 0, dim, amber near expiry, skipped when it does
+  not fit). Check in PSL with fixtures for each state, then sync and verify the
+  device per `AGENTS.md`.
 
 ## Not covered (needs its own decision)
 

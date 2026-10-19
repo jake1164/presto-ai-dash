@@ -8,10 +8,20 @@ import unittest
 from unittest.mock import patch
 
 import presto_path
-from home import DEMO_QUOTAS, HomeScroll, quota_label, quota_width, scroll_limit
+from datetime import datetime, timedelta, timezone
+from home import (DEMO_QUOTAS, HomeScroll, binding_window, quota_label, quota_width,
+                  scroll_limit, source_rows)
 from net import embedded_payload
 from test_ui import Display
-from ui import PANEL, DAILY, WEEKLY, Palette, draw_home
+from ui import PANEL, DAILY, WEEKLY, Palette, draw_home, draw_sources
+
+
+HOME_NOW = datetime(2026, 10, 18, 12, tzinfo=timezone.utc)
+
+
+def iso_past(**delta):
+    """An ISO instant before HOME_NOW for source_rows fixtures."""
+    return (HOME_NOW - timedelta(**delta)).isoformat()
 
 
 class QuotaTests(unittest.TestCase):
@@ -187,6 +197,136 @@ class AppHomeTests(unittest.TestCase):
         self.touch(False, 0, 0, 120)
         self.assertEqual(self.app._current_card().id, "ollama")
         self.assertEqual(self.app.home_scroll.offset, 50)
+
+
+class HomeHintTests(unittest.TestCase):
+    """Phase 4: the daemon's hint takes the reset-note slot until data is fresh."""
+
+    def rows_for(self, hint, windows, status="warning"):
+        payload = {"updated_at": HOME_NOW.isoformat(), "card_order": "accounts",
+                   "sources": [{"id": "c", "type": "claude", "name": "Claude",
+                                "status": status,
+                                "quota": {"windows": windows, "hint": hint}}]}
+        return source_rows(payload)
+
+    def window(self, label, period, percent, state, minutes_ago=0,
+               reset_days=None, reset_minutes=None):
+        """A window as the payload carries it: days/minutes ahead may be negative."""
+        reset = None
+        if reset_days is not None:
+            reset = (HOME_NOW + timedelta(days=reset_days)).isoformat()
+        elif reset_minutes is not None:
+            reset = (HOME_NOW + timedelta(minutes=reset_minutes)).isoformat()
+        return {"label": label, "period_minutes": period, "used_percent": percent,
+                "state": state, "resets_at": reset,
+                "observed_at": iso_past(minutes=minutes_ago)}
+
+    def unmeasured(self):
+        return [self.window("5h", 300, None, "unavailable"),
+                self.window("Weekly", 10080, None, "unavailable")]
+
+    def stale_unexpired(self):
+        # Both windows were read six days ago; their resets are still ahead.
+        return [self.window("5h", 300, 12, "stale", minutes_ago=6 * 24 * 60, reset_days=7),
+                self.window("Weekly", 10080, 34, "stale", minutes_ago=6 * 24 * 60,
+                            reset_days=9)]
+
+    def expired(self):
+        return [self.window("5h", 300, 12, "stale", minutes_ago=6 * 24 * 60, reset_days=-1),
+                self.window("Weekly", 10080, 34, "stale", minutes_ago=6 * 24 * 60,
+                            reset_days=-2)]
+
+    def fresh(self):
+        return [self.window("5h", 300, 12, "available", minutes_ago=5, reset_minutes=240),
+                self.window("Weekly", 10080, 34, "available", minutes_ago=90, reset_days=7)]
+
+    def drawn(self, row):
+        display = Display()
+        draw_sources(display, Palette(display), [row], 0, 3, status="warning")
+        HomeLayoutTests().assert_layout(display)
+        texts = [text for text, *_ in display.rows]
+        self.assertTrue(all(ord(char) < 128 for text in texts for char in text), texts)
+        return texts
+
+    def test_source_rows_carry_the_hint(self):
+        for hint in (None, "Run claude in a terminal"):
+            self.assertEqual(self.rows_for(hint, self.unmeasured())[0]["hint"], hint)
+
+    def test_five_hint_states_replace_the_reset_note(self):
+        cases = (("Run claude in a terminal", self.unmeasured()),
+                 ("Waiting for a Claude reply", self.unmeasured()),
+                 ("Awaiting refresh", self.expired()),
+                 ("Reply in claude to refresh", self.stale_unexpired()),
+                 ("No report 6d - run claude", self.stale_unexpired()))
+        for hint, windows in cases:
+            with self.subTest(hint=hint):
+                texts = self.drawn(self.rows_for(hint, windows)[0])
+                self.assertIn(hint, texts)
+                self.assertNotIn("last known", texts)
+                self.assertFalse(any(" resets " in text for text in texts))
+
+    def test_expired_window_shows_dash_and_an_empty_bar_never_the_old_value(self):
+        row = self.rows_for("Awaiting refresh", self.expired())[0]
+        self.assertEqual([w["expired"] for w in row["windows"]], [True, True])
+        texts = self.drawn(row)
+        self.assertEqual(texts.count("--"), 2)
+        self.assertNotIn("12%", texts)
+        self.assertNotIn("34%", texts)
+        self.assertNotIn("0%", texts)
+        display = Display()
+        draw_sources(display, Palette(display), [row], 0, 3)
+        bars = [pen for pen, rect in display.rectangles if rect[2] > 20]
+        self.assertEqual(set(bars), {PANEL})  # tracks only, never a filled bar
+
+    def test_mixed_expired_only_the_stale_window_goes_unknown(self):
+        windows = [self.window("5h", 300, 34, "stale", minutes_ago=3 * 24 * 60,
+                               reset_days=-1),
+                   self.window("Weekly", 10080, 21, "available", minutes_ago=5,
+                               reset_days=7)]
+        row = self.rows_for(None, windows, status="ok")[0]
+        self.assertEqual(row["binding"], 1)
+        texts = self.drawn(row)
+        self.assertEqual(texts.count("--"), 1)
+        self.assertIn("21%", texts)
+        self.assertNotIn("34%", texts)
+        self.assertTrue(any(text.startswith("Wk resets ") for text in texts), texts)
+        self.assertFalse(any("last known" in text for text in texts))
+
+    def test_expired_window_does_not_choose_note_over_stale_unexpired_window(self):
+        windows = [self.window("5h", 300, 88, "stale", minutes_ago=3 * 24 * 60,
+                               reset_days=-1),
+                   self.window("Weekly", 10080, 21, "stale", minutes_ago=6 * 24 * 60,
+                               reset_days=2)]
+        row = self.rows_for(None, windows, status="warning")[0]
+        self.assertEqual(row["binding"], 1)
+        texts = self.drawn(row)
+        self.assertTrue(any(text.startswith("last known ") for text in texts), texts)
+        self.assertFalse(any(" resets " in text for text in texts))
+
+    def test_all_expired_without_hint_draws_no_reset_note(self):
+        texts = self.drawn(self.rows_for(None, self.expired())[0])
+        self.assertFalse(any(" resets " in text or text.startswith("last known") or
+                             text == "awaiting refresh" for text in texts), texts)
+
+    def test_hint_takes_note_slot_even_when_a_window_is_fresh(self):
+        texts = self.drawn(self.rows_for("Check Claude", self.fresh(), status="warning")[0])
+        self.assertIn("Check Claude", texts)
+        self.assertFalse(any(" resets " in text for text in texts))
+
+    def test_fresh_window_keeps_todays_reset_note_without_a_hint(self):
+        row = self.rows_for(None, self.fresh(), status="ok")[0]
+        self.assertEqual(row["binding"], 1)
+        texts = self.drawn(row)
+        self.assertTrue(any(text.startswith("Wk resets") for text in texts))
+        self.assertNotIn("last known", texts)
+        self.assertIn("12%", texts)
+
+    def test_hint_wins_the_name_line_when_they_cannot_both_fit(self):
+        row = self.rows_for("No report 6d - run claude", self.stale_unexpired())[0]
+        row["name"] = "Claude personal account"
+        texts = self.drawn(row)
+        self.assertTrue(texts[0].endswith("~"))  # the hint wins; the name clips
+        self.assertIn("No report 6d - run claude", texts)
 
 
 class HomeScrollTests(unittest.TestCase):

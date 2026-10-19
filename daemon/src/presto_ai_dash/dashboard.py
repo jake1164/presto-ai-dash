@@ -1,10 +1,48 @@
 """Render Home and per-account cards, preserving the original fake demo."""
 
-from datetime import datetime
-
 from . import __version__
-from .models import Card, iso, overall_status, severity
-from .quotas import QUOTA_SCHEMA_VERSION, present_quota, present_snapshot
+from .models import Card, iso, now_utc, overall_status, severity
+from .quotas import (QUOTA_SCHEMA_VERSION, age_label, present_quota,
+                     present_snapshot, timestamp)
+
+
+def _short_label(value, limit=8):
+    """Bound provider labels so a reset detail keeps its complete timestamp."""
+    value = str(value)
+    if len(value) <= limit:
+        return value
+    first = value.split(" ", 1)[0]
+    if len(first) <= limit:
+        return first
+    if limit <= 3:
+        return value[:limit]
+    return value[:limit - 3] + "..."
+
+
+def _trail_lines(report, now):
+    """Detail lines about the observation trail: data age, last reply, collector.
+
+    They follow the per-window reset lines and the six-line cap drops them
+    bottom-first, so a full reset list always keeps every reset line.
+    """
+    def ago(moment):
+        return "%s ago" % age_label((now - timestamp(moment)).total_seconds())
+
+    lines = []
+    ages = [timestamp(window["observed_at"]) for window in report["windows"]]
+    if ages:
+        lines.append("Data age: %s" % age_label((now - max(ages)).total_seconds()))
+    replied = report.get("last_progress_at")
+    lines.append("Last reply: %s" % ("unavailable" if replied is None else ago(replied)))
+    seen = report.get("collector_seen_at")
+    if seen is None:
+        lines.append("Reports: never")
+    else:
+        age = ago(seen)
+        host = _short_label(report.get("collector_host") or "unknown",
+                            max(1, 30 - len("Reports: ") - 1 - len(age)))
+        lines.append("Reports: %s %s" % (host, age))
+    return lines
 
 
 def build_status_payload(snapshots):
@@ -141,8 +179,13 @@ def _fake_payload(snapshot):
     }
 
 
-def _account_card(row, snapshot):
-    """Each configured account owns a card, including new connector types."""
+def _account_card(row, snapshot, now=None):
+    """Each configured account owns a card, including new connector types.
+
+    ``now`` is the moment resets are judged against; a stale snapshot's own
+    ``updated_at`` is the time of its last reading, not the present.
+    """
+    now = timestamp(now or now_utc())
     if snapshot is None:
         return Card(row["id"], row["name"], "offline", primary="Awaiting first report")
     report = snapshot.metrics.get("quota")
@@ -157,14 +200,24 @@ def _account_card(row, snapshot):
         primary = reading(windows[0]) if windows else "Usage unavailable"
         secondary = " / ".join(reading(w) for w in windows[1:])
         def reset(window):
+            label = _short_label(window["label"])
             if not window["resets_at"]:
-                return window["label"] + " reset: unavailable"
+                return label + " reset: unavailable"
             # A passed reset says nothing about current use: flag it, don't assume 0%.
             when = window["resets_at"][5:16].replace("T", " ") + "Z"
-            if datetime.fromisoformat(window["resets_at"]) <= snapshot.updated_at:
-                return window["label"] + " reset passed " + when
-            return window["label"] + " reset: " + when
+            if timestamp(window["resets_at"]) <= now:
+                return label + " passed " + when
+            return label + " reset: " + when
         details = [reset(w) for w in windows]
+        if "collector_seen_at" in report:
+            # Claude accounts carry the observation trail: an old reading is
+            # never presented as current, and a hint never reads as offline.
+            status = snapshot.status
+            if report.get("hint") and severity(status) < severity("warning"):
+                status = "warning"
+            return Card(row["id"], row["name"], status, primary, secondary,
+                        (details + _trail_lines(report, now) +
+                         ([report["error"]] if report.get("error") else []))[:6])
         activity = report.get("activity")
         if activity:
             primary = "%s requests" % activity["request_count"]
@@ -208,9 +261,11 @@ def build_instance_payload(snapshots, instances):
                    "updated_at": iso(max((s.updated_at for s in reporting.values()), default=None)),
                    "card_order": "accounts",
                    "cards": [home.to_dict()] + [card.to_dict() for card in states]}
+    card_status = {card.id: card.status for card in states} if not fake else {}
     payload["sources"] = [
         {"id": row["id"], "type": row["type"], "name": row["name"],
-         "status": reporting[row["id"]].status if row["id"] in reporting else "offline",
+         "status": card_status.get(
+             row["id"], reporting[row["id"]].status if row["id"] in reporting else "offline"),
          "updated_at": iso(reporting[row["id"]].updated_at) if row["id"] in reporting else None,
          "metrics": reporting[row["id"]].metrics if row["id"] in reporting else {},
          "alerts": reporting[row["id"]].alerts if row["id"] in reporting else []}

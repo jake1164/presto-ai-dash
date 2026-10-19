@@ -76,7 +76,8 @@ def binding_window(windows):
     """The window most likely to stop work: highest use, then longest period."""
     best = None
     for index, window in enumerate(windows):
-        if window["percent"] is None or window["state"] not in ("available", "stale"):
+        if (window.get("expired") or window["percent"] is None or
+                window["state"] not in ("available", "stale")):
             continue
         period = window.get("period_minutes")
         key = (window["percent"], period if isinstance(period, int) else 10 ** 9)
@@ -147,11 +148,13 @@ def source_rows(payload):
                 label = str(window.get("label") or "Allowance")
                 resets = iso_seconds(window.get("resets_at"))
                 observed = iso_seconds(window.get("observed_at"))
+                reset_in = None if resets is None or now is None else resets - now
                 windows.append({"label": label, "percent": percent, "state": state,
                                 "period_minutes": window.get("period_minutes"),
                                 "resets_at": window.get("resets_at"),
-                                "reset_in": None if resets is None or now is None else resets - now,
-                                "age": None if observed is None or now is None else now - observed})
+                                "reset_in": reset_in,
+                                "age": None if observed is None or now is None else now - observed,
+                                "expired": reset_in is not None and reset_in <= 0})
             activity = quota.get("activity")
             text = ""
             if isinstance(activity, dict):
@@ -164,11 +167,14 @@ def source_rows(payload):
                     text += " in %dd" % ((until - start + 43200) // 86400)
                 if activity.get("state") == "stale":
                     text = "Stale: " + text
+            hint = quota.get("hint")
+            if not isinstance(hint, str):  # a junk hint must never reach the screen
+                hint = None
             if windows or text:
                 rows.append({"id": source.get("id"), "type": source.get("type"),
                              "name": str(source.get("name") or "Cloud account"),
                              "status": normalise_status(source.get("status")), "usage": text,
-                             "windows": windows, "activity": text,
+                             "windows": windows, "activity": text, "hint": hint,
                              "binding": binding_window(windows)})
                 continue
         metrics = source.get("metrics")

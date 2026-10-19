@@ -287,12 +287,16 @@ class IngestSourceTests(ManagementBase):
         self.assertEqual(datetime.fromisoformat(report["last_progress_at"]), NOW)
         self.assertEqual(snapshot.status, "ok")
 
-    def test_awaiting_report_has_no_collector_fields(self):
+    def test_awaiting_report_carries_an_empty_collector_trail(self):
         source = ClaudeSource({"stale_after_seconds": 900})
         source.id, source.name = self.row["id"], self.row["name"]
         source.attach_storage(self.storage)
         report = source.collect().metrics["quota"]
-        self.assertNotIn("collector_host", report)
+        # Rule 1's hint is built at payload time, so the pending report carries
+        # the trail as None: no observation has ever arrived.
+        self.assertTrue(all(report.get(key) is None for key in
+                            ("collector_seen_at", "collector_host",
+                             "collector_version", "last_progress_at")))
         self.assertTrue(all(window["state"] == "unavailable" for window in report["windows"]))
 
     def test_collector_seen_at_is_daemon_time_not_client_clock(self):

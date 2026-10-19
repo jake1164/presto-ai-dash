@@ -52,7 +52,25 @@ export accounts.
   900 seconds. Reset times also invalidate old windows; no new zero is inferred.
   A later normal response restores fresh readings.
 - Until a first real export, Claude shows warning and unavailable meters with
-  an awaiting-export explanation. Restarting the daemon alone cannot supply data.
+  an awaiting-export explanation. Restarting the daemon alone cannot supply
+  data.
+- Freshness hints explain what to do. The daemon computes a short ASCII hint
+  (at most 28 characters) when the payload is built, so it ages between polls,
+  and sends it in the quota report. First match wins: no report at all, or no
+  collector report and no window ever measured, reads `Run claude in a
+  terminal`; heartbeats only read `Waiting for a Claude reply`; every measured
+  window's reset passed reads `Awaiting refresh`; measured windows exist but
+  none fresh while the collector was seen within the stale threshold reads
+  `Reply in claude to refresh`; otherwise `No report <age> - run claude`, where
+  the age is that of the newest signal of any kind. A fresh window draws no
+  hint. These cases are warnings, never provider `offline`.
+- Detail cards for reports that carry a collector trail add three lines after
+  the per-window reset lines, within the existing six-line budget (reset lines
+  are never dropped; the lowest-priority line goes first when a line must go):
+  `Data age: <age>`, `Last reply: <age> ago` (or `Last reply: unavailable`
+  without a response-progress time), and `Reports: <host> <age> ago` (or
+  `Reports: never`). Reset times stay UTC; other providers' cards are
+  unchanged.
 
 This is a **Claude Code terminal export**. Coverage from the VS Code graphical
 panel has not been verified, and terminal inactivity must not be presented as

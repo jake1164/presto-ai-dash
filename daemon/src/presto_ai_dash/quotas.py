@@ -8,6 +8,78 @@ from .models import iso, now_utc, severity
 
 QUOTA_SCHEMA_VERSION = 1
 
+# The device draws a hint instead of a reset note, so it must stay short.
+MAX_HINT_CHARS = 28
+
+
+def compact_age(seconds):
+    """A compact ASCII age: 59m, 1h, 47h, 2d. A future moment counts as 0m."""
+    if seconds is None:
+        return None
+    seconds = max(0, int(seconds))
+    minutes = seconds // 60
+    if minutes < 60:
+        return "%dm" % minutes
+    hours = seconds // 3600
+    if hours < 48:
+        return "%dh" % hours
+    return "%dd" % (seconds // 86400)
+
+
+def age_label(seconds):
+    """A readable age for small detail text; the 48h boundary jumps to days."""
+    if seconds is None:
+        return None
+    seconds = max(0, int(seconds))
+    minutes = seconds // 60
+    if minutes < 60:
+        return "%d min" % minutes
+    hours = seconds // 3600
+    if hours < 48:
+        return "%d h" % hours
+    # At 48 hours this becomes 2 days; "1 day" is unreachable by design.
+    days = seconds // 86400
+    return "%d day%s" % (days, "" if days == 1 else "s")
+
+
+def claude_hint(report, now=None):
+    """Why a Claude account's readings are missing or old, and what to do.
+
+    Returns a hint of at most 28 ASCII characters, or None. Reports without the
+    observation trail (collector_seen_at and friends) get None, so providers
+    that send no hint are never decorated. First match wins; every answer stays
+    a warning, because none of these cases means the provider is unreachable.
+    """
+    if "collector_seen_at" not in report:
+        return None
+    now = timestamp(now or now_utc())
+    stale_after = report.get("stale_after_seconds", 180)
+    fresh = not report.get("error") and any(
+        window["used_percent"] is not None and
+        (not window["resets_at"] or timestamp(window["resets_at"]) > now) and
+        (now - timestamp(window["observed_at"])).total_seconds() <= stale_after
+        for window in report["windows"])
+    if fresh:
+        return None
+    measured = [window for window in report["windows"]
+                if window["used_percent"] is not None]
+    if not measured:
+        if report.get("collector_seen_at"):
+            return "Waiting for a Claude reply"
+        return "Run claude in a terminal"
+    if all(window["resets_at"] and timestamp(window["resets_at"]) <= now
+           for window in measured):
+        return "Awaiting refresh"
+    seen = report.get("collector_seen_at")
+    if seen and (now - timestamp(seen)).total_seconds() <= stale_after:
+        return "Reply in claude to refresh"
+    # The newest signal of any kind quotes: a recent collector beats an old
+    # window headline. Without a collector (migrated data), the quota leads.
+    signals = [timestamp(window["observed_at"]) for window in report["windows"]]
+    if seen:
+        signals.append(timestamp(seen))
+    return "No report %s - run claude" % compact_age((now - max(signals)).total_seconds())
+
 
 def timestamp(value):
     if isinstance(value, str):
@@ -75,6 +147,9 @@ def present_quota(report, now=None):
         if reset and reset <= now:
             window["state"] = "stale"
             window["reason"] = "awaiting provider reading after reset"
+    if "collector_seen_at" in result:
+        # Built here, not at collect time, so the hint ages between polls.
+        result["hint"] = claude_hint(result, now)
     return result
 
 

@@ -34,16 +34,20 @@ class ClaudeSource(Source):
 
     def collect(self):
         observation = self.storage.observation(self.id) if hasattr(self, "storage") else None
-        report = deepcopy(observation["report"]) if observation else None
-        if report is None:
+        if observation is None:
             report = quota_report(self.provider, self.product, [
                 quota_window(key, label, None, None, now_utc(), minutes, state="unavailable")
                 for key, label, minutes in WINDOWS])
             report["note"] = "Awaiting quota export from normal Claude Code terminal use"
-            return self.snapshot("warning", metrics={"quota": report})
+        else:
+            report = deepcopy(observation["report"])
+        # Every report carries the collector trail (None before the first
+        # push), so payload building can produce freshness hints (Phase 4).
         report["stale_after_seconds"] = self.config.get("stale_after_seconds", 900)
         for key in ("collector_seen_at", "collector_host", "collector_version", "last_progress_at"):
-            report[key] = observation[key]
+            report[key] = observation[key] if observation else None
+        if observation is None:
+            return self.snapshot("warning", metrics={"quota": report})
         available = [w for w in report["windows"] if w["state"] == "available"]
         status = ("rate_limited" if any(w["used_percent"] >= 100 for w in available)
                   else "ok" if available else "warning")

@@ -97,6 +97,17 @@ M11 connects the reusable windows to Home:
   device itself is cut off), a passed reset reads `awaiting refresh`, an
   unknown window shows `--` (distinct from a measured `0%`), and an
   unidentified empty window such as Codex's null `Secondary` stays off Home.
+- Freshness hints (Phase 4): Claude-style reports that carry a collector trail
+  add a short ASCII hint (at most 28 characters) the daemon computes at payload
+  build time, such as `Run claude in a terminal`, `Waiting for a Claude reply`,
+  `Awaiting refresh`, `Reply in claude to refresh`, or `No report 6d - run
+  claude`. When a row has a hint and no window is fresh, the line is drawn
+  right-aligned in the dim ink in place of the reset note (it wins over a
+  cutting long name); with a fresh window no hint is drawn. A window whose
+  reset has passed draws `--` with an empty bar on Home — never a dimmed or
+  `0%` value; its last measured value stays on the detail card.
+  Stale-but-unexpired windows keep today's dimmed value. Rows without a hint
+  behave exactly as before.
 - Local services (Ollama, LiteLLM) are health, not allowance: they share one
   line under the cloud rows, or become the list when no quota account exists.
 - Show additional windows, such as Go's monthly allowance, in the same reusable

@@ -1,8 +1,8 @@
 # Plan: optional observation ingest (local and remote collectors)
 
-Status (2026-10-18): **Phases 1, 2 and 3 are implemented and committed.** The
-database schema is v7. Next: Phase 4 (hints and the Presto display), then 9 and
-7. Phases 5, 6 and 8 are optional. Written for an implementing agent. Read
+Status (2026-10-18): **Phases 1-4 are implemented; Phases 1-3 are committed.**
+The database schema is v7. Next: Phase 9, then 7. Phases 5, 6 and 8 are
+optional. Written for an implementing agent. Read
 `AGENTS.md`, `docs/claude.md`, `docs/sources.md` and `docs/quotas.md` first. Do
 not start a phase until the previous one passes its tests.
 
@@ -11,8 +11,8 @@ not start a phase until the previous one passes its tests.
 | 1 | Observations storage (schema v6) and `ingest()` | Done |
 | 2 | Standalone collector `collectors/claude_statusline.py` | Done |
 | 3 | `POST /api/v1/ingest`, tokens (schema v7), admin controls | Done |
-| 4 | Freshness hints and the Presto display | **Next** |
-| 5 | `Stop` hook activity (needs a manual VS Code panel check first) | Optional |
+| 4 | Freshness hints and the Presto display | Done (2026-10-18) |
+| 5 | Claude activity from local session logs (VS Code panel and CLI); 5b Stop hook and 5c remote push optional | **Next** |
 | 6 | Codex over push | Optional |
 | 7 | "Adding a source" guide and template | Not started (an earlier attempt was discarded) |
 | 8 | OpenTelemetry activity detail | Optional, only if asked |
@@ -59,7 +59,10 @@ and off by default.
   observations: it cannot trigger a provider call, a login, a settings edit or
   any other action, and nothing a remote collector sends can cause one.
 - Never store prompts, transcripts, tool contents, session IDs, account email
-  or account UUIDs. Hashes of progress markers are allowed (as today).
+  or account UUIDs. Hashes of progress markers are allowed (as today). The
+  Phase 5 activity reader opens local session files, which contain prompts,
+  but extracts only the fields listed in Phase 5 (timestamps, model, token
+  counts) and never stores, logs or sends anything else.
 - Missing, expired or old readings are never shown as a fresh 0%.
 - Keep `AGENTS.md` rules: tests via the repo `.venv`, PSL visual check, and
   device sync after any `presto/` change.
@@ -101,10 +104,10 @@ end user does once per computer.
 
 | Method | Provides | Quota | Surfaces | User effort | Decision |
 | --- | --- | --- | --- | --- | --- |
-| Status line (`statusLine` command) | 5h and weekly `used_percentage`, `resets_at`; response-progress markers | **Yes, the only supported source** | Terminal CLI (incl. VS Code integrated terminal). VS Code panel undocumented | One button locally; one snippet remotely | **Core (Phases 1-3)** |
+| Status line (`statusLine` command) | 5h and weekly `used_percentage`, `resets_at`; response-progress markers | **Yes, the only supported source** | Terminal CLI only; the VS Code panel does not run it (public issues; the author's own install received nothing for a week) | One button locally; one snippet remotely | **Core (Phases 1-3)** |
 | `Stop` hook (`hooks` setting) | That a reply finished; time of last activity | No | Terminal and IDE extensions per hook docs | Installed by the same button/snippet | **Phase 5**: makes the "use the CLI" hint exact |
 | OpenTelemetry (`CLAUDE_CODE_ENABLE_TELEMETRY`, OTLP) | `api_request`: timestamp, model, duration, tokens, cost | No | CLI documented; VS Code and headless implied | Several environment variables per computer; always sends account email | **Phase 8, optional** |
-| Transcript file times (`~/.claude/projects`) | Time of last session write | No | All, shared history | Needs a scheduled task per computer; contents hold prompts | **Rejected**: the hook gives the same signal with no extra process |
+| Local session logs (`<profile>/projects/**/*.jsonl`) | Per-request time, model, token counts | No | **CLI and VS Code panel** (verified) | One checkbox; reads only timestamps, model and token counts, never text | **Phase 5**: the only always-on activity signal for panel users. Unofficial file format; this machine only |
 | `/usage` dialog, claude.ai usage page | Full usage bars | Viewable only | Panel, browser | Manual | **Not collectable**; mention in docs as the manual check |
 | Anthropic Admin / Console usage API | API-key spend | No (different product) | n/a | API key | **Out of scope** for subscriptions |
 | OAuth usage endpoint, browser cookies, `/usage` screen scraping (as used by CodexBar) | Quota | Yes | n/a | Credential access or CLI launches | **Not shipped** (credential policy, undocumented endpoints) |
@@ -289,6 +292,15 @@ Done 2026-10-18: implemented with tests; the round trip from the collector scrip
 
 ### Phase 4: freshness and "run the CLI" hints (daemon and Presto)
 
+Done 2026-10-18: implemented with tests. `claude_hint()` in `quotas.py`
+computes the hint when the payload is built (`present_quota`), using the
+source's configured `stale_after_seconds`; `dashboard.py` adds the
+`Data age` / `Last reply` / `Reports` trail lines to detail cards for reports
+that carry a collector trail; `presto/ui.py` and `presto/home.py` draw the
+hint on Home and `--` with empty bars for expired windows. Rule 3 also fires
+for a migrated database with quota rows but no `collector_seen_at` when both
+resets have passed.
+
 The daemon computes one hint per Claude account when the status payload is
 built (so it ages between polls, not once at collect time) and puts it in the
 quota report as `hint` (ASCII, at most 28 characters). First match wins:
@@ -330,29 +342,137 @@ quota report as `hint` (ASCII, at most 28 characters). First match wins:
   fixture payloads for each hint (never the live preview: it reads
   `presto/config.py`), then sync and verify the device per `AGENTS.md`.
 
-### Phase 5: activity from a `Stop` hook (makes the CLI hint exact)
+### Phase 5: Claude activity from local session logs (VS Code panel and CLI)
 
-Anthropic's hook docs say hooks run in terminal sessions and IDE extensions;
-the status-line docs do not say the VS Code panel runs the status line. A
-`Stop` hook running the same collector file in activity mode
-(`--event stop`: no quota, sends `progress` and a heartbeat) lets the daemon
-see "Claude is being used but quota is not arriving".
+**Why.** The author uses Claude almost only in the VS Code panel, which (per
+several public Claude Code issues, and the author's own install receiving no
+reading for a week) does not run the status line, the only source of quota. The
+goal is to show that **Claude is in use but its quota is stale**, accurately,
+without any quota from the panel. Quota percentages from the panel are not
+obtainable by any supported means; this phase does not pretend otherwise.
 
-- Envelope: add optional `"event": "stop"`. The daemon then sets
-  `last_activity_at` (new column) and leaves quota untouched.
-- Hint table gains, above the stale rows: activity seen in the last 24 h but
-  no quota for longer than the stale threshold gives
-  `Panel can't report - use CLI`.
-- Setup stays one action: the local "Set up Claude export" button installs
-  both `statusLine` and the `Stop` hook entry, and removal restores both. The
-  hook entry is appended to any existing `hooks.Stop` list and never replaces
-  the user's own hooks. The remote snippet contains both settings blocks.
-- Before building, verify on a real VS Code panel session that the `Stop`
-  hook runs there (watch the daemon receive the heartbeat during normal use).
-  Do not send model requests just to test it. If hooks do not run in the
-  panel, drop this phase and keep the Phase 4 hints.
-- Tests: hook entry install, coexistence with existing hooks, removal, and
-  the new hint.
+**Verified 2026-10-18 on the author's machine (field names and numbers only):**
+the panel writes the same session files as the CLI under
+`<profile>/projects/<project>/<session>.jsonl`. Each assistant entry has
+`timestamp` (ISO UTC), `entrypoint`, `requestId`, and `message.model` plus
+`message.usage` with `input_tokens`, `output_tokens`,
+`cache_creation_input_tokens` and `cache_read_input_tokens`. Anthropic's own VS
+Code docs say the panel's `/usage` breakdown is computed from these local
+sessions.
+
+**Assumptions (decided 2026-10-18; change them here, not in code):**
+
+- A. The reader is a **pull source inside the daemon** (no hook, no settings
+  edit, no push), because the daemon runs on the machine where Claude Code
+  runs. Remote/Docker use is Phase 5c.
+- B. It is **opt-in**: one checkbox on the Claude account, off by default.
+- C. It reads **only** `timestamp`, `entrypoint`, `requestId`, `message.id`,
+  `message.model` and the four token counts. It never stores, logs, returns or
+  sends message text, tool inputs, paths or session ids, even though the files
+  contain them.
+- D. When the reader is enabled and working, stale quota with recent activity
+  **does not raise the status to warning** (no permanently yellow LED). The
+  text hint carries the staleness. If the reader is off or failing, Phase 4
+  behaviour is unchanged.
+- E. The session file format is **not an official interface**. The docs must
+  say so; the reader degrades to "activity unavailable" instead of raising when
+  the format changes.
+- F. Activity is a **lower bound**: use on claude.ai, a phone or another
+  machine never appears in these files.
+- G. No percentage is ever derived from tokens (limits are not published).
+  Tokens are shown as load, not as quota.
+
+**Reader (`claude_activity.py`, stdlib only, daemon-side).**
+
+- Root: the parent directory of the account's `settings_path`, plus `projects`
+  (so each Claude profile/account gets its own activity). Never follow a
+  symlink out of that tree.
+- Pre-filter lines cheaply (only lines containing `"usage"`), then parse; skip
+  lines over 1 MiB, malformed lines and a partial last line.
+- **Dedupe**: verify on the real file shape (names only) whether one API
+  response appears on several lines, and count each response once by
+  `requestId`/`message.id`. State the finding and the rule in the module
+  docstring.
+- **Incremental**: remember per file (size, mtime, offset); on each poll read
+  only appended bytes; rescan a file that shrank or was replaced. The first
+  scan skips files not modified in the last 8 days and is bounded (cap total
+  bytes). Keep only the last 7 days of (timestamp, tokens, model, entrypoint)
+  tuples in memory.
+- **Output** (`local_activity` in the quota report, only when enabled):
+  `last_request_at`, `last_model`, `last_entrypoint` (`VS Code`, `CLI`, or the
+  raw value sanitised to ASCII, at most 8 characters), `requests_5h`,
+  `tokens_5h`, `tokens_7d`, where tokens are input + output + cache creation
+  (document the choice; cache reads are excluded as they are cheap against
+  limits), and `available` (false with a short reason on any error).
+- Never raises; a missing directory, permission error or unreadable file sets
+  `available: false`.
+- Config: `activity_logs` boolean on `ClaudeSource` (check how
+  `config_fields` types and the admin form handle booleans; add support if
+  missing), label "Read local Claude Code activity (timestamps and token
+  counts only)". The 5 minute "in use" window is a setting
+  (`active_seconds`, default 300).
+
+**Status and hints (computed when the payload is built, like Phase 4).**
+
+- Status: a last request within `active_seconds` gives status `active` (solid
+  marker, blue accent) unless something worse already applies. Otherwise the
+  source's normal status. Assumption D applies.
+- With the reader available, the hint becomes (at most 28 ASCII characters; if
+  too long, drop " old"):
+
+| Situation | Hint |
+| --- | --- |
+| In use, quota readings exist | `In use - quota 6d old` |
+| In use, no quota ever | `In use - no quota data` |
+| Used recently (under 24 h), quota old | `Used 3h ago - quota 6d old` |
+| Used recently, every reset has passed | `Used 3h ago - quota expired` |
+| Quota fresh | no hint (the marker shows use) |
+| No activity in 24 h or more | Phase 4 hints unchanged |
+
+- Reader off or unavailable: Phase 4 hints and status unchanged.
+
+**Estimated weekly reset (detail card only, labelled as an estimate).** The
+weekly cycle is fixed. From the newest real `seven_day` reset time R (even if
+passed), the next reset is R plus 7 days, repeated until it is in the future.
+Show `Wk reset ~4d (est)`. Do not estimate the 5h window (its start rule is not
+documented). Never show the estimate as a measured reset, and show nothing when
+no real reading has ever existed.
+
+**Detail card.** At most 6 lines, in this priority (drop from the bottom): the
+existing per-window reset lines, `Wk reset ~<age> (est)`,
+`Last used: <age> ago (<surface>)` (replaces `Last reply` when activity is
+available), `Tokens 5h/7d: 120k/2.1M` (compact `k`/`M`), `Data age`,
+`Reports`.
+
+**Presto.** Home needs no layout change: it already draws the hint in the note
+slot and a solid marker for `active`. If device code does change, follow
+`AGENTS.md` (PSL fixtures, sync, verify). Check every hint row above and the
+`active` marker with fixture payloads, never the live preview.
+
+**Tests.** JSONL fixtures in a temp directory with **sentinel prompt text**:
+assert the sentinel never appears in the report, stored rows, API payload or
+captured logs. Plus: dedupe; partial and malformed lines; oversized line;
+missing and unreadable directory; a symlink out of the tree is ignored;
+incremental append picks up new lines and reads only the tail (assert the bytes
+read); a shrunk file triggers a rescan; 5h and 7d window math and the `active`
+threshold with an injected clock; status rule D; every hint row and the
+28-character cap; the weekly estimate across several cycles and with no
+reading; detail-card order and the 6-line cap; opt-in off means no
+`local_activity` and unchanged Phase 4 behaviour; the admin checkbox round
+trip. Docs: `docs/claude.md` section "Local activity (VS Code panel and CLI)"
+covering what is read, what is not, assumptions E and F, and how to enable.
+
+**Phase 5b (optional, only if 5 is unacceptable): `Stop` hook.** Hooks are
+documented to run in IDE extensions. A `Stop` hook running the collector in
+activity mode sends a heartbeat and sets `last_activity_at`. It needs a
+settings edit (appended to any existing `hooks.Stop`, restored on removal) and
+a manual check that it fires in the panel before building. It gives less data
+than Phase 5.
+
+**Phase 5c (optional, Docker/remote): push the activity.** Add an optional
+`activity` object to envelope v1 (same fields as `local_activity`, same caps,
+unknown keys still rejected) and a collector mode that runs the reader on the
+Claude machine and pushes it, so a containerised daemon gets activity too.
 
 ### Phase 6 (optional): Codex over push
 
@@ -477,8 +597,8 @@ on the claude.ai usage page); do not scrape it. Its detail card says
   PowerShell snippet from a real remote Claude session, and the POSIX
   collector paths (state directory permissions, `O_NOFOLLOW`); the tests for
   those are skipped or simulated on Windows.
-- Unknown: whether the VS Code panel runs the Claude status line at all
-  (Phase 5 settles this).
+- The VS Code panel almost certainly does not run the Claude status line, so
+  panel users get no quota from it (Phase 5 adds activity, not quota).
 - The admin page cannot be reached inside a container (see above).
 - Ollama Cloud reports activity totals only, no allowance; nothing to fix
   with its current API.

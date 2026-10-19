@@ -186,7 +186,8 @@ class QuotaStorageTests(ManagementBase):
             self.assertEqual(payload["cards"][1]["primary"], "5h: 0%")
             self.assertEqual(payload["cards"][2]["primary"], "5h: 20%")
             self.assertEqual(payload["cards"][3]["primary"], "2 requests")
-            self.assertTrue(any("Monthly reset" in line for line in payload["cards"][1]["detail"]))
+            self.assertTrue(any("Monthly passed" in line for line in payload["cards"][1]["detail"]),
+                            payload["cards"][1]["detail"])
             self.manager.save({"revision": rows[0]["revision"], "enabled": False}, rows[0]["id"])
             self.manager.save({"revision": rows[1]["revision"], "name": "Renamed Go",
                                "api_key": "replacement"}, rows[1]["id"])
@@ -298,8 +299,28 @@ class QuotaDeviceTests(unittest.TestCase):
             quota_window("a", "5h", 10, (NOW - timedelta(hours=1)).isoformat(), NOW - timedelta(hours=3)),
             quota_window("b", "Weekly", 34, RESET, NOW)])
         card = _account_card({"id": "c", "name": "Claude", "type": "claude"},
-                             SourceSnapshot("c", "ok", NOW, {"quota": report}))
-        self.assertEqual(card.detail[:2], ["5h reset passed 10-11 13:00Z", "Weekly reset: 10-13 14:00Z"])
+                             SourceSnapshot("c", "ok", NOW, {"quota": report}), now=NOW)
+        self.assertEqual(card.detail[:2], ["5h passed 10-11 13:00Z", "Weekly reset: 10-13 14:00Z"])
+
+    def test_passed_reset_is_judged_against_now_not_the_last_reading(self):
+        """Claude's snapshot time is its last reading, so a stale account must not
+        present a reset that passed since then as upcoming."""
+        from presto_ai_dash.dashboard import _account_card
+        reading = NOW
+        report = quota_report("claude", "Claude", [
+            quota_window("a", "5h", 10, (reading + timedelta(hours=2)).isoformat(), reading),
+            quota_window("b", "Weekly", 34, (reading + timedelta(days=4)).isoformat(), reading)])
+        snapshot = SourceSnapshot("c", "ok", reading, {"quota": report})
+        row = {"id": "c", "name": "Claude", "type": "claude"}
+        later = reading + timedelta(days=6)
+        card = _account_card(row, snapshot, now=later)
+        self.assertEqual(card.detail[:2], ["5h passed 10-11 16:00Z", "Weekly passed 10-15 14:00Z"])
+        soon = _account_card(row, snapshot, now=reading + timedelta(hours=1))
+        self.assertEqual(soon.detail[:2], ["5h reset: 10-11 16:00Z", "Weekly reset: 10-15 14:00Z"])
+        # The production path never passes `now`; it must also use the present.
+        live = _account_card(row, snapshot)
+        self.assertTrue(live.detail[0].startswith("5h passed"))
+        self.assertTrue(live.detail[1].startswith("Weekly passed"))
 
     def test_home_separates_fresh_stale_passed_unknown_and_local(self):
         """The reference rules: never show old data or a passed reset as current."""
@@ -324,12 +345,14 @@ class QuotaDeviceTests(unittest.TestCase):
         draw_sources(display, Palette(display), rows, 0, 3)
         test_home.HomeLayoutTests().assert_layout(display)
         texts = [text for text, *_ in display.rows]
-        self.assertIn("last known 6d0h ago", texts)      # stale, not a passed countdown
+        self.assertFalse(any("last known" in text for text in texts))  # both resets passed
         self.assertIn("Wk resets 4d19h", texts)          # labelled future reset
-        self.assertIn("awaiting refresh", texts)         # passed reset is not zero
+        self.assertFalse(any("awaiting refresh" in text for text in texts))  # no eligible binding window
         self.assertNotIn("Se", texts)                    # Codex null secondary stays off Home
         self.assertIn("--", texts)                       # unknown 5h ...
-        self.assertIn("0%", texts)                       # ... is distinct from a measured 0%
+        # A measured 0% behind a passed reset is now "--" everywhere on Home:
+        # expired readings are never presented as a fresh zero (Phase 4).
+        self.assertNotIn("0%", texts)
         self.assertEqual(texts[-4:], ["LiteLLM", "12 req", "Ollama", "ACTIVE"])
         self.assertFalse(any(y >= 188 for text, x, y, *_ in display.rows if text in ("Claude", "Codex", "Go")))
 

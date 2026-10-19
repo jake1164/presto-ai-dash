@@ -105,6 +105,9 @@ class RoundTripTests(AdminServerBase):
         self.assertEqual(windows[0]["used_percent"], 12.0)
         self.assertEqual(windows[0]["state"], "available")
         self.assertIsNotNone(windows[0]["resets_at"])
+        # A fresh reading answers no hint; it ages into one only when stale.
+        self.assertIsNone(next(row for row in self.device_status()["sources"]
+                               if row["id"] == self.row["id"])["quota"].get("hint"))
         self.assertFalse(card["detail"][0].endswith("unavailable"))
         # The admin page reports the collector trail; the token appears nowhere.
         _, _, listing = self.request("/api/admin/sources")

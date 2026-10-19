@@ -181,6 +181,10 @@ def _marker(display, palette, row, x, y, size, stale):
 def _freshness(row, stale):
     """Line-1 note: labelled reset countdown, or why there is none."""
     from home import reset_label, window_tag
+    hint = row.get("hint")
+    # A daemon hint takes the note slot; the name makes room for it below.
+    if hint:
+        return hint, INK_DIM
     binding = row.get("binding")
     if binding is None:
         return "", INK_DIM
@@ -213,7 +217,13 @@ def _draw_quota_row(display, palette, row, y, row_width, stale):
         _text(display, palette, note, right - note_w, y, note_rgb, scale=1)
 
     windows = home_windows(row)
-    cells = [(window_tag(w), quota_label(w["percent"]), _window_rgb(w, stale)) for w in windows]
+    cells = []
+    for window in windows:
+        # A passed reset is never a reading: not fresh, not dimmed, not 0%.
+        # An expired value survives on the detail card only.
+        percent = None if window.get("expired") else window["percent"]
+        cells.append((window_tag(window), quota_label(percent),
+                      _window_rgb(window, stale)))
     scale = 2
     if sum(display.measure_text(t, 1) + 2 + display.measure_text(v, 2) + 10
            for t, v, _ in cells) - 10 > row_width:
@@ -239,7 +249,8 @@ def _draw_quota_row(display, palette, row, y, row_width, stale):
     for window in windows:
         display.set_pen(palette.pen(PANEL))
         display.rectangle(14, bars_y, row_width, bar_h)
-        filled = quota_width(window["percent"], row_width)
+        # An expired window's bar stays empty; a stale one keeps its dim fill.
+        filled = 0 if window.get("expired") else quota_width(window["percent"], row_width)
         if filled:
             display.set_pen(palette.pen(_window_rgb(window, stale)))
             display.rectangle(14, bars_y, filled, bar_h)

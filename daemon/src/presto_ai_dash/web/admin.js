@@ -4,6 +4,7 @@
   let csrfToken = "", unlocked = false, catalog = [], sources = [], editing = null;
   let busy = false;
   let dragging = null;
+  let ingestState = null, tokenReveal = null;
   function message(text, error = false) {
     element("message").textContent = text;
     element("message").classList.toggle("error", error);
@@ -25,6 +26,18 @@
   }
   function selectedType() {
     return catalog.find((type) => type.id === element("source-type").value);
+  }
+  async function loadIngest() {
+    // A separate call so a toggle change is visible without waiting for the next poll.
+    try {
+      ingestState = await request("/api/admin/ingest");
+      renderIngest();
+    } catch (_) { /* keep the last known switch state */ }
+  }
+  function renderIngest() {
+    element("ingest-enabled").checked = !!ingestState?.enabled;
+    element("ingest-enabled").disabled = !!ingestState?.locked_by_environment;
+    element("ingest-lock").hidden = !ingestState?.locked_by_environment;
   }
   function renderFields(settings = {}) {
     const type = selectedType();
@@ -186,6 +199,43 @@
     if (event.pointerId === dragging?.pointerId) finishDrag(true);
   });
   element("source-list").addEventListener("lostpointercapture", () => { if (dragging) finishDrag(true); });
+  function copyCell(text) {
+    const container = document.createElement("div"); container.className = "ingest-line";
+    const code = document.createElement("code"); code.className = "ingest-code";
+    code.textContent = text;
+    const copy = document.createElement("button"); copy.type = "button";
+    copy.textContent = "Copy"; copy.setAttribute("aria-label", "Copy to the clipboard");
+    copy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(text); copy.textContent = "Copied";
+        setTimeout(() => { copy.textContent = "Copy"; }, 2000);
+      } catch (_) { message("Copying is blocked; select the text instead.", true); }
+    });
+    container.append(code, copy);
+    return container;
+  }
+  function revealToken(source) {
+    // tokenReveal holds the one-time response; it disappears on hide or revoke.
+    if (!tokenReveal || tokenReveal.id !== source.id || !source.ingest.token_exists) return null;
+    const box = document.createElement("div"); box.className = "token-box";
+    const title = document.createElement("p"); title.className = "badge";
+    title.textContent = "Remote token — shown only once, copy it now:";
+    box.append(title);
+    box.append(copyCell(tokenReveal.token));
+    for (const [name, snippet] of [["POSIX (sh/bash) settings.json status line:",
+                                    tokenReveal.posix_snippet],
+                                   ["Windows PowerShell settings.json status line:",
+                                    tokenReveal.powershell_snippet]]) {
+      const label = document.createElement("p"); label.className = "note";
+      label.textContent = name + " edit the URL after pasting:";
+      box.append(label, copyCell(snippet));
+    }
+    const dismiss = document.createElement("button"); dismiss.type = "button";
+    dismiss.textContent = "Hide";
+    dismiss.addEventListener("click", () => { tokenReveal = null; renderList(); });
+    box.append(dismiss);
+    return box;
+  }
   function renderList() {
     const list = element("source-list"), active = document.activeElement;
     const focusedId = list.contains(active) ? active.closest(".source")?.dataset.id : null;
@@ -269,6 +319,48 @@
         });
         row.append(setup);
       }
+      if (source.ingest) {
+        const reported = document.createElement("p"); reported.className = "note";
+        reported.textContent = source.ingest.collector_seen_at ?
+          "Last report: " + new Date(source.ingest.collector_seen_at).toLocaleString() +
+          " from " + source.ingest.collector_host : "No reports yet";
+        row.append(reported);
+        const controls = document.createElement("div"); controls.className = "actions";
+        const create = document.createElement("button"); create.type = "button";
+        create.textContent = source.ingest.token_exists ? "Rotate remote token" : "Create remote token";
+        create.addEventListener("click", async () => {
+          if (busy) return;
+          busy = true; create.disabled = true;
+          try {
+            tokenReveal = await request("/api/admin/sources/" + source.id + "/ingest-token", "POST");
+            tokenReveal.id = source.id;
+            await reload();
+            message("Remote token ready. Copy it now: it is shown only once.");
+          } catch (error) { message(error.message, true); }
+          finally { busy = false; create.disabled = false; renderList(); }
+        });
+        controls.append(create);
+        if (source.ingest.token_exists) {
+          const revoke = document.createElement("button"); revoke.type = "button";
+          revoke.className = "danger"; revoke.textContent = "Revoke";
+          revoke.addEventListener("click", async () => {
+            if (!window.confirm("Revoke this account's remote token? Collectors using it are refused.")) return;
+            if (busy) return;
+            busy = true; revoke.disabled = true;
+            try {
+              await request("/api/admin/sources/" + source.id + "/ingest-token", "DELETE");
+              tokenReveal = null;
+              await reload();
+              message("Remote token revoked. Install a new one to report again.");
+            } catch (error) { message(error.message, true); }
+            finally { busy = false; revoke.disabled = false; }
+          });
+          controls.append(revoke);
+        }
+        row.append(controls);
+        const reveal = revealToken(source);
+        if (reveal) row.append(reveal);
+      }
       if (source.quota) {
         for (const quota of source.quota.windows) {
           const meter = document.createElement("div"); meter.className = "quota " + quota.state;
@@ -320,6 +412,7 @@
   }
   function lock() {
     csrfToken = ""; unlocked = false; sources = []; catalog = []; editing = null;
+    ingestState = null; tokenReveal = null;
     element("admin-token").value = ""; element("source-form").reset();
     element("source-list").replaceChildren(); element("source-fields").replaceChildren();
     element("workspace").hidden = true; element("login-panel").hidden = false;
@@ -327,6 +420,7 @@
   }
   async function unlock() {
     await reload();
+    await loadIngest();
     element("source-type").replaceChildren(...catalog.map((type) => {
         const option = document.createElement("option"); option.value = type.id;
         option.textContent = type.id === "fake" ? "Fake (demo/test data)" : type.name; return option;
@@ -360,6 +454,18 @@
     try { await request("/api/admin/session", "DELETE"); lock(); }
     catch (error) { message(error.message, true); }
     finally { busy = false; }
+  });
+  element("ingest-enabled").addEventListener("change", async () => {
+    if (busy) { renderIngest(); return; }
+    busy = true;
+    try {
+      ingestState = await request("/api/admin/ingest", "PUT",
+        {enabled: element("ingest-enabled").checked});
+      message(element("ingest-enabled").checked ?
+        "Remote reports accepted. Each remote account needs its own token below." :
+        "Remote reports refused. Existing tokens are kept.");
+    } catch (error) { message(error.message, true); }
+    finally { busy = false; renderIngest(); }
   });
   element("add-source").addEventListener("click", () => { if (!busy) { openEditor(); message(""); } });
   element("close-editor").addEventListener("click", () => { if (!busy) closeEditor(); });

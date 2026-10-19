@@ -1,23 +1,56 @@
 """One authenticated status endpoint, served using the standard library."""
 
+import hashlib
 import hmac
 import json
 import logging
 import os
 import socket
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 from .dashboard import build_status_payload
+from .ingest import ingest as store_observation
 
 log = logging.getLogger(__name__)
 STATUS_PATH = "/api/v1/status"
+INGEST_PATH = "/api/v1/ingest"
+INGEST_BODY_LIMIT = 16384
 
 
-def make_handler(storage, shared_token, source_ids=None, status_provider=None):
+class _IngestRateLimiter:
+    """Two-second per-token throttle for the ingest route.
+
+    Only tokens that passed authentication become entries, and the map drops
+    or clears old entries instead of growing without bound.
+    """
+
+    INTERVAL_SECONDS = 2.0
+    MAX_ENTRIES = 1024
+
+    def __init__(self):
+        self._seen = {}
+
+    def check(self, key, now):
+        """Whether a request with this key may proceed; it is registered when so."""
+        seen = {past_key: past for past_key, past in self._seen.items()
+                if now - past < self.INTERVAL_SECONDS}
+        self._seen = seen
+        if key in seen:
+            return False
+        if len(seen) >= self.MAX_ENTRIES:
+            seen.clear()
+        seen[key] = now
+        return True
+
+
+def make_handler(storage, shared_token, source_ids=None, status_provider=None,
+                 ingest_enabled=None, ingest_rate_limiter=None):
     if not shared_token:
         raise ValueError("API requires a nonempty shared token")
+    limiter = ingest_rate_limiter if ingest_rate_limiter is not None else _IngestRateLimiter()
 
     class StatusHandler(BaseHTTPRequestHandler):
         def setup(self):
@@ -63,6 +96,69 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None):
                 return
             self._send_json(200, payload)
 
+        def _ingest_allowed(self):
+            """Re-evaluated per request so an admin toggle applies without a restart."""
+            if ingest_enabled is None:
+                return False
+            try:
+                return bool(ingest_enabled())
+            except Exception:
+                # A broken availability check must never open the route.
+                log.exception("ingest availability check failed")
+                return False
+
+        def do_POST(self):
+            if urlparse(self.path).path != INGEST_PATH:
+                self._send_json(404, {"error": "not_found"})
+                return
+            if not self._ingest_allowed():
+                # A disabled route looks like an unknown one and hides itself.
+                self._send_json(404, {"error": "not_found"})
+                return
+            try:
+                length = int(self.headers.get("Content-Length", ""))
+            except ValueError:
+                length = -1
+            if length < 0:
+                self._send_json(400, {"error": "invalid_length"})
+                return
+            if length > INGEST_BODY_LIMIT:
+                # Refuse the size before reading a single body byte.
+                self._send_json(413, {"error": "body_too_large"})
+                return
+            if self.headers.get("Transfer-Encoding"):
+                self._send_json(400, {"error": "unsupported_transfer_encoding"})
+                return
+            parts = self.headers.get("Authorization", "").split()
+            token = parts[1] if len(parts) == 2 and parts[0].lower() == "bearer" else ""
+            instance_id = storage.instance_for_ingest_token(token)
+            if instance_id is None:
+                # Unknown, revoked or malformed bearer: the input is never echoed.
+                self._send_json(401, {"error": "unauthorised"})
+                return
+            key = hashlib.sha256(token.encode("utf-8")).hexdigest()
+            if not limiter.check(key, time.monotonic()):
+                self._send_json(429, {"error": "rate_limited"})
+                return
+            data = self.rfile.read(length)
+            try:
+                envelope = json.loads(data.decode("utf-8"))
+            except (ValueError, UnicodeError):
+                self._send_json(400, {"error": "invalid_json"})
+                return
+            try:
+                accepted = store_observation(storage, instance_id, envelope)
+            except ValueError:
+                self._send_json(400, {"error": "invalid_envelope"})
+                return
+            if not accepted:
+                # A disabled or deleted instance is refused like a bad token.
+                self._send_json(401, {"error": "unauthorised"})
+                return
+            log.debug("ingest accepted for instance %s", instance_id)
+            self.send_response(204)
+            self.end_headers()
+
     return StatusHandler
 
 
@@ -80,11 +176,13 @@ class _ExclusiveHTTPServer(ThreadingHTTPServer):
 
 class ApiServer:
     def __init__(self, host, port, storage, shared_token, source_ids=None,
-                 status_provider=None, handler_class=None):
+                 status_provider=None, ingest_enabled=None, ingest_rate_limiter=None,
+                 handler_class=None):
         self.host = host
         self._server = _ExclusiveHTTPServer(
             (host, port), handler_class or make_handler(
-                storage, shared_token, source_ids, status_provider))
+                storage, shared_token, source_ids, status_provider,
+                ingest_enabled, ingest_rate_limiter))
         self._server.daemon_threads = False
         self._server.block_on_close = True
         self._server._active_condition = threading.Condition()

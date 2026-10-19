@@ -1,12 +1,15 @@
 """UTC-normalized SQLite snapshot and alert-observation history."""
 
+import hashlib
 import json
 from copy import deepcopy
+import secrets
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
 
 from .models import STATUS_ORDER, SourceSnapshot, now_utc
+from .sources import source_type
 
 
 def _utc(moment):
@@ -49,8 +52,22 @@ def _validated_alerts(value):
     return alerts
 
 
+def _token_digest(token):
+    """The SHA-256 lookup key of a presented ingest token, or None for junk.
+
+    Tokens are stored and compared only as digests; presentation is equality
+    on the unique hash column, so the plaintext never reaches the database.
+    """
+    if not isinstance(token, str) or not token:
+        return None
+    try:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+    except UnicodeError:
+        return None
+
+
 class Storage:
-    SCHEMA_VERSION = 6
+    SCHEMA_VERSION = 7
     MAX_HISTORY_LIMIT = 1000
 
     def __init__(self, path):
@@ -129,23 +146,31 @@ class Storage:
                 self._conn.execute("ALTER TABLE source_instances ADD COLUMN position INTEGER NOT NULL DEFAULT 0")
                 self._conn.execute("UPDATE source_instances SET position = rowid")
             self._conn.execute("PRAGMA user_version = 5")
-            # v6: provider-neutral observations replace the Claude-only export
-            # table. last_activity_at is created now (unused until Phase 5) so
-            # activity support will not need another migration.
-            self._conn.execute("""CREATE TABLE IF NOT EXISTS observations (
+            if version < 6:
+                # v6: provider-neutral observations replace the Claude-only export
+                # table. last_activity_at is created now (unused until Phase 5) so
+                # activity support will not need another migration.
+                self._conn.execute("""CREATE TABLE IF NOT EXISTS observations (
+                    instance_id TEXT PRIMARY KEY REFERENCES source_instances(id) ON DELETE CASCADE,
+                    report TEXT, evidence TEXT,
+                    collector_seen_at TEXT, collector_host TEXT, collector_version TEXT,
+                    last_progress_at TEXT, progress TEXT, last_activity_at TEXT
+                )""")
+                exports = self._conn.execute(
+                    "SELECT instance_id, report, evidence FROM claude_exports").fetchall()
+                for export in exports:
+                    self._conn.execute(
+                        "INSERT INTO observations (instance_id, report, evidence) VALUES (?, ?, ?)",
+                        (export["instance_id"], export["report"], export["evidence"]))
+                self._conn.execute("DROP TABLE claude_exports")
+                self._conn.execute("PRAGMA user_version = 6")
+            # v7: per-instance remote ingest tokens. Only the SHA-256 hash is
+            # stored; the plaintext is shown once by create_ingest_token.
+            self._conn.execute("""CREATE TABLE IF NOT EXISTS ingest_tokens (
                 instance_id TEXT PRIMARY KEY REFERENCES source_instances(id) ON DELETE CASCADE,
-                report TEXT, evidence TEXT,
-                collector_seen_at TEXT, collector_host TEXT, collector_version TEXT,
-                last_progress_at TEXT, progress TEXT, last_activity_at TEXT
+                token_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL
             )""")
-            exports = self._conn.execute(
-                "SELECT instance_id, report, evidence FROM claude_exports").fetchall()
-            for export in exports:
-                self._conn.execute(
-                    "INSERT INTO observations (instance_id, report, evidence) VALUES (?, ?, ?)",
-                    (export["instance_id"], export["report"], export["evidence"]))
-            self._conn.execute("DROP TABLE claude_exports")
-            self._conn.execute("PRAGMA user_version = 6")
+            self._conn.execute("PRAGMA user_version = 7")
             self._conn.commit()
         except Exception:
             self._conn.rollback()
@@ -252,6 +277,94 @@ class Storage:
             row = self._conn.execute("SELECT * FROM claude_bridges WHERE instance_id = ?",
                                      (instance_id,)).fetchone()
         return dict(row) if row else None
+
+    def create_ingest_token(self, instance_id):
+        """Mint (or rotate) the push token of one source instance.
+
+        Returns the plaintext exactly once and stores only its SHA-256 hash.
+        Only enabled instances of push-capable source classes get a token.
+        """
+        token = secrets.token_urlsafe(32)
+        with self._lock:
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                row = self._conn.execute(
+                    "SELECT enabled, type FROM source_instances WHERE id = ?",
+                    (instance_id,)).fetchone()
+                if row is None:
+                    raise KeyError(instance_id)
+                if (not row["enabled"] or
+                        not source_type(row["type"]).accepts_push):
+                    raise ValueError("ingest tokens are only for enabled push-capable sources")
+                self._conn.execute(
+                    "INSERT INTO ingest_tokens (instance_id, token_hash, created_at)"
+                    " VALUES (?, ?, ?) ON CONFLICT(instance_id) DO UPDATE SET"
+                    " token_hash=excluded.token_hash, created_at=excluded.created_at",
+                    (instance_id, _token_digest(token), _stored_time(now_utc())))
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return token
+
+    def revoke_ingest_token(self, instance_id):
+        """Remove one instance's token; a disabled account may still revoke."""
+        with self._lock:
+            try:
+                row = self._conn.execute("SELECT type FROM source_instances WHERE id = ?",
+                                         (instance_id,)).fetchone()
+                if row is None:
+                    raise KeyError(instance_id)
+                if not source_type(row["type"]).accepts_push:
+                    raise ValueError("ingest tokens belong to push-capable sources only")
+                self._conn.execute("DELETE FROM ingest_tokens WHERE instance_id = ?",
+                                   (instance_id,))
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def ingest_token_info(self, instance_id):
+        """Token existence and creation time; never the hash."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT created_at FROM ingest_tokens WHERE instance_id = ?",
+                (instance_id,)).fetchone()
+        return {"exists": row is not None, "created_at": row["created_at"] if row else None}
+
+    def instance_for_ingest_token(self, token):
+        """The instance a presented bearer token belongs to, or None."""
+        digest = _token_digest(token)
+        if digest is None:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT instance_id FROM ingest_tokens WHERE token_hash = ?",
+                (digest,)).fetchone()
+        return row["instance_id"] if row else None
+
+    def source_instance_type(self, instance_id):
+        with self._lock:
+            row = self._conn.execute("SELECT type FROM source_instances WHERE id = ?",
+                                     (instance_id,)).fetchone()
+        return row["type"] if row else None
+
+    def ingest_enabled_setting(self):
+        """The persisted admin switch, or None while it has never been set."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT value FROM configuration_meta WHERE name = 'ingest_enabled'").fetchone()
+        return None if row is None else bytes(row["value"]) == b"1"
+
+    def save_ingest_enabled(self, enabled):
+        if type(enabled) is not bool:
+            raise ValueError("ingest_enabled must be a boolean")
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO configuration_meta (name, value) VALUES ('ingest_enabled', ?)"
+                " ON CONFLICT(name) DO UPDATE SET value=excluded.value",
+                (b"1" if enabled else b"0",))
+
 
     def save_claude_bridge(self, instance_id, settings_path, previous, command):
         try:

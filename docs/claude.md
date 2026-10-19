@@ -58,6 +58,42 @@ This is a **Claude Code terminal export**. Coverage from the VS Code graphical
 panel has not been verified, and terminal inactivity must not be presented as
 fresh panel telemetry. Use terminal mode for the verified reporting route.
 
+## Remote computers
+
+A Claude Code setup on another computer (Windows, macOS, or Linux) can report
+to this daemon through the optional observation ingest route, `POST
+/api/v1/ingest`. The route and this feature are off by default; nothing new
+listens until an administrator turns them on. The computer running the daemon
+needs no extra setup, and the local status-line export above keeps working
+as before.
+
+1. On the daemon's admin page, tick **Accept remote reports** (or start the
+   daemon with `DASH_INGEST_ENABLED=1`; see [setup.md](setup.md)).
+2. Download the collector `claude_statusline.py` from the same page — it is
+   the single-file Python 3.8+ script that also drives the local export.
+3. In the remote account's row, click **Create remote token**. The token is
+   shown once; copy it into a file on the remote computer, for example
+   `~/.config/presto-ai-dash/claude.token`. The daemon stores only its hash.
+4. On the remote computer, set the `statusLine` command in that profile's
+   Claude settings file to the paste-ready snippet shown with the token, then
+   edit the URL placeholder to the daemon's real address and check the token
+   file path. Claude Code runs the collector after normal responses, exactly
+   as it runs the local export.
+
+The envelope carries quota windows, progress evidence hashes, and a short
+host label only — no credentials, session identities, or prompt text. The
+daemon owns time and applies the same freshness rules as the local export, so
+a quiet remote computer ages into stale readings instead of a fresh 0%.
+One account may report from several computers; the newest reading wins.
+
+**Network safety.** The ingest route serves plain HTTP beside the status
+endpoint. Anything on the network that can reach the daemon port may attempt
+posts, so enable ingest only on a private network such as Tailscale, or put
+it behind a reverse proxy with TLS. A token is write-only for one account:
+it cannot read the status payload, list sources, or touch any other source,
+and revoking it stops that computer's reports immediately.
+
+
 ## Implementation checkpoint — 2026-10-11
 
 The connector, UI setup/removal, SQLite schema v4 migration, and helper are

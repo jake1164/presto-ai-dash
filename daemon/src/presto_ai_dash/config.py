@@ -12,7 +12,8 @@ log = logging.getLogger(__name__)
 DEFAULTS = {
     "daemon": {"host": "0.0.0.0", "port": 8787, "shared_token": "",
                "poll_interval": 15, "database": "dash.db",
-               "retention_hours": 72, "cleanup_interval": 300},
+               "retention_hours": 72, "cleanup_interval": 300,
+               "ingest_enabled": False},
     "logging": {"level": "INFO"},
     "admin": {"enabled": False, "port": 8788, "token": "", "key_file": ""},
     "sources": {
@@ -36,6 +37,41 @@ ENV_OVERRIDES = {
 
 class ConfigError(ValueError):
     """Invalid or unreadable daemon configuration."""
+
+
+INGEST_ENV = "DASH_INGEST_ENABLED"
+TRUTHY_FLAGS = frozenset(("1", "true", "yes", "on"))
+FALSY_FLAGS = frozenset(("0", "false", "no", "off"))
+
+
+def parse_flag(value, name):
+    """Parse a boolean environment flag, rejecting anything ambiguous."""
+    lowered = value.strip().lower() if isinstance(value, str) else ""
+    if lowered in TRUTHY_FLAGS:
+        return True
+    if lowered in FALSY_FLAGS:
+        return False
+    raise ConfigError("%s must be a boolean flag (1/true/yes/on or 0/false/no/off)" % name)
+
+
+def ingest_enabled(config, stored=None, environ=None):
+    """The effective ingest switch, resolved afresh on every request.
+
+    The environment beats the admin's stored setting, which beats TOML; off by
+    default. Reading the environment here — not once at startup — is what lets
+    an admin toggle apply without a daemon restart. A garbled variable fails
+    closed instead of taking the route down.
+    """
+    names = os.environ if environ is None else environ
+    if INGEST_ENV in names:
+        try:
+            return parse_flag(names[INGEST_ENV], INGEST_ENV)
+        except ConfigError:
+            log.error("%s is set to a non-boolean value; ingest stays disabled", INGEST_ENV)
+            return False
+    if stored is not None:
+        return stored
+    return config["daemon"].get("ingest_enabled", False)
 
 
 def _merge(base, override, prefix=""):
@@ -65,6 +101,8 @@ def load_config(path=None):
                 except ValueError as exc:
                     raise ConfigError("DASH_PORT must be an integer") from exc
             config[section][key] = value
+    if INGEST_ENV in os.environ:
+        config["daemon"]["ingest_enabled"] = parse_flag(os.environ[INGEST_ENV], INGEST_ENV)
     for section, key, minimum, maximum in (
         (config["daemon"], "port", 1, 65535),
         (config["daemon"], "poll_interval", 1, None),
@@ -81,6 +119,8 @@ def load_config(path=None):
         value = config["daemon"][key]
         if not isinstance(value, str) or (key != "shared_token" and not value.strip()):
             raise ConfigError("daemon.%s must be a valid string" % key)
+    if type(config["daemon"]["ingest_enabled"]) is not bool:
+        raise ConfigError("daemon.ingest_enabled must be a boolean")
     token = config["daemon"]["shared_token"]
     if token and (not token.isascii() or any(char.isspace() for char in token)):
         raise ConfigError("daemon.shared_token must be ASCII without whitespace")

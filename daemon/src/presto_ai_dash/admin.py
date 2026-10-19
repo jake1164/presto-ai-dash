@@ -15,6 +15,8 @@ from .storage import ConfigurationConflict
 
 log = logging.getLogger(__name__)
 MAX_BODY = 65536
+COLLECTOR_FILE = "claude_statusline.py"
+INGEST_TOKEN_PATH = r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/ingest-token"
 ASSETS = {"/": ("index.html", "text/html; charset=utf-8"),
           "/admin.js": ("admin.js", "text/javascript; charset=utf-8"),
           "/admin.css": ("admin.css", "text/css; charset=utf-8")}
@@ -33,7 +35,8 @@ def make_admin_handler(manager, token):
         def log_message(self, *_):
             pass
 
-        def _send(self, status, body, content_type="application/json", cookie=None):
+        def _send(self, status, body, content_type="application/json", cookie=None,
+                  headers=None):
             if content_type == "application/json":
                 body = json.dumps(body).encode("utf-8")
             self.send_response(status)
@@ -46,6 +49,8 @@ def make_admin_handler(manager, token):
                              "default-src 'none'; script-src 'self'; style-src 'self'; "
                              "connect-src 'self'; frame-ancestors 'none'; "
                              "base-uri 'none'; form-action 'none'")
+            for name, value in (headers or {}).items():
+                self.send_header(name, value)
             self.send_header("Connection", "close")
             if cookie is not None:
                 self.send_header("Set-Cookie", cookie)
@@ -136,6 +141,22 @@ def make_admin_handler(manager, token):
                         log.error("codex login status failed")
                         self._send(500, {"error": "login status could not be read"})
                 return
+            if path == "/api/admin/collector":
+                if self._authorized():
+                    self._send(200, files("presto_ai_dash").joinpath(
+                        "collectors", COLLECTOR_FILE).read_bytes(),
+                        "text/x-python; charset=utf-8",
+                        headers={"Content-Disposition":
+                                 'attachment; filename="%s"' % COLLECTOR_FILE})
+                return
+            if path == "/api/admin/ingest":
+                if self._authorized():
+                    try:
+                        self._send(200, manager.ingest_state())
+                    except Exception:
+                        log.error("admin ingest state failed")
+                        self._send(500, {"error": "ingest state could not be read"})
+                return
             if path != "/api/admin/sources":
                 self._send(404, {"error": "not found"})
                 return
@@ -153,8 +174,9 @@ def make_admin_handler(manager, token):
             match = re.fullmatch(r"/api/admin/sources/([A-Za-z0-9_-]{1,80})", path)
             reorder = method == "PUT" and path == "/api/admin/source-order"
             export = re.fullmatch(r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/claude-export", path)
+            ingest_setting = method == "PUT" and path == "/api/admin/ingest"
             if ((method == "POST" and path != "/api/admin/sources" and export is None) or
-                    (method != "POST" and match is None and not reorder)):
+                    (method != "POST" and match is None and not reorder and not ingest_setting)):
                 self._send(404, {"error": "not found"})
                 return
             if (self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json"
@@ -177,6 +199,8 @@ def make_admin_handler(manager, token):
             try:
                 if reorder:
                     result = manager.reorder(data)
+                elif ingest_setting:
+                    result = manager.set_ingest_enabled(data)
                 elif export:
                     result = manager.configure_claude_export(export[1], data)
                 elif method == "DELETE":
@@ -197,6 +221,23 @@ def make_admin_handler(manager, token):
                 log.error("admin source update failed")
                 self._send(500, {"error": "configuration could not be saved"})
 
+        def _ingest_token(self, method, instance_id):
+            """Create/rotate (POST) or revoke (DELETE) one account's push token."""
+            if not self._authorized():
+                return
+            try:
+                if method == "POST":
+                    self._send(201, manager.create_ingest_token(instance_id))
+                else:
+                    self._send(200, manager.revoke_ingest_token(instance_id))
+            except KeyError:
+                self._send(404, {"error": "source not found"})
+            except ValueError as exc:
+                self._send(400, {"error": str(exc)})
+            except Exception:
+                log.error("admin ingest token operation failed")
+                self._send(500, {"error": "ingest token could not be saved"})
+
         def do_POST(self):
             if urlsplit(self.path).path == "/api/admin/session":
                 if self._authorized(bearer_only=True):
@@ -212,6 +253,10 @@ def make_admin_handler(manager, token):
             login_cancel = re.fullmatch(r"/api/admin/codex-logins/([A-Za-z0-9_-]{1,80})/cancel", path)
             codex_login = re.fullmatch(r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/codex-login", path)
             codex_logout = re.fullmatch(r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/codex-logout", path)
+            token_create = re.fullmatch(INGEST_TOKEN_PATH, path)
+            if token_create:
+                self._ingest_token("POST", token_create[1])
+                return
             if login_cancel or codex_login or codex_logout:
                 if not self._authorized():
                     return
@@ -261,6 +306,10 @@ def make_admin_handler(manager, token):
                 if self._authorized():
                     sessions.revoke(self._cookie_value())
                     self._send(200, {"logged_out": True}, cookie=self._session_cookie())
+                return
+            token_revoke = re.fullmatch(INGEST_TOKEN_PATH, urlsplit(self.path).path)
+            if token_revoke:
+                self._ingest_token("DELETE", token_revoke[1])
                 return
             self._mutation("DELETE")
 

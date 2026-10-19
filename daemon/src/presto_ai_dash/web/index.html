@@ -32,6 +32,15 @@
         Uncheck Enabled to pause a source and hide it on Presto; its settings, key, and position are kept.</p>
       <div id="source-list" aria-label="Accounts in display order"></div>
       <p class="note">Changes apply automatically after any current probe finishes.</p>
+      <h2>Remote reports (optional)</h2>
+      <label class="check" id="ingest-label"><input id="ingest-enabled" type="checkbox"> Accept remote reports</label>
+      <p id="ingest-lock" class="note" hidden>The DASH_INGEST_ENABLED environment variable controls
+        remote reports for this daemon; edit the environment instead of this page.</p>
+      <p class="note">Remote collectors send observations to this daemon over plain HTTP from
+        other computers. Enable it only on a private network such as Tailscale, or behind a
+        reverse proxy with TLS. A remote token is write-only for one account and report bodies
+        hold no secrets.</p>
+      <p><a id="download-collector" href="/api/admin/collector" download="claude_statusline.py">Download collector (claude_statusline.py)</a></p>
       <h2>Cloud and subscription sources</h2>
       <p class="note">Available subscription connectors show current allowance meters in your source list.
         OpenCode Go reports quota percentages. Ollama Cloud reports dated activity;

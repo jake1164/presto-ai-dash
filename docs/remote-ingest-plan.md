@@ -230,6 +230,8 @@ Done 2026-10-18: implemented with tests; normalization moved into the collector 
 
 ### Phase 3: HTTP route and admin controls
 
+Done 2026-10-18: implemented with tests; the round trip from the collector script to `/api/v1/status` passes end to end.
+
 - `api.py`: add `POST /api/v1/ingest` behind `ingest_enabled`. Resolve the
   bearer token by hash to an instance (constant-time compare), check the
   instance is enabled and `accepts_push`, then call `ingest()`. Apply the

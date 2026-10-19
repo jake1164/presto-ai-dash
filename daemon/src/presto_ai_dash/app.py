@@ -10,7 +10,7 @@ import threading
 from . import __version__
 from .api import ApiServer
 from .admin import AdminServer
-from .config import (ConfigError, configure_logging, load_config,
+from .config import (ConfigError, configure_logging, ingest_enabled, load_config,
                      resolve_shared_token, resolve_admin_token)
 from .management import SourceConfiguration, ManagedCollector
 from .models import now_utc
@@ -65,6 +65,10 @@ class Daemon:
         self._stop_lock = threading.Lock()
         self._stopped = False
 
+    def ingest_allowed(self):
+        """The route's live switch, so an admin toggle applies without a restart."""
+        return ingest_enabled(self.config, self.storage.ingest_enabled_setting())
+
     def setup(self):
         try:
             managed = (self.config["admin"]["enabled"] or
@@ -82,7 +86,8 @@ class Daemon:
                                  source_ids=([collector.source.id for collector in self.collectors]
                                              if not managed else None),
                                  status_provider=(self.source_configuration.status_payload
-                                                  if managed else None))
+                                                  if managed else None),
+                                 ingest_enabled=self.ingest_allowed)
             if self.config["admin"]["enabled"]:
                 token = resolve_admin_token(self.config, self.shared_token)
                 self.admin = AdminServer(self.config["admin"]["port"],

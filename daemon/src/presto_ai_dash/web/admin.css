@@ -40,6 +40,11 @@ input[type=checkbox] { accent-color: #7ce6da; width: 18px; height: 18px; }
 #source-list[aria-busy=true] { opacity: .7; pointer-events: none; }
 .source p { margin: 7px 0 0; font-size: .9rem; }
 .badge { color: #7ce6da; font-size: .85rem; }
+.token-box { margin-top: 12px; padding: 16px; border: 1px solid #ac6273; border-radius: 10px; background: #231a2e; }
+.token-box > button { margin-top: 14px; }
+.ingest-line { display: flex; align-items: flex-start; gap: 10px; margin-top: 8px; }
+.ingest-code { flex: 1; min-width: 0; overflow-wrap: anywhere; background: #0c1422; border: 1px solid #2a3b53; border-radius: 7px; padding: 10px 12px; font-size: .85rem; }
+.ingest-line button { flex-shrink: 0; min-height: 44px; }
 #message { min-height: 1.5em; margin: 18px 0 0; color: #7ce6da; }
 #message.error { color: #ffb8c8; }
 main > .panel { min-width: 0; }

@@ -303,29 +303,8 @@ class EncryptedConfigurationTests(ManagementBase):
                 load_config(path)
 
 
-class AdminHttpTests(ManagementBase):
-    def test_second_admin_server_cannot_share_listening_port(self):
-        with self.assertRaises(OSError):
-            duplicate = AdminServer(self.admin.actual_port, self.manager, "other-admin-token")
-            self.addCleanup(duplicate.stop)
-
-    def test_account_order_endpoint_auth_csrf_and_conflicts(self):
-        self.add_litellm()
-        original = [r["id"] for r in self.manager.list_sources()["sources"]]
-        data = {"order": original[::-1], "expected_order": original}
-        path = "/api/admin/source-order"
-        self.assertEqual(self.request(path, "PUT", data, token="device-token")[0], 401)
-        cookie, session, _ = self.login()
-        headers = {"Cookie": cookie, "Origin": self.base_url}
-        self.assertEqual(self.request(path, "PUT", data, token=None, headers=headers)[0], 403)
-        headers["X-CSRF-Token"] = session["csrf_token"]
-        status, _, result = self.request(path, "PUT", data, token=None, headers=headers)
-        self.assertEqual(status, 200)
-        self.assertEqual([r["id"] for r in result["sources"]], original[::-1])
-        self.assertNotIn("credential", json.dumps(result))
-        self.assertNotIn("test-provider-key", json.dumps(result))
-        self.assertEqual(self.request(path, "PUT", data)[0], 409)
-        self.assertEqual(self.request(path, "PUT", {"order": []})[0], 400)
+class AdminServerBase(ManagementBase):
+    """A real admin server on an ephemeral port; the base for admin-route tests."""
 
     def setUp(self):
         super().setUp()
@@ -352,6 +331,37 @@ class AdminHttpTests(ManagementBase):
             return response.status, dict(response.headers), (
                 json.loads(body) if response.headers["Content-Type"] == "application/json" else body)
 
+    def login(self, cookie=None):
+        status, headers, session = self.request("/api/admin/session", "POST",
+                                                headers={"Cookie": cookie} if cookie else None)
+        self.assertEqual(status, 201)
+        return headers["Set-Cookie"].split(";", 1)[0], session, headers
+
+
+class AdminHttpTests(AdminServerBase):
+    def test_second_admin_server_cannot_share_listening_port(self):
+        with self.assertRaises(OSError):
+            duplicate = AdminServer(self.admin.actual_port, self.manager, "other-admin-token")
+            self.addCleanup(duplicate.stop)
+
+    def test_account_order_endpoint_auth_csrf_and_conflicts(self):
+        self.add_litellm()
+        original = [r["id"] for r in self.manager.list_sources()["sources"]]
+        data = {"order": original[::-1], "expected_order": original}
+        path = "/api/admin/source-order"
+        self.assertEqual(self.request(path, "PUT", data, token="device-token")[0], 401)
+        cookie, session, _ = self.login()
+        headers = {"Cookie": cookie, "Origin": self.base_url}
+        self.assertEqual(self.request(path, "PUT", data, token=None, headers=headers)[0], 403)
+        headers["X-CSRF-Token"] = session["csrf_token"]
+        status, _, result = self.request(path, "PUT", data, token=None, headers=headers)
+        self.assertEqual(status, 200)
+        self.assertEqual([r["id"] for r in result["sources"]], original[::-1])
+        self.assertNotIn("credential", json.dumps(result))
+        self.assertNotIn("test-provider-key", json.dumps(result))
+        self.assertEqual(self.request(path, "PUT", data)[0], 409)
+        self.assertEqual(self.request(path, "PUT", {"order": []})[0], 400)
+
     def test_auth_host_origin_and_security_headers(self):
         for token in (None, "wrong", "device-token"):
             self.assertEqual(self.request(token=token)[0], 401)
@@ -363,12 +373,6 @@ class AdminHttpTests(ManagementBase):
         self.assertIn("frame-ancestors 'none'", headers["Content-Security-Policy"])
         self.assertNotIn("credential", json.dumps(data))
         self.assertEqual(self.admin._server.server_address[0], "127.0.0.1")
-
-    def login(self, cookie=None):
-        status, headers, session = self.request("/api/admin/session", "POST",
-                                               headers={"Cookie": cookie} if cookie else None)
-        self.assertEqual(status, 201)
-        return headers["Set-Cookie"].split(";", 1)[0], session, headers
 
     def test_browser_session_cookie_and_credential_hash_only(self):
         cookie, session, headers = self.login()

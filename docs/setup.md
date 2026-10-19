@@ -129,8 +129,14 @@ database while the daemon is stopped to reset demo history.
 | `DASH_HOST` | `daemon.host` |
 | `DASH_PORT` | `daemon.port` |
 | `DASH_DATABASE` | `daemon.database` |
+| `DASH_INGEST_ENABLED` | `daemon.ingest_enabled`, the stored remote-reports toggle |
 
 Prefer these for anything secret so it never lands in a file.
+
+`DASH_INGEST_ENABLED` accepts `1/true/yes/on` and `0/false/no/off`
+(case-insensitive) and overrides both the stored toggle and the TOML value;
+it locks the admin page's remote-reports switch read-only. An invalid value
+fails closed: the daemon logs the error and keeps the route off.
 
 ## 2. Flash and configure the Presto
 
@@ -310,6 +316,26 @@ sources. LiteLLM can read its key from `LITELLM_API_KEY`; Ollama's optional
 `samples_file` only reads observations supplied by an external collector.
 Neither source sends prompts. See `docs/sources.md` for measured fields and
 limits.
+
+### Remote observation ingest (optional)
+
+The status port can also accept pushed observations at
+`POST /api/v1/ingest`, authenticated with per-account remote tokens instead
+of the Presto shared token. It is off by default; turn it on with the admin
+page's **Accept remote reports** switch (stored in the database), with
+`[daemon] ingest_enabled = true` in `dash.toml`, or with
+`DASH_INGEST_ENABLED=1` for containers. The environment variable wins, and
+any successful change takes effect without a restart; with the route off,
+the path answers 404 like any unknown one.
+
+The route speaks plain HTTP only — this project deliberately does not
+terminate TLS. Never expose it to an untrusted network directly: put the
+daemon behind a reverse proxy with TLS, or keep it on a private network such
+as Tailscale. Request bodies carry no secrets or credentials, and a remote
+token is write-only for one account, but the port also serves the status
+endpoint, so treat its exposure like any other unencrypted service. See
+[claude.md](claude.md#remote-computers) for the one-time collection setup.
+
 
 ## Troubleshooting
 

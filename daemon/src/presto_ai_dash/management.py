@@ -1,18 +1,24 @@
 """Database-backed source instances, secret updates, and live reconfiguration."""
 
 from concurrent.futures import ThreadPoolExecutor
+import os
 import threading
 import time
 from urllib.parse import urlsplit
 from uuid import uuid4
 
 from .codex_login import CodexLoginManager
+from .collectors import claude_statusline
+from .config import ingest_enabled
 from .credentials import load_cipher
 from .dashboard import build_instance_payload
 from .sources import source_catalog, source_type
 from .models import SourceSnapshot
 from .quotas import present_quota, present_snapshot
 from .storage import ConfigurationConflict
+
+# The snippet URL is deliberately a placeholder: the user edits the address.
+INGEST_URL_PLACEHOLDER = "http://REPLACE-WITH-DASH-ADDRESS:8787/api/v1/ingest"
 
 
 def validate_settings(cls, settings):
@@ -94,6 +100,7 @@ class SourceConfiguration:
             public["has_key"] = record["credential"] is not None
             if record["type"] == "claude":
                 public["export_installed"] = self.storage.claude_bridge(record["id"]) is not None
+            self._attach_ingest(public, record)
             snapshot = snapshots.get(record["id"])
             if snapshot:
                 snapshot = present_snapshot(snapshot)
@@ -103,6 +110,53 @@ class SourceConfiguration:
                 public["quota"] = present_quota(snapshot.metrics["quota"])
             sources.append(public)
         return {"types": source_catalog(), "sources": sources}
+
+    def _attach_ingest(self, public, record):
+        """Push-capable accounts gain token state and the collector trail."""
+        try:
+            pushes = source_type(public["type"]).accepts_push
+        except KeyError:
+            pushes = False  # an unavailable source module is never push-capable
+        if not pushes:
+            return
+        info = self.storage.ingest_token_info(record["id"])
+        observation = self.storage.observation(record["id"])
+        public["ingest"] = {
+            "token_exists": info["exists"], "created_at": info["created_at"],
+            "collector_seen_at": observation["collector_seen_at"] if observation else None,
+            "collector_host": observation["collector_host"] if observation else None,
+            "last_progress_at": observation["last_progress_at"] if observation else None}
+
+    def ingest_state(self):
+        """The route switch for the admin page; the environment locks the toggle."""
+        return {"enabled": ingest_enabled(self.config, self.storage.ingest_enabled_setting()),
+                "locked_by_environment": os.environ.get("DASH_INGEST_ENABLED") is not None}
+
+    def set_ingest_enabled(self, data):
+        if not isinstance(data, dict) or set(data) != {"enabled"} or \
+                type(data["enabled"]) is not bool:
+            raise ValueError("ingest needs an enabled boolean")
+        if self.ingest_state()["locked_by_environment"]:
+            raise ConfigurationConflict(
+                "ingest is set by DASH_INGEST_ENABLED; edit the environment to change it")
+        self.storage.save_ingest_enabled(data["enabled"])
+        return self.ingest_state()
+
+    def create_ingest_token(self, instance_id):
+        """Mint or rotate one write-only push token, shown exactly once."""
+        token = self.storage.create_ingest_token(instance_id)
+        token_file = "claude-%s.token" % instance_id
+        return {"token": token,
+                "posix_snippet": claude_statusline.posix_snippet(
+                    "/path/to/claude_statusline.py", INGEST_URL_PLACEHOLDER,
+                    "~/.config/presto-ai-dash/" + token_file, "laptop"),
+                "powershell_snippet": claude_statusline.powershell_snippet(
+                    "C:/path/to/claude_statusline.py", INGEST_URL_PLACEHOLDER,
+                    "C:/Users/USERNAME/presto-ai-dash/" + token_file, "laptop")}
+
+    def revoke_ingest_token(self, instance_id):
+        self.storage.revoke_ingest_token(instance_id)
+        return {"revoked": True}
 
     def save(self, data, instance_id=None):
         if not isinstance(data, dict) or data.keys() - {

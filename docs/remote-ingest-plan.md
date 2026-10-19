@@ -1,9 +1,22 @@
 # Plan: optional observation ingest (local and remote collectors)
 
-Status: **proposed, not implemented.** Written 2026-10-18 for an implementing
-agent. Read `AGENTS.md`, `docs/claude.md`, `docs/sources.md` and
-`docs/quotas.md` first. Do not start a phase until the previous one passes its
-tests.
+Status (2026-10-18): **Phases 1, 2 and 3 are implemented and committed.** The
+database schema is v7. Next: Phase 4 (hints and the Presto display), then 9 and
+7. Phases 5, 6 and 8 are optional. Written for an implementing agent. Read
+`AGENTS.md`, `docs/claude.md`, `docs/sources.md` and `docs/quotas.md` first. Do
+not start a phase until the previous one passes its tests.
+
+| Phase | What | State |
+| --- | --- | --- |
+| 1 | Observations storage (schema v6) and `ingest()` | Done |
+| 2 | Standalone collector `collectors/claude_statusline.py` | Done |
+| 3 | `POST /api/v1/ingest`, tokens (schema v7), admin controls | Done |
+| 4 | Freshness hints and the Presto display | **Next** |
+| 5 | `Stop` hook activity (needs a manual VS Code panel check first) | Optional |
+| 6 | Codex over push | Optional |
+| 7 | "Adding a source" guide and template | Not started (an earlier attempt was discarded) |
+| 8 | OpenTelemetry activity detail | Optional, only if asked |
+| 9 | Banked reset credits (Codex) | After Phase 4 |
 
 ## Goal
 
@@ -53,9 +66,15 @@ and off by default.
 
 ## Facts the plan relies on (verified in the code on 2026-10-18)
 
+The first six bullets describe the code **before** Phase 1 and are kept for
+the reasoning. Today: `Storage.save_observation` replaced
+`save_claude_export`, `claude_exports` became the `observations` table, the
+helper builds an envelope and calls `ingest()`, and the schema is v7.
+
 - The daemon API (`api.py`) already listens on `daemon.host:daemon.port`
   (default `0.0.0.0:8787`) with a bearer shared token, GET
-  `/api/v1/status` only. The Presto device holds that shared token.
+  `/api/v1/status` only (Phase 3 added the ingest POST). The Presto device
+  holds that shared token.
 - The admin page (`admin.py`) binds `127.0.0.1` and checks the `Host` header
   against `127.0.0.1`/`localhost`. **It is unreachable from outside a Docker
   container.** See "Not covered" below.
@@ -71,7 +90,9 @@ and off by default.
   container. Push solves this the same way it solves Claude (optional phase).
 - Source discovery skips modules whose names start with `_`, so
   `sources/_template.py` will not register.
-- Storage schema is at `PRAGMA user_version = 5`.
+- Storage schema was `PRAGMA user_version = 5` before Phase 1 (now 7). A
+  migrated database cannot be opened by code older than the migration; back up
+  `dash.db` before running new code against it.
 
 ## Collection methods considered
 
@@ -136,10 +157,17 @@ the body never names one.
 
 - `windows` absent means a heartbeat: the collector ran but had no quota
   (Claude before its first response). Heartbeats update collector
-  connectivity only and never touch quota.
-- `windows[*]` uses the existing `quota_window` field set and rules from
-  `quotas.py`: `state` is one of the existing quota states; `used_percent` is
-  null unless measured; `resets_at` is ISO-8601 with an offset.
+  connectivity only and never touch quota. An empty `windows` list is
+  rejected; a collector with nothing to report omits the key.
+- `collector` must contain exactly `name`, `version` and `host`.
+- `windows[*]` must contain exactly `id`, `label`, `period_minutes`,
+  `used_percent`, `resets_at` and `state`. They follow the existing
+  `quota_window` rules from `quotas.py`: `state` is one of the existing quota
+  states; `used_percent` is null unless measured; `resets_at` is ISO-8601 with
+  an offset.
+- `client_time` is validated but informational. The daemon stamps every stored
+  time (`observed_at`, `collector_seen_at`, `last_progress_at`) with its own
+  receive time.
 - `evidence` keeps today's "a cached redraw is not new data" rule: a window
   whose hash matches the stored one keeps its previous `observed_at`.
 - `progress` is an opaque hash that changes only when the provider did real
@@ -169,15 +197,15 @@ token posts again within 2 seconds. The response body never echoes input.
 
 ### Phase 1: storage and the ingest function (daemon only)
 
-Done 2026-10-18: implemented with tests; the `ingest_tokens` table was left for Phase 3, which owns tokens.
+Done 2026-10-18: implemented with tests. The `ingest_tokens` table was built in
+Phase 3 as part of schema v7, not in v6.
 
 - Schema v6 migration: table `observations(instance_id PK REFERENCES
   source_instances ON DELETE CASCADE, report TEXT, evidence TEXT,
   collector_seen_at TEXT, collector_host TEXT, collector_version TEXT,
   last_progress_at TEXT, progress TEXT, last_activity_at TEXT)`. Create
   `last_activity_at` now (unused until Phase 5) to avoid a second migration. Copy rows from `claude_exports`,
-  then drop it. Table `ingest_tokens(instance_id PK, token_hash TEXT,
-  created_at TEXT)`.
+  then drop it.
 - New module `ingest.py`: `validate(envelope, source_class)` and
   `ingest(storage, instance_id, envelope, now)`. Move the evidence/freshness
   logic out of `Storage.save_claude_export` into a generic
@@ -185,8 +213,9 @@ Done 2026-10-18: implemented with tests; the `ingest_tokens` table was left for 
 - `Source` gains `accepts_push = False` and `push_window_ids = None`. Claude
   sets `accepts_push = True` and `push_window_ids = ("five_hour", "seven_day")`.
 - `ClaudeSource.collect()` reads from `observations` and adds
-  `collector_seen_at`, `collector_host`, `last_progress_at` and a `hint`
-  (Phase 4) to its quota report.
+  `collector_seen_at`, `collector_host`, `collector_version` and
+  `last_progress_at` to its quota report. The `hint` is added in Phase 4, when
+  the status payload is built.
 - `claude_export.py` keeps its CLI and local behaviour but builds an envelope
   and calls `ingest()` in-process. Its normalization moves to the shared
   collector module (Phase 2) so both transports use the same code.
@@ -216,10 +245,13 @@ Done 2026-10-18: implemented with tests; normalization moved into the collector 
     and printing its stdout; otherwise prints a short status text.
   - Token comes from a file, never the command line, so `settings.json` can be
     shared or synced without leaking it.
-  - Client throttle in the OS temp directory: skip a heartbeat if one was sent
-    under 60 s ago; skip an identical envelope sent under 60 s ago; after a
-    network failure, skip all posts for 5 minutes. The status line must never
-    stall on an unreachable server.
+  - Client throttle state in a per-user directory (`%LOCALAPPDATA%` or
+    `$XDG_STATE_HOME`/`~/.local/state`, owner-only, symlinks refused): skip a
+    heartbeat if one was sent under 60 s ago; skip an identical envelope sent
+    under 60 s ago; after a network failure, skip all posts for 5 minutes. The
+    status line must never stall on an unreachable server.
+  - Redirects are refused (a redirect counts as a failed post), so the token
+    is never forwarded to another host.
 - Windows: Claude Code runs status lines through Git Bash if installed, else
   PowerShell. Paths in the command use forward slashes. Provide one
   PowerShell-safe and one POSIX snippet; test both quoting paths the way
@@ -232,9 +264,10 @@ Done 2026-10-18: implemented with tests; normalization moved into the collector 
 
 Done 2026-10-18: implemented with tests; the round trip from the collector script to `/api/v1/status` passes end to end.
 
-- `api.py`: add `POST /api/v1/ingest` behind `ingest_enabled`. Resolve the
-  bearer token by hash to an instance (constant-time compare), check the
-  instance is enabled and `accepts_push`, then call `ingest()`. Apply the
+- `api.py`: add `POST /api/v1/ingest` behind `ingest_enabled`. Tokens live in
+  `ingest_tokens` (schema v7) as SHA-256 hashes; the presented token is hashed
+  and looked up, the instance is checked to be enabled and `accepts_push`, then
+  `ingest()` runs. Authentication happens before the body is read. Apply the
   size, rate and response rules above. Keep the existing 3 s socket timeout.
 - Enabling: a global setting stored in SQLite and toggled in the admin page,
   plus `DASH_INGEST_ENABLED=1` (and `[daemon] ingest_enabled` in TOML) for
@@ -256,29 +289,46 @@ Done 2026-10-18: implemented with tests; the round trip from the collector scrip
 
 ### Phase 4: freshness and "run the CLI" hints (daemon and Presto)
 
-The daemon computes one hint per Claude account, in this order, and puts it
-in the quota report as `hint` (ASCII, at most 28 characters):
+The daemon computes one hint per Claude account when the status payload is
+built (so it ages between polls, not once at collect time) and puts it in the
+quota report as `hint` (ASCII, at most 28 characters). First match wins:
 
 | Condition | Hint |
 | --- | --- |
-| No collector has ever reported | `Run claude in a terminal` |
-| Collector seen, never any quota | `Waiting for a Claude reply` |
-| Quota older than the stale threshold, collector also quiet | `No report 6d - run claude` |
-| Collector seen recently, quota stale (heartbeats only) | `Reply in claude to refresh` |
-| Every window's reset has passed | `Awaiting refresh` |
+| No observation, or no collector report and no window ever measured | `Run claude in a terminal` |
+| Collector seen, but no window ever measured (heartbeats only) | `Waiting for a Claude reply` |
+| Measured windows exist and every one's reset has passed | `Awaiting refresh` |
+| Measured windows exist, none fresh, collector seen within the stale threshold | `Reply in claude to refresh` |
+| Measured windows exist, none fresh, collector quiet | `No report 6d - run claude` |
+| At least one window is fresh and measured | no hint |
 
-- Never mark the provider `offline` for these cases; use `warning`.
+- The stale threshold is the source's configured `stale_after_seconds`
+  (default 900), not a hardcoded number.
+- `<age>` in `No report <age>` is the age of the newest signal of any kind
+  (the later of `collector_seen_at` and the newest window `observed_at`),
+  formatted `%dm` under 60 minutes, `%dh` under 48 hours, else `%dd`.
+- A migrated database can have quota data but no `collector_seen_at` (the
+  author's real install). Treat the collector as never seen and use the last
+  row with the quota's own age.
+- Never mark the provider `offline` for these cases; use `warning` (keep any
+  worse status that already applies).
 - Presto Home: when a quota row has a hint and no fresh window, draw the hint
-  in place of the reset note. A window whose reset has passed shows `--` (its
-  old value only on the detail card as "last 34%"), not a dimmed number.
-  Stale-but-unexpired windows keep today's dimmed value with
-  `last known <age> ago`.
-- Detail card lines: quota age per window, last response seen (or
-  "unavailable"), collector last seen and host. Reset times stay UTC (the
-  device has no time zone).
-- Tests: each hint row above; expired windows never render a percentage on
-  Home; `test_ui`/`test_quotas` layout checks still pass. Visually check PSL
-  for each hint, then sync and verify the device per `AGENTS.md`.
+  in dim ink in place of the reset note (the hint wins over a long name). A
+  window whose reset has passed shows `--` with an empty bar (its old value
+  only on the detail card), never a dimmed number and never `0%`.
+  Stale-but-unexpired windows keep today's dimmed value. Rows with no hint
+  behave exactly as today.
+- Detail card, at most 6 lines (drop the lowest-priority line first, never a
+  window reset line): the per-window reset lines, then `Data age: <age>`,
+  `Last reply: <age> ago` or `Last reply: unavailable` (from
+  `last_progress_at`), and `Reports: <host> <age> ago` or `Reports: never`.
+  Reset times stay UTC (the device has no time zone). Other providers' cards
+  do not change.
+- Tests: each hint row above with an injected clock, the migrated no-collector
+  case, the age boundaries, the 28-character ASCII cap, expired windows never
+  rendering a percentage on Home, and layout checks. Visually check PSL with
+  fixture payloads for each hint (never the live preview: it reads
+  `presto/config.py`), then sync and verify the device per `AGENTS.md`.
 
 ### Phase 5: activity from a `Stop` hook (makes the CLI hint exact)
 
@@ -314,6 +364,8 @@ over spawning a local app-server. This is what makes Codex usable with a
 containerized daemon without putting a Codex login in the container.
 
 ### Phase 7: "Adding a source" guide and template
+
+Not started. An earlier attempt was discarded, so none of these files exist.
 
 - `docs/adding-a-source.md`: what a source is; the `collect()` contract
   (never raise, return a `SourceSnapshot`, `offline` only when unreachable);
@@ -413,6 +465,23 @@ on the claude.ai usage page); do not scrape it. Its detail card says
   usable for this project until that is decided.
 - No Dockerfile exists yet (planned for v0.1).
 - TLS termination inside the daemon: out of scope; use a reverse proxy.
+
+## Known leftovers (from reviews of Phases 1-3)
+
+- The ingest rate limiter (`api.py`) has no lock while the server is
+  multi-threaded. A stress test found no failures and real traffic is a few
+  posts a minute, so the risk is theoretical; a lock is a two-line fix.
+- `ApiServer.__init__` gained arguments before `handler_class`; a caller that
+  passes `handler_class` positionally would break. Only keyword callers exist.
+- Never exercised: a real collector on a second computer, the Windows
+  PowerShell snippet from a real remote Claude session, and the POSIX
+  collector paths (state directory permissions, `O_NOFOLLOW`); the tests for
+  those are skipped or simulated on Windows.
+- Unknown: whether the VS Code panel runs the Claude status line at all
+  (Phase 5 settles this).
+- The admin page cannot be reached inside a container (see above).
+- Ollama Cloud reports activity totals only, no allowance; nothing to fix
+  with its current API.
 
 ## Done means
 

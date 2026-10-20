@@ -488,10 +488,39 @@ settings edit (appended to any existing `hooks.Stop`, restored on removal) and
 a manual check that it fires in the panel before building. It gives less data
 than Phase 5.
 
-**Phase 5c (optional, Docker/remote): push the activity.** Add an optional
-`activity` object to envelope v1 (same fields as `local_activity`, same caps,
-unknown keys still rejected) and a collector mode that runs the reader on the
-Claude machine and pushes it, so a containerised daemon gets activity too.
+**Phase 5c (amended 2026-10-20; needed for Docker/remote): push the local
+readers.** Status today: the downloadable collector
+(`collectors/claude_statusline.py`) carries ONLY the terminal status-line
+quota and heartbeats. The activity reader (Phase 5) and the usage cache reader
+(Phase 5d) run inside the daemon and read files on the daemon's own machine,
+so a daemon on another machine (Docker) gets neither. This phase closes that:
+- The collector gains two optional modes that run the existing standalone
+  readers (`claude_activity.py`, `claude_usage_cache.py`, both stdlib-only and
+  already free of package imports) on the Claude machine and push the result.
+  One checkbox on the account (or the "Set up for VS Code" preset) tells the
+  user what to enable, and the admin page's snippet generator includes the
+  modes.
+- Envelope v1 gains optional keys: `activity` (the `local_activity` fields,
+  same caps) and `usage_cache` (the extracted windows, `fetched_at`, the
+  optional credit, and the reader's availability and reason). Unknown keys are
+  still rejected.
+- **Timestamp hazard (must be designed, not assumed).** The daemon owns time:
+  a pushed window is stamped with the receive time. A usage-cache reading may be
+  hours old when pushed, so stamping it "now" would present stale numbers as
+  fresh. The envelope therefore carries the reading's own `fetched_at`; the
+  daemon accepts it only for the `usage_cache` object, caps it at the receive
+  time, rejects values older than 7 days or in the future, and uses it as the
+  windows' `observed_at` and for the source label "usage cache" (the existing
+  merge then lets the newest reading win).
+- Privacy is unchanged: the same field whitelist as the daemon-side readers,
+  never message text, account ids or paths beyond the reader's own path hint
+  (which stays on the collector; only a short reason code and a message without
+  the path is pushed).
+- The reader's log messages are written where the reader runs, so on a remote
+  machine they appear in the collector's own output; the daemon's Status tab
+  shows the pushed availability and reason.
+- Verification needs a second machine: until it has been run for real, the
+  admin page and docs must say this path is untested on a remote host.
 
 ### Phase 5d (proposed 2026-10-20): Claude usage cache reader (panel quota)
 
@@ -537,7 +566,8 @@ is on disk.
   included credit line ("Credit: $100 of $100 (exp 11-05)") only if room
   remains after the existing lines.
 - Docker/remote: the file lives on the Claude machine, so a containerised
-  daemon needs the collector to read and push it (extends Phase 5c).
+  daemon needs the collector to read and push it. NOT built: see the amended
+  Phase 5c (including the timestamp hazard of pushing an old reading).
 - Update the report note and docs: quota arrives from terminal sessions and
   from Claude Code's usage cache; the panel refreshes the cache when `/usage`
   is opened or at irregular moments.

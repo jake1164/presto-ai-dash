@@ -117,6 +117,15 @@ class ClaudeSource(Source):
                 windows[position] = window
         report["windows"] = windows
 
+    @staticmethod
+    def _note(observation, cache):
+        """Why the quota looks the way it does, in the current wording."""
+        if cache is not None and cache.get("available"):
+            return NOTE_CACHE
+        if observation is None:
+            return NOTE_AWAITING if cache is None else NOTE_AWAITING_CACHE
+        return NOTE_EXPORT
+
     def collect(self):
         now = now_utc()
         observation = self.storage.observation(self.id) if hasattr(self, "storage") else None
@@ -126,7 +135,6 @@ class ClaudeSource(Source):
                 quota_window(key, label, None, None, now, minutes, state="unavailable",
                              source=SOURCE_EXPORT)
                 for key, label, minutes in WINDOWS])
-            report["note"] = NOTE_AWAITING
         else:
             report = deepcopy(observation["report"])
         # Every window says where it came from.
@@ -136,10 +144,9 @@ class ClaudeSource(Source):
             report["usage_cache"] = {key: value for key, value in cache.items()
                                      if key != "windows"}
             self._merge_cache(report, cache)
-            if cache.get("available"):
-                report["note"] = NOTE_CACHE
-            elif observation is None:
-                report["note"] = NOTE_AWAITING_CACHE
+        # The note is the wording of today, not a copy frozen into the stored
+        # reading when it was received (ingest writes one into every report).
+        report["note"] = self._note(observation, cache)
         # Every report carries the collector trail (None before the first
         # push), so payload building can produce freshness hints (Phase 4).
         report["stale_after_seconds"] = self.config.get("stale_after_seconds", 900)

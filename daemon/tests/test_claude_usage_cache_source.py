@@ -232,6 +232,54 @@ class NoteTests(SourceBase):
         self.assertIn("usage cache", report["note"])
 
 
+class StoredNoteTests(SourceBase):
+    """The note comes from the code, never from the stored reading.
+
+    ingest() writes the wording of the day into every stored reading, so a
+    reading stored before a wording change would otherwise keep showing the old
+    sentence until the next terminal report arrived.
+    """
+
+    OLD = ("Claude Code terminal export; idle readings become stale. "
+           "VS Code panel coverage is unverified.")
+
+    def stored(self):
+        observation = terminal_observation(NOW - 6 * DAY)
+        observation["report"]["note"] = self.OLD
+        return observation
+
+    def note_and_payload(self, source):
+        snapshot = self.collect(source)
+        return snapshot.metrics["quota"]["note"], json.dumps(snapshot.metrics, default=str)
+
+    def test_a_stored_old_note_is_replaced_with_the_reader_off(self):
+        note, payload = self.note_and_payload(self.source(self.stored(), usage_cache=False))
+        self.assertEqual(note, ClaudeSource.report_note)
+        self.assertNotIn("coverage is unverified", payload)
+
+    def test_a_stored_old_note_is_replaced_when_the_cache_is_unavailable(self):
+        # The reader is on but there is no file: the terminal wording applies.
+        note, payload = self.note_and_payload(self.source(self.stored()))
+        self.assertEqual(note, ClaudeSource.report_note)
+        self.assertNotIn("coverage is unverified", payload)
+
+    def test_a_stored_old_note_is_replaced_when_the_cache_is_available(self):
+        self.write_cache()
+        note, payload = self.note_and_payload(self.source(self.stored()))
+        self.assertIn("usage cache", note)
+        self.assertNotEqual(note, ClaudeSource.report_note)
+        self.assertNotIn("coverage is unverified", payload)
+
+    def test_no_reading_still_shows_the_awaiting_wording(self):
+        note, _ = self.note_and_payload(self.source(None, usage_cache=False))
+        self.assertEqual(note, "Awaiting quota export from normal Claude Code terminal use")
+
+    def test_the_stored_note_itself_is_left_alone(self):
+        observation = self.stored()
+        self.collect(self.source(observation, usage_cache=False))
+        self.assertEqual(observation["report"]["note"], self.OLD)  # collect works on a copy
+
+
 class ReaderOffTests(SourceBase):
     """With the reader off, the source behaves exactly as before."""
 

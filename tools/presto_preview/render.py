@@ -143,7 +143,7 @@ def render(payload="sample", out=DEFAULT_OUT, stale=False, offline=False, muted=
         print("payload rejected by the app: %s" % app.error, file=sys.stderr)
     app.alerts.muted = muted
     if offline:
-        app.connection_error = ("Daemon offline", "Check daemon and LAN address", True)
+        app.connection_error = ("Daemon offline", "TimeoutError @head", True)
     elif stale:
         app.connection_error = ("Daemon offline", "Check daemon and LAN address", False)
 

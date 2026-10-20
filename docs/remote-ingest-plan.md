@@ -803,6 +803,18 @@ In order (item 0 is an urgent defect and goes first):
    `Get-NetNeighbor` for the device address, ping loss, `netstat` for
    `SYN_RECEIVED` from the device. Also check the router's client list for the
    Presto's signal strength and the DHCP lease time.
+   **Rollback test (2026-10-20): the device app code is cleared.** The app from
+   before Phase 9 (revision 6d41106e5122, commit dfa1d05) was synced to the
+   Presto and ran against the slimmed payload. It dropped offline again with the
+   same signature (ARP `Incomplete`, 0 of 12 pings answered, gateway 4 of 4,
+   a `SYN_RECEIVED` connection from the device stuck on the daemon). So neither
+   the Phase 5-9 payload growth nor the recent app changes cause it. Since
+   Wi-Fi power-save has always been on, the open question is what changed in
+   the environment (router, channel, signal, a new device or lease on the
+   network, the PC's address or adapter, load on the radio), not the app.
+   Step B1/B4 shipped: the offline screen and serial log now show the
+   exception type, where the fetch stopped (conn/send/head/body/parse), the
+   failure count, uptime, free memory and Wi-Fi state.
    **Device protocol options** (author's idea to send each source
    independently, assessed 2026-10-20): (1) slim single payload: one request,
    about 5 KB peak, scales to roughly 12 services; (2) summary plus lazy

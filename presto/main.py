@@ -124,6 +124,8 @@ class App(object):
         self.last_good_at = None
         self.live_rows = None
         self.connection_error = None
+        self.fail_count = 0
+        self.started_at = None
         self._last_screen = None
 
         self._buzzer = None
@@ -232,12 +234,61 @@ class App(object):
             print("AI Dash: rejected refresh: %s" % exc)
             self._poll_failed("Bad data", str(exc))
             return False
-        except NetworkUnavailable:
-            self._poll_failed("Daemon offline", "Check daemon and LAN address")
+        except NetworkUnavailable as exc:
+            reason = getattr(exc, "reason", None) or "no reason"
+            self._note_failure(reason)
+            self._poll_failed("Daemon offline", reason)
             return False
         self.connection_error = None
+        self.fail_count = 0
         self._set_payload(payload)
         return True
+
+    def _note_failure(self, reason):
+        """Count the failure and log it to the serial console, not the screen."""
+        self.fail_count += 1
+        print("AI Dash: fetch failed (%d): %s; %s" %
+              (self.fail_count, reason, " | ".join(self._diag_lines())))
+
+    def _diag_lines(self):
+        """Short ASCII lines on the link and memory, for the offline screen.
+
+        Every probe is optional: the firmware wrapper and MicroPython differ,
+        and a diagnostic must never raise.
+        """
+        if self.started_at is None:
+            self.started_at = _now_ms()
+        up = _ticks_diff(_now_ms(), self.started_at) // 1000
+        lines = ["fails %d  up %dh%02dm" % (self.fail_count, up // 3600, up // 60 % 60)]
+        parts = []
+        try:
+            import gc
+            free = getattr(gc, "mem_free", None)
+            if free:
+                parts.append("free %dK" % (free() // 1024))
+        except Exception:
+            pass
+        try:
+            parts.append("wifi " + ("up" if self.presto.wifi.isconnected() else "DOWN"))
+        except Exception:
+            pass
+        try:
+            wifi = self.presto.wifi
+            wlan = getattr(wifi, "wlan", None) or getattr(wifi, "_wlan", None)
+        except Exception:
+            wlan = None
+        if wlan is not None:
+            try:
+                parts.append("st %s" % (wlan.status(),))
+            except Exception:
+                pass
+            try:
+                parts.append("rssi %s" % (wlan.status("rssi"),))
+            except Exception:
+                pass
+        if parts:
+            lines.append("  ".join(parts))
+        return lines
 
     def _poll_failed(self, title, message, immediate=False):
         self.connection_error = (title, message, immediate)
@@ -339,7 +390,8 @@ class App(object):
         screen = self._connection_screen()
         if screen:
             draw_message(self.display, self.palette, screen[0], screen[1],
-                         detail=["Retrying...", "RESET returns to carousel"])
+                         detail=["Retrying..."] + self._diag_lines() +
+                         ["RESET returns to carousel"])
         elif card.id == "dash" and self.static_demo:
             draw_home(self.display, self.palette, DEMO_QUOTAS,
                       self.index, len(self.cards), muted=self.alerts.muted,
@@ -378,6 +430,7 @@ class App(object):
 
     def run(self):
         """Run the selected mode; live mode never falls back to static values."""
+        self.started_at = _now_ms()
         self._setup_buzzer()
         if not self.static_demo:
             self._poll_failed("Connecting...", "Joining Wi-Fi")

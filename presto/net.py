@@ -9,7 +9,12 @@ micropython-lib ``python-ecosys/requests``), which is what lets the Presto send
 the shared bearer token the daemon requires.
 """
 
+import gc
 import json
+
+
+def _collect():
+    gc.collect()
 
 
 class StatusError(Exception):
@@ -18,6 +23,24 @@ class StatusError(Exception):
 
 class NetworkUnavailable(Exception):
     """The daemon could not be reached at all."""
+
+
+def describe_error(exc, stage=None):
+    """A short ASCII reason for a failed fetch, safe to show on the screen.
+
+    Only the exception's type, an integer errno and the stage are used, never
+    its text, which can carry addresses or response contents.
+    """
+    if isinstance(exc, NetworkUnavailable):
+        text = str(exc.args[0]) if exc.args else "network"
+    else:
+        text = type(exc).__name__
+        args = getattr(exc, "args", None)
+        if isinstance(exc, OSError) and args and type(args[0]) is int:
+            text += " %d" % args[0]
+    if stage:
+        text += " @" + stage
+    return "".join(ch if " " <= ch <= "~" else "?" for ch in text)[:30]
 
 
 class Unauthorised(Exception):
@@ -72,6 +95,10 @@ class StatusClient(object):
         self.timeout = timeout
         self.path = path
         self._transport = transport
+        # Where the last async fetch got to and why it ended; the screen and
+        # the serial log report these when the daemon looks unreachable.
+        self.stage = "start"
+        self.received = 0
 
     @property
     def url(self):
@@ -135,12 +162,16 @@ class StatusClient(object):
             return await asyncio.wait_for(self._fetch_stream(), self.timeout)
         except (Unauthorised, StatusError):
             raise
-        except Exception:
-            raise NetworkUnavailable("cannot reach daemon")
+        except Exception as exc:
+            error = NetworkUnavailable("cannot reach daemon")
+            error.reason = describe_error(exc, self.stage)
+            raise error
 
     async def _fetch_stream(self):
         import asyncio
         writer = None
+        self.stage = "conn"
+        self.received = 0
         try:
             path = self.path if self.path.startswith("/") else "/" + self.path
             if any(char in str(value) for value in (self.host, self.token, path)
@@ -150,14 +181,16 @@ class StatusClient(object):
             request = ("GET %s HTTP/1.1\r\nHost: %s:%s\r\n"
                        "Authorization: Bearer %s\r\nConnection: close\r\n\r\n" %
                        (path, self.host, self.port, self.token or ""))
+            self.stage = "send"
             writer.write(request.encode("utf-8"))
             await writer.drain()
+            self.stage = "head"
 
             header = b""
             while b"\r\n\r\n" not in header:
                 chunk = await reader.read(256)
                 if not chunk:
-                    raise NetworkUnavailable("incomplete HTTP response")
+                    raise NetworkUnavailable("short head")
                 header += chunk
                 if len(header) > 4096:
                     raise StatusError("response headers too large")
@@ -181,17 +214,23 @@ class StatusClient(object):
                 raise StatusError("daemon returned HTTP %s" % status)
             if not 0 <= length <= 65536 or b"transfer-encoding" in headers:
                 raise StatusError("unsupported response size or framing")
+            self.stage = "body"
+            self.received = len(body)
             while len(body) < length:
                 chunk = await reader.read(min(1024, length - len(body)))
                 if not chunk:
-                    raise NetworkUnavailable("incomplete response body")
+                    raise NetworkUnavailable("short body")
                 body += chunk
+                self.received = len(body)
             if len(body) != length:
                 raise StatusError("invalid response length")
             try:
                 text = body.decode("utf-8")
             except UnicodeError:
                 raise StatusError("response was not UTF-8")
+            self.stage = "parse"
+            body = header = None
+            _collect()
             return parse_payload(text)
         finally:
             if writer is not None:

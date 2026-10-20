@@ -273,6 +273,31 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(texts[:2], ['Gateway 0', 'OK'])
         self.assertNotIn('OpenAI', texts)
 
+    async def test_offline_screen_says_why_and_counts(self):
+        await self.app.poll_once()
+        error = NetworkUnavailable('cannot reach daemon')
+        error.reason = 'TimeoutError @head'
+        self.app.client.fetch_async.side_effect = error
+        self.assertFalse(await self.app.poll_once())
+        self.assertFalse(await self.app.poll_once())
+        self.assertEqual(self.app.fail_count, 2)
+        with patch.object(self.module, '_now_ms', return_value=30001):
+            screen = self.app._connection_screen()
+            self.assertEqual(screen, ('Daemon offline', 'TimeoutError @head'))
+            self.app._render()
+        texts = [row[0] for row in self.device.display.rows]
+        self.assertIn('TimeoutError @head', texts)
+        self.assertTrue(any(t.startswith('fails 2') for t in texts), texts)
+        self.assertTrue(all(t.isascii() for t in texts))
+        self.app.client.fetch_async.side_effect = None
+        self.assertTrue(await self.app.poll_once())
+        self.assertEqual(self.app.fail_count, 0)
+
+    async def test_diagnostics_never_raise(self):
+        self.device.wifi = SimpleNamespace(isconnected=lambda: 1 / 0)
+        self.app.presto = self.device
+        self.assertTrue(self.app._diag_lines()[0].startswith('fails 0'))
+
     async def test_stale_then_offline_then_recovers(self):
         await self.app.poll_once()
         self.app.index = 1

@@ -98,6 +98,17 @@ class CacheBase(unittest.TestCase):
         target.write_bytes(raw)
         return target
 
+    def write_stamped(self, document, mtime):
+        """Write a fixture with its own modification time.
+
+        The reader re-reads only when the size or the modification time
+        changed, and a file system may not move the clock between two quick
+        writes, so the time is set here.
+        """
+        target = self.write(document)
+        os.utime(str(target), (mtime, mtime))
+        return target
+
     def reader(self, candidates=None, clock=None):
         return UsageCacheReader(candidates or [str(self.path)], clock=clock)
 
@@ -135,7 +146,7 @@ class ReadResultTests(CacheBase):
         result = self.refresh()
         self.assertEqual(set(result), {"available", "reason", "message", "path",
                                        "fetched_at", "windows", "credit",
-                                       "account_changed"})
+                                       "account_changed", "refreshes", "since"})
 
     def test_a_null_window_is_not_reported_never_zero(self):
         self.write(cache_document(weekly=None))
@@ -818,6 +829,249 @@ class DiagnosticsTests(CacheBase):
             code = claude_usage_cache.main(["--path", str(self.root / "absent.json")])
         self.assertEqual(code, 1)
         self.assertIn("FILE NOT FOUND", buffer.getvalue())
+
+
+class RefreshRecordTests(CacheBase):
+    """The record of the fetch times the daemon has seen on its own."""
+
+    def test_the_first_read_records_the_fetch_time_and_the_start(self):
+        self.write(cache_document(fetched=NOW - timedelta(hours=2)))
+        result = self.refresh()
+        self.assertEqual(result["refreshes"], [iso(NOW - timedelta(hours=2))])
+        self.assertEqual(result["since"], iso(NOW))
+
+    def test_the_same_fetch_time_is_never_counted_twice(self):
+        # The file is rewritten with the same fetch time and a new modification
+        # time, so the reader really reads it again.
+        self.write_stamped(cache_document(fetched=NOW - timedelta(hours=2)),
+                           NOW.timestamp() - 100)
+        reader = self.reader()
+        self.refresh(reader)
+        for index in range(4):
+            self.write_stamped(cache_document(fetched=NOW - timedelta(hours=2)),
+                               NOW.timestamp() - 90 + index)
+            result = self.refresh(reader)
+        self.assertEqual(result["refreshes"], [iso(NOW - timedelta(hours=2))])
+
+    def test_a_new_fetch_time_is_appended_newest_last(self):
+        reader = self.reader()
+        self.write_stamped(cache_document(fetched=NOW - timedelta(hours=2)),
+                           NOW.timestamp() - 100)
+        self.refresh(reader)
+        self.write_stamped(cache_document(fetched=NOW - timedelta(hours=1)),
+                           NOW.timestamp() - 50)
+        result = self.refresh(reader)
+        self.assertEqual(result["refreshes"], [iso(NOW - timedelta(hours=2)),
+                                              iso(NOW - timedelta(hours=1))])
+
+    def test_an_older_fetch_time_never_moves_the_record_backwards(self):
+        reader = self.reader()
+        self.write_stamped(cache_document(fetched=NOW - timedelta(hours=1)),
+                           NOW.timestamp() - 100)
+        self.refresh(reader)
+        self.write_stamped(cache_document(fetched=NOW - timedelta(hours=5)),
+                           NOW.timestamp() - 50)
+        result = self.refresh(reader)
+        self.assertEqual(result["refreshes"], [iso(NOW - timedelta(hours=1))])
+
+    def test_the_record_keeps_at_most_fifty_fetch_times(self):
+        reader = self.reader()
+        for index in range(60):
+            self.write_stamped(cache_document(fetched=NOW - timedelta(hours=60 - index)),
+                               NOW.timestamp() - 600 + index)
+            self.refresh(reader)
+        result = self.refresh(reader)
+        self.assertEqual(len(result["refreshes"]), 50)
+        self.assertEqual(result["refreshes"][0], iso(NOW - timedelta(hours=50)))
+        self.assertEqual(result["refreshes"][-1], iso(NOW - timedelta(hours=1)))
+
+    def test_a_restart_starts_the_record_again(self):
+        self.write_stamped(cache_document(fetched=NOW - timedelta(hours=2)),
+                           NOW.timestamp() - 100)
+        reader = self.reader()
+        self.refresh(reader)
+        self.write_stamped(cache_document(fetched=NOW - timedelta(hours=1)),
+                           NOW.timestamp() - 50)
+        self.refresh(reader)
+        restarted = self.reader()
+        result = self.refresh(restarted)
+        self.assertEqual(result["refreshes"], [iso(NOW - timedelta(hours=1))])
+        self.assertEqual(result["since"], iso(NOW))
+
+    def test_only_timestamps_enter_the_record(self):
+        self.write(cache_document(fetched=NOW - timedelta(hours=2)))
+        result = self.refresh()
+        for value in result["refreshes"]:
+            self.assertIsInstance(value, str)
+            datetime.fromisoformat(value)
+        text = json.dumps(result)
+        for sentinel in SENTINELS:
+            self.assertNotIn(sentinel, text)
+
+    def test_a_later_problem_keeps_the_record(self):
+        self.write(cache_document(fetched=NOW - timedelta(hours=2)))
+        reader = self.reader()
+        self.refresh(reader)
+        self.write(raw=b"{broken")
+        result = self.refresh(reader)
+        self.assertEqual(result["refreshes"], [iso(NOW - timedelta(hours=2))])
+
+
+class LogWordingTests(CacheBase):
+    """The log messages name the real checkbox and read as sentences."""
+
+    def label(self):
+        """The real label of the usage cache checkbox in the admin page."""
+        from presto_ai_dash.sources.claude import ClaudeSource
+        fields = {field["key"]: field for field in ClaudeSource.config_fields}
+        return fields["usage_cache"]["label"]
+
+    def captured(self, action):
+        """The messages one action logs, without the level prefix."""
+        records = []
+
+        class Capture(logging.Handler):
+            def emit(self, record):
+                records.append(record.getMessage())
+
+        handler = Capture()
+        logger = logging.getLogger(LOGGER_NAME)
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+        self.addCleanup(logger.removeHandler, handler)
+        action()
+        return records
+
+    def denied(self):
+        """Three failed reads, which is when the problem becomes persistent."""
+        real_open = open
+
+        def opener(file, *args, **kwargs):
+            if str(file).endswith(".claude.json"):
+                raise PermissionError("fixture: locked")
+            return real_open(file, *args, **kwargs)
+
+        reader = self.reader()
+        with patch("builtins.open", side_effect=opener):
+            for _ in range(3):
+                self.refresh(reader)
+
+    def changed_account(self):
+        self.write(cache_document(account=SENTINEL_UUID))
+        reader = self.reader()
+        self.refresh(reader)
+        self.write(cache_document(account="ANOTHER-ACCOUNT-ID"))
+        self.refresh(reader)
+
+    def recovered(self):
+        self.write()
+        reader = self.reader()
+        self.refresh(reader)
+        self.write(raw=b"{broken")
+        self.refresh(reader)
+        self.write()
+        self.refresh(reader)
+
+    def catalogue(self):
+        """Every message the reader can log, one catalogue entry at a time."""
+        messages = []
+        # FILE NOT FOUND
+        messages += self.captured(
+            lambda: self.refresh(self.reader([str(self.root / "absent.json")])))
+        # FORMAT CHANGED: a field has the wrong type
+        document = cache_document()
+        document["cachedUsageUtilization"]["utilization"]["five_hour"]["utilization"] = "12"
+        document["cachedUsageUtilization"]["utilization"]["seven_day"]["utilization"] = "66"
+        self.write(document)
+        messages += self.captured(self.refresh)
+        # NO QUOTA READING
+        self.write(cache_document(five=None, weekly=None))
+        messages += self.captured(self.refresh)
+        # FILE TOO LARGE
+        with open(self.path, "wb") as handle:
+            handle.write(b"{}")
+        os.truncate(str(self.path), 50 * 1024 * 1024)
+        messages += self.captured(self.refresh)
+        # NOT A FILE
+        directory = self.root / "as-a-directory"
+        directory.mkdir()
+        messages += self.captured(lambda: self.refresh(self.reader([str(directory)])))
+        # ACCESS DENIED
+        self.write()
+        messages += self.captured(self.denied)
+        # ACCOUNT CHANGED
+        messages += self.captured(self.changed_account)
+        # RECOVERED, the first read, and the transient problem
+        self.write()
+        messages += self.captured(self.recovered)
+        return messages
+
+    def test_the_quoted_phrase_is_the_start_of_the_real_label(self):
+        label = self.label()
+        self.assertTrue(label.startswith(claude_usage_cache.SILENCE_PHRASE), label)
+        self.assertIn(claude_usage_cache.SILENCE_PHRASE, label)
+
+    def test_every_message_that_names_the_checkbox_quotes_the_real_label(self):
+        for message in self.catalogue():
+            if "Untick" in message:
+                with self.subTest(message=message):
+                    self.assertIn("'%s'" % claude_usage_cache.SILENCE_PHRASE, message)
+
+    def test_no_message_quotes_the_old_label_or_the_old_capitalisation(self):
+        for message in self.catalogue():
+            with self.subTest(message=message):
+                self.assertNotIn("Read Claude Code usage cache", message)
+                self.assertNotIn("needs updating: Untick", message)
+
+    def test_every_catalogue_message_is_one_well_formed_sentence_group(self):
+        for message in self.catalogue():
+            with self.subTest(message=message):
+                self.assertTrue(message.startswith("Claude usage cache: "), message)
+                self.assertTrue(message.endswith("."), message)
+                self.assertTrue(message.isascii(), message)
+                self.assertNotIn("  ", message)
+                self.assertNotIn(" .", message)
+                self.assertNotIn(" ,", message)
+                for sentence in message.split(". ")[1:]:
+                    self.assertTrue(sentence[:1].isupper(), (message, sentence))
+
+
+class NoBackupFilesTests(unittest.TestCase):
+    """The reader never looks at Claude Code's own backups of the file."""
+
+    def test_the_module_never_mentions_the_backups(self):
+        source = Path(claude_usage_cache.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("backups", source)
+        self.assertNotIn(".backup", source)
+
+
+class NoWritesTests(CacheBase):
+    """The reader only reads: it writes no file, and keeps the record in memory."""
+
+    def test_the_reader_never_opens_a_file_for_writing(self):
+        self.write(cache_document())
+        opened = []
+        real_open = open
+
+        def opener(file, mode="r", *args, **kwargs):
+            opened.append((str(file), mode))
+            return real_open(file, mode, *args, **kwargs)
+
+        reader = self.reader()
+        with patch("builtins.open", side_effect=opener):
+            self.refresh(reader)
+        self.assertTrue(opened)
+        for name, mode in opened:
+            for letter in ("w", "a", "x", "+"):
+                self.assertNotIn(letter, mode, (name, mode))
+
+    def test_the_record_lives_only_in_the_reader(self):
+        self.write(cache_document(fetched=NOW - timedelta(hours=2)))
+        reader = self.reader()
+        result = self.refresh(reader)
+        self.assertEqual(result["refreshes"], [iso(NOW - timedelta(hours=2))])
+        # Nothing else holds the record: no file, no database.
+        self.assertEqual(len(os.listdir(self.root)), 1)
 
 
 if __name__ == "__main__":

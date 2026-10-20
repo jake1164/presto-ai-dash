@@ -333,6 +333,16 @@ class HomeHintTests(unittest.TestCase):
         self.assertTrue(texts[0].endswith("~"))  # the hint wins; the name clips
         self.assertIn("No report 6d - run claude", texts)
 
+    def test_the_cache_hints_are_drawn_in_full(self):
+        cases = ("Reset passed - open /usage", "Quota 6d old - open /usage",
+                 "Quota 400d old - open /usage", "Quota 1000d old",
+                 "In use - quota 2h old", "Run /usage in Claude Code")
+        for hint in cases:
+            with self.subTest(hint=hint):
+                texts = self.drawn(self.rows_for(hint, self.stale_unexpired())[0])
+                self.assertIn(hint, texts)
+                self.assertFalse(any(" resets " in text for text in texts))
+
 
 class HomeResetBadgeTests(unittest.TestCase):
     """Phase 9: a small badge counts the banked resets on the Home row."""

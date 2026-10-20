@@ -548,6 +548,8 @@ whether the included-credit line is wanted.
 
 Done 2026-10-20: implemented with tests. The opt-in reader (`collectors/claude_usage_cache.py`, stdlib only) opens Claude Code's state file read-only, extracts only the fetch time, the two windows and the credit (found by shape, never by its obfuscated key), remembers a SHA-256 of the account id in memory only, and degrades to "unavailable" with a precise reason instead of raising; the newest reading per window wins over the terminal export, ties go to the terminal export, and every window, card and admin line names its source.
 
+Follow-up done 2026-10-20: the hints of a cache reader name `/usage` instead of a terminal, the log messages quote the real checkbox label, the Edit form has a **Set up for VS Code** button, and the daemon records in memory how often the cache refreshes (one admin line, no new storage).
+
 ### Phase 6 (optional): Codex over push
 
 Write `collectors/codex_appserver.py` that runs on the developer machine,

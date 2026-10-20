@@ -4,6 +4,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import math
 
+from .collectors.claude_usage_cache import REASON_MISSING as CACHE_FILE_MISSING
 from .models import iso, now_utc, severity
 
 QUOTA_SCHEMA_VERSION = 1
@@ -121,6 +122,11 @@ def claude_hint(report, now=None):
     While the Phase 5 local activity reader reports use in the last 24 hours,
     its in-use table speaks instead; with the reader off or failing, exactly
     the Phase 4 rules apply.
+
+    An account that reads Claude Code's local usage cache gets the cache rules
+    instead: the cache refreshes when /usage is opened in Claude Code, so the
+    advice names that action rather than telling a panel user to open a
+    terminal. With the reader off, every rule below is exactly as it was.
     """
     if "collector_seen_at" not in report:
         return None
@@ -136,6 +142,17 @@ def claude_hint(report, now=None):
     measured = [window for window in report["windows"]
                 if window["used_percent"] is not None]
     seen = report.get("collector_seen_at")
+    cache = report.get("usage_cache")
+    if isinstance(cache, dict):
+        if cache.get("available"):
+            hint = cache_hint(report, measured, now)
+            if hint:
+                return hint
+        elif not measured and cache.get("reason") == CACHE_FILE_MISSING:
+            # The reader is on and Claude Code has not written the file yet:
+            # opening /usage is what creates it. Nothing was ever measured, so
+            # there is no quota to be old.
+            return "Run /usage in Claude Code"
     activity = report.get("local_activity")
     if (isinstance(activity, dict) and activity.get("available")
             and activity.get("last_request_at")):
@@ -157,6 +174,39 @@ def claude_hint(report, now=None):
     if seen:
         signals.append(timestamp(seen))
     return "No report %s - run claude" % compact_age((now - max(signals)).total_seconds())
+
+
+def cache_hint(report, measured, now):
+    """The hint for an account that reads Claude Code's local usage cache.
+
+    The cache is refreshed by opening /usage in Claude Code, so that is what
+    the hint names. The quota age is that of the newest measured window, the
+    same age the detail card shows. At most MAX_HINT_CHARS ASCII characters;
+    when the age makes the full wording too long, the action goes first.
+    """
+    if not measured:
+        return None
+    if all(window["resets_at"] and timestamp(window["resets_at"]) <= now
+           for window in measured):
+        return "Reset passed - open /usage"
+    newest = max(timestamp(window["observed_at"]) for window in measured)
+    age = compact_age((now - newest).total_seconds())
+    if claude_in_use(report, now):
+        return "In use - quota %s old" % age
+    hint = "Quota %s old - open /usage" % age
+    if len(hint) > MAX_HINT_CHARS:
+        hint = "Quota %s old" % age
+    return hint
+
+
+def claude_in_use(report, now):
+    """Whether the local activity reader says Claude is in use right now."""
+    activity = report.get("local_activity")
+    if not (isinstance(activity, dict) and activity.get("available")
+            and activity.get("last_request_at")):
+        return False
+    idle = (now - timestamp(activity["last_request_at"])).total_seconds()
+    return idle <= report.get("active_seconds", 300)
 
 
 def timestamp(value):
@@ -203,19 +253,24 @@ def claude_provenance(report, config=None, now=None):
     now = timestamp(now or now_utc())
     report = report if isinstance(report, dict) else {}
     config = config if isinstance(config, dict) else {}
-    return {"quota": _quota_source_line(report, now),
+    return {"quota": _quota_source_line(report, now, config),
             "activity": _activity_source_line(report, config, now),
             "usage_cache": _usage_cache_line(report, config, now),
+            "usage_cache_refreshes": _usage_cache_refresh_line(report, config, now),
             "credit": _credit_line(report),
             "status_note": _status_note_line(report, config)}
 
 
-def _quota_source_line(report, now):
+def _quota_source_line(report, now, config):
     """Where the quota numbers came from, and how old they are."""
     measured = [window for window in report.get("windows", [])
                 if isinstance(window, dict) and window.get("used_percent") is not None
                 and window.get("observed_at")]
     if not measured:
+        if config.get("usage_cache"):
+            # The cache reader is on, so opening /usage is what brings a
+            # reading: telling this user to open a terminal would be wrong.
+            return "Quota: no reading yet (open /usage in Claude Code)"
         return "Quota: no reading yet (use claude in a terminal)"
     newest = max(measured, key=lambda window: timestamp(window["observed_at"]))
     observed = timestamp(newest["observed_at"])
@@ -275,6 +330,69 @@ def _usage_cache_line(report, config, now):
     age = age_label((now - timestamp(fetched)).total_seconds())
     path = ascii_label(cache.get("path") or "unknown path", 160)
     return "Usage cache: ok - fetched %s (%s old), %s" % (when, age, path)
+
+
+def _usage_cache_refresh_line(report, config, now):
+    """How often Claude Code refreshed its usage cache, as far as we saw it.
+
+    The record is the daemon's own: it starts empty on every daemon start, so
+    the line says when the watching began instead of pretending to know Claude
+    Code's schedule. The gap is the median of the observed gaps and is only
+    shown with at least three refreshes, because two do not make a rate.
+    """
+    if not config.get("usage_cache"):
+        return None
+    cache = report.get("usage_cache")
+    if not isinstance(cache, dict):
+        return None
+    refreshes = cache.get("refreshes")
+    if not isinstance(refreshes, list):
+        return None
+    since = _local_stamp(cache.get("since"))
+    moments = []
+    for value in refreshes:
+        try:
+            moments.append(timestamp(value))
+        except (TypeError, ValueError):
+            continue
+    recent = [moment for moment in moments
+              if (now - moment).total_seconds() <= 24 * 3600]
+    if not recent:
+        return "Usage cache refreshes seen: none yet since %s" % since
+    newest = max(recent)
+    parts = ["last %s ago" % age_label((now - newest).total_seconds())]
+    gap = median_gap(recent)
+    if len(recent) >= 3 and gap is not None:
+        parts.append("usually every %s" % age_label(gap))
+    return ("Usage cache refreshes seen: %d in the last 24 h (%s; since %s)"
+            % (len(recent), ", ".join(parts), since))
+
+
+def median_gap(moments):
+    """The median gap between consecutive moments, in seconds.
+
+    An even number of gaps is the mean of the two middle ones. None means
+    there is no gap to measure.
+    """
+    ordered = sorted(moments)
+    gaps = [(later - earlier).total_seconds()
+            for earlier, later in zip(ordered, ordered[1:])]
+    if not gaps:
+        return None
+    middle = len(gaps) // 2
+    if len(gaps) % 2:
+        return gaps[middle]
+    return (gaps[middle - 1] + gaps[middle]) / 2.0
+
+
+def _local_stamp(value):
+    """A local timestamp for the admin page, or "unknown"."""
+    if not value:
+        return "unknown"
+    try:
+        return timestamp(value).astimezone().strftime("%Y-%m-%d %H:%M")
+    except (TypeError, ValueError):
+        return "unknown"
 
 
 def _credit_line(report):

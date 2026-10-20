@@ -68,6 +68,30 @@
       element("source-fields").append(label, input);
     }
     element("key-section").hidden = !type.has_secret;
+    if (type.id === "claude") element("source-fields").append(...vscodePreset());
+  }
+  function vscodePreset() {
+    // One button for panel users: it only ticks the two local readers in the
+    // form. The user still presses Save, and un-ticking works as before.
+    const preset = document.createElement("button");
+    preset.type = "button";
+    preset.textContent = "Set up for VS Code";
+    const note = document.createElement("p");
+    note.className = "note";
+    note.textContent = "Ticks both readers: the activity reader shows that Claude Code "
+      + "is in use, from the session logs Claude Code writes on this machine, and the "
+      + "usage cache reader shows the quota numbers Claude Code caches on this machine "
+      + "for its own /usage dialog.";
+    const status = document.createElement("p");
+    status.className = "note";
+    status.textContent = "";
+    preset.addEventListener("click", () => {
+      element("field-activity_logs").checked = true;
+      element("field-usage_cache").checked = true;
+      status.textContent = "Both readers are ticked. Press Save source to apply.";
+      message("Both Claude readers are ticked in the form. Press Save source to apply.");
+    });
+    return [preset, note, status];
   }
   function openEditor(source = null) {
     edit(source);
@@ -418,7 +442,8 @@
       }
       if (source.provenance) {
         // Labelled lines: each one says where its number comes from.
-        for (const key of ["quota", "activity", "usage_cache", "credit", "status_note"]) {
+        for (const key of ["quota", "activity", "usage_cache", "usage_cache_refreshes",
+                           "credit", "status_note"]) {
           const line = source.provenance[key];
           if (!line) continue;
           const paragraph = document.createElement("p"); paragraph.className = "note";

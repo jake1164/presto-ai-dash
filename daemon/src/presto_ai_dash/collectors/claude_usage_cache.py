@@ -64,6 +64,9 @@ OLD_FETCH_SECONDS = 7 * 24 * 3600
 WARN_INTERVAL_SECONDS = 30 * 60
 # Two consecutive transient failures are tolerated; the third is persistent.
 TRANSIENT_LIMIT = 2
+# The distinct fetch times kept in memory. Nothing is written to a file or a
+# database: the record starts empty on every daemon start.
+MAX_REFRESH_RECORDS = 50
 
 WINDOWS = (("five_hour", "5h", 300), ("seven_day", "Weekly", 10080))
 # Keys inside "utilization" that are never a credit entry.
@@ -78,10 +81,13 @@ REASON_ACCOUNT = "account changed"
 REASON_TRANSIENT = "read problem"
 REASON_NO_DATA = "no quota reported"
 
+# The start of the real checkbox label in the admin page. It is quoted in the
+# log messages, so a user can find the box the message names.
+SILENCE_PHRASE = "Read Claude Code's local usage cache"
+
 _UNAFFECTED = ("Quota from the usage cache is unavailable; terminal-export "
                "readings are unaffected.")
-_SILENCE = ("Untick 'Read Claude Code usage cache' in the admin page to "
-            "silence this.")
+_SILENCE = ("Untick '%s' in the admin page to silence this." % SILENCE_PHRASE)
 
 
 def _type_name(value):
@@ -208,6 +214,12 @@ class UsageCacheReader:
         # Set when the account behind the cache changed: the file is then read
         # again on every poll, so the change keeps being reported.
         self._blocked = False
+        # The distinct fetch times seen, newest last, at most MAX_REFRESH_RECORDS.
+        # Memory only: nothing is written to a file or a database, and a new
+        # reader (a daemon restart) starts with an empty record.
+        self._refreshes = []
+        # When the daemon first looked at the file: the start of the watching.
+        self._since = None
 
     # -- reading -----------------------------------------------------------
 
@@ -216,6 +228,8 @@ class UsageCacheReader:
         now = now if now is not None else self._clock()
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
+        if self._since is None:
+            self._since = _iso(now.timestamp())
         try:
             return self._refresh(now)
         except Exception as error:  # noqa: BLE001 - an unofficial format may change
@@ -289,12 +303,15 @@ class UsageCacheReader:
                                     path, account_changed=True)
         if digest is not None and self._account_fingerprint is None:
             self._account_fingerprint = digest
+        self._record_refresh(result["fetched_at"])
+        result.update(self._refresh_state())
         self._stat = (info.st_size, info.st_mtime_ns)
         self._result = copy.deepcopy(result)
         self._failures = 0
         if self._recovering:
-            LOGGER.info("Claude usage cache: RECOVERED - readable again (fetched %s)",
-                        _local_time(result["fetched_at"]))
+            LOGGER.info("Claude usage cache: RECOVERED - the usage cache file '%s' "
+                        "is readable again (fetched %s).",
+                        path, _local_time(result["fetched_at"]))
             self._recovering = False
         return result
 
@@ -427,11 +444,31 @@ class UsageCacheReader:
 
     # -- failures ----------------------------------------------------------
 
+    def _record_refresh(self, fetched_at):
+        """Remember a fetch time. A duplicate or an older time changes nothing.
+
+        Only the fetch time is kept: no value from the file ever enters the
+        record.
+        """
+        if not fetched_at:
+            return
+        if self._refreshes and fetched_at <= self._refreshes[-1]:
+            return
+        self._refreshes.append(fetched_at)
+        if len(self._refreshes) > MAX_REFRESH_RECORDS:
+            del self._refreshes[:-MAX_REFRESH_RECORDS]
+
+    def _refresh_state(self):
+        """The refresh record: the fetch times seen, and since when we watch."""
+        return {"refreshes": list(self._refreshes), "since": self._since}
+
     def _result_dict(self, available, reason, message, path, fetched_at, windows,
                      credit, account_changed=False):
-        return {"available": available, "reason": reason, "message": message,
-                "path": path, "fetched_at": fetched_at, "windows": windows,
-                "credit": credit, "account_changed": account_changed}
+        result = {"available": available, "reason": reason, "message": message,
+                  "path": path, "fetched_at": fetched_at, "windows": windows,
+                  "credit": credit, "account_changed": account_changed}
+        result.update(self._refresh_state())
+        return result
 
     def _persistent(self, now, reason, message, path, account_changed=False,
                     keep_counter=False):
@@ -457,13 +494,14 @@ class UsageCacheReader:
             return self._persistent(now, reason, message, path, keep_counter=True)
         LOGGER.debug("Claude usage cache: transient read problem (%s)%s. The last "
                      "known reading is kept and the file is read again on the next poll.",
-                     kind, (" at " + path) if path else "")
+                     kind, (" at '%s'" % path) if path else "")
         message = ("the usage cache could not be read this time (%s); the last known "
                    "reading is kept" % kind)
         if self._result is not None:
             result = copy.deepcopy(self._result)
             result["reason"] = REASON_TRANSIENT
             result["message"] = message
+            result.update(self._refresh_state())
             return result
         self._recovering = True
         return self._result_dict(False, REASON_TRANSIENT, message, path, None, [], None)
@@ -481,7 +519,7 @@ class UsageCacheReader:
         if path in self._announced:
             return
         self._announced.add(path)
-        LOGGER.info("Claude usage cache: reading %s", path)
+        LOGGER.info("Claude usage cache: reading the usage cache file '%s'.", path)
 
     # -- messages ----------------------------------------------------------
 
@@ -494,11 +532,11 @@ class UsageCacheReader:
         if problem.reason == REASON_NO_DATA:
             return ("Claude usage cache: NO QUOTA READING - %s holds no quota for "
                     "either window right now. %s Open /usage in Claude Code to "
-                    "fetch usage; %s" % (path, _UNAFFECTED, _SILENCE))
+                    "fetch usage. %s" % (path, _UNAFFECTED, _SILENCE))
         return ("Claude usage cache: FORMAT CHANGED - expected %s at %s in %s but "
-                "found %s. %s If Claude Code was updated this reader needs updating: "
-                "%s" % (problem.expected, problem.field, path, problem.found,
-                        _UNAFFECTED, _SILENCE))
+                "found %s. %s If Claude Code was updated this reader needs "
+                "updating. %s" % (problem.expected, problem.field, path,
+                                  problem.found, _UNAFFECTED, _SILENCE))
 
     def _missing_message(self):
         tried = ", ".join(self.path_candidates) if self.path_candidates else "none"
@@ -533,7 +571,7 @@ class UsageCacheReader:
                     "that owns the file, or %s" % (path, kind, _UNAFFECTED, _SILENCE))
         return ("Claude usage cache: FORMAT CHANGED - %s could not be parsed (%s) "
                 "after %d attempts. %s If Claude Code was updated this reader "
-                "needs updating: %s" % (path, kind, TRANSIENT_LIMIT + 1,
+                "needs updating. %s" % (path, kind, TRANSIENT_LIMIT + 1,
                                         _UNAFFECTED, _SILENCE))
 
     def _fresh_message(self, now, fetched):
@@ -590,6 +628,8 @@ def main(argv=None):
         print("Credit: $%g of $%g (expires %s)"
               % (credit["limit"] - credit["used"], credit["limit"],
                  credit["resets_at"]))
+    print("Refreshes seen: %d (since %s)"
+          % (len(result.get("refreshes") or []), result.get("since") or "unknown"))
     if result["message"]:
         print(result["message"])
     return 0

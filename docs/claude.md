@@ -6,6 +6,50 @@ and weekly subscription quota fields. It uses the
 These fields appear after a normal Claude Code response for supported
 subscription logins. An API billing key is not needed.
 
+## Claude in VS Code: quick start
+
+The VS Code panel never runs the status line, so quota arrives from the file
+Claude Code caches for its own `/usage` dialog and activity from the session
+logs Claude Code writes. Two readers make that work; both are opt-in and
+read-only.
+
+1. Open the Claude account on the admin page and press **Set up for VS Code**
+   in the Edit form (or tick **Read local Claude Code activity (timestamps and
+   token counts only)** and **Read Claude Code's local usage cache (usage
+   numbers only)** yourself).
+2. Press **Save source**. The button only ticks the two boxes; nothing is
+   saved until you save, and un-ticking works as before.
+3. Open `/usage` in Claude Code once. That forces Claude Code to fetch usage
+   and write its cache, so the quota appears immediately.
+
+**What you will see.** On the Presto the account shows its 5-hour and weekly
+bars with `Quota via cache, 2 h old` on the detail card, and a hint that says
+what to do: `Reset passed - open /usage`, `In use - quota 2h old`,
+`Quota 2h old - open /usage` or `Run /usage in Claude Code`. On the admin page
+the account lists the quota, the activity and the usage cache separately, each
+labelled with where its numbers come from: `Quota: no reading yet (open /usage
+in Claude Code)` until the first reading arrives, then the source, the time and
+the age of the reading, plus the line
+`Usage cache refreshes seen: N in the last 24 h (last <age> ago, usually every
+<gap>; since <time>)`.
+
+**Refreshing.** Opening `/usage` refreshes the quota at once. The cache also
+refreshes on its own at irregular moments, so the numbers age between those
+refreshes; the admin line says how often that happened while the daemon was
+watching.
+
+**Privacy.** Read: the timestamps, surface, model and token counts of the
+session logs, and the fetch time, the two windows and the credit of
+`~/.claude.json`. Never read, stored, logged or sent: prompts, tool inputs,
+paths, session identities, the account id, the email, the organisation, the
+project history and the MCP server list. Nothing is written to either file,
+and nothing is sent anywhere: both readers work on this machine only.
+
+**The log messages.** Every message the reader writes is in the
+[catalogue](#usage-cache-vs-code-panel-and-cli), the table under **The log
+messages**, with what each one means. A message that names the checkbox quotes
+its real label, so you can find the box it means.
+
 ## Setup and storage
 
 1. In the local configuration UI, add a **Claude** source, choose its name and
@@ -64,6 +108,15 @@ export accounts.
   `Reply in claude to refresh`; otherwise `No report <age> - run claude`, where
   the age is that of the newest signal of any kind. A fresh window draws no
   hint. These cases are warnings, never provider `offline`.
+- With the usage cache reader on and working, the cache rules speak first: a
+  fresh reading draws no hint; every measured reset passed reads `Reset passed
+  - open /usage`; Claude in use reads `In use - quota <age> old`; anything else
+  reads `Quota <age> old - open /usage`, where the age is that of the newest
+  measured reading (the same age the card shows). With the reader on, no cache
+  file yet and no quota reading yet, the hint reads `Run /usage in Claude
+  Code`. A cache that fails for another reason (format changed, access denied,
+  too large, account changed) keeps the rules above, and the admin page
+  explains the failure. With the reader off, every rule above is unchanged.
 - Detail cards for reports that carry a collector trail add three lines after
   the per-window reset lines, within the existing six-line budget (reset lines
   are never dropped; the lowest-priority line goes first when a line must go):
@@ -159,7 +212,8 @@ newer than the active window, with the hint `In use - quota 6d old` (or
 `In use - no quota data`) replacing the stale-quota warning — while the
 reader works, stale quota alone never raises a yellow warning (the text says
 what's stale instead). Recently used: `Used 3h ago - quota expired`. After a
-quiet day the Phase 4 hints apply unchanged. The detail card adds
+quiet day the Phase 4 hints apply unchanged. With the usage cache reader on
+and working, the cache hints above replace these two. The detail card adds
 `Last used: <age> ago (<surface>)`, `Log tokens 5h/7d: 120k/2.1M` (the "Log" says the numbers come from the local session logs), and an
 `Wk reset ~4 days (est)` line when the weekly reset has passed: the weekly
 cycle is fixed, so the next reset is the newest real one plus whole weeks —
@@ -238,13 +292,26 @@ opening `/usage` in Claude Code forces a refresh. A reading that is older
 than seven days is still shown, but it is labelled as old, and the status
 note says that opening `/usage` refreshes it.
 
+**How often it refreshes.** The daemon keeps its own record of the distinct
+fetch times it has seen: memory only, at most fifty, newest last, and empty
+again after every daemon start. Nothing is written to a file, to a new table,
+or to Claude Code's own backups of the file (which are never read). The admin
+page shows it per account as `Usage cache refreshes seen: N in the last 24 h
+(last <age> ago, usually every <gap>; since <time>)`, or `Usage cache
+refreshes seen: none yet since <time>` before the first refresh. The gap is
+the median of the observed gaps and is only shown with at least three
+refreshes, because two do not make a rate; `since` is when the daemon started
+watching, which is as far as the record reaches.
+
 **The log messages.** The reader logs under `presto_ai_dash.claude_usage_cache`
 and never logs a value or any file content — only paths, key names, JSON
-types and exception class names.
+types and exception class names. A message that names the checkbox quotes the
+start of its real label, `Read Claude Code's local usage cache`, so the label
+in the message and the label on the page can never drift apart.
 
 | Message | What it means |
 | --- | --- |
-| `reading <path>` (INFO) | The file it reads. Logged once per file. |
+| `reading the usage cache file '<path>'` (INFO) | The file it reads. Logged once per file. |
 | `FILE NOT FOUND` (WARNING) | No usage cache exists yet. It appears when Claude Code first fetches usage: open `/usage` once. |
 | `FILE TOO LARGE` (WARNING) | The file is above the 32 MB safety limit, so it was not read. |
 | `NOT A FILE` (WARNING) | The path is not a regular file, so it was not read. |
@@ -260,9 +327,10 @@ of problem is reported at once, and a recovery always is. Nothing here ever
 stops the quota reporting of the other sources.
 
 **Diagnostics.** `python -m presto_ai_dash.collectors.claude_usage_cache
---path <file>` prints what the reader extracted (the windows, the fetch time
-and the credit) or the same clear message, and exits 1 when nothing could be
-read. Without `--path` it searches the default layout.
+--path <file>` prints what the reader extracted (the windows, the fetch time,
+the credit and how many refreshes were seen) or the same clear message, and
+exits 1 when nothing could be read. Without `--path` it searches the default
+layout.
 
 **Limits.** The file format is **not an official interface** (assumption E):
 it can change without notice, and the reader then reports the usage cache as

@@ -9,6 +9,7 @@ in a temp directory; no test reads ~/.claude.json.
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -250,6 +251,34 @@ class ReaderOffTests(SourceBase):
         self.assertEqual(fields["usage_cache_path"]["default"], "")
         self.assertEqual(fields["usage_cache_path"]["label"],
                          "Claude Code state file (blank: automatic)")
+
+
+class RefreshRecordTests(SourceBase):
+    """The reader's own record of the fetch times reaches the report."""
+
+    def test_the_report_carries_the_record_of_the_fetch_times(self):
+        self.write_cache(cache_document(fetched=NOW - timedelta(hours=2)))
+        report = self.collect(self.source(terminal_observation(NOW - 6 * DAY))).metrics["quota"]
+        self.assertEqual(report["usage_cache"]["refreshes"],
+                         [(NOW - timedelta(hours=2)).isoformat()])
+        self.assertEqual(report["usage_cache"]["since"], NOW.isoformat())
+
+    def test_a_new_fetch_time_is_recorded_on_the_next_collect(self):
+        self.write_cache(cache_document(fetched=NOW - timedelta(hours=2)))
+        source = self.source(terminal_observation(NOW - 6 * DAY))
+        self.collect(source)
+        self.write_cache(cache_document(fetched=NOW - timedelta(hours=1)))
+        stamp = NOW.timestamp() - 10
+        os.utime(str(self.cache), (stamp, stamp))
+        report = self.collect(source).metrics["quota"]
+        self.assertEqual(report["usage_cache"]["refreshes"],
+                         [(NOW - timedelta(hours=2)).isoformat(),
+                          (NOW - timedelta(hours=1)).isoformat()])
+
+    def test_the_reader_off_carries_no_record(self):
+        report = self.collect(self.source(terminal_observation(NOW - 6 * DAY),
+                                           usage_cache=False)).metrics["quota"]
+        self.assertNotIn("usage_cache", report)
 
 
 class QuotaWindowTests(unittest.TestCase):

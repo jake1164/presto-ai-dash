@@ -683,5 +683,134 @@ class QuotaAgeLineTests(unittest.TestCase):
         self.assertIn("Quota via export, 6 days old", detail)
 
 
+class CacheHintTests(unittest.TestCase):
+    """The Phase 5d cache rules: the advice names /usage, not a terminal."""
+
+    def cached(self, report, available=True, reason=None):
+        """The usage_cache dict the usage cache reader puts into the report."""
+        report["usage_cache"] = {"available": available, "reason": reason,
+                                 "message": None, "path": "/home/you/.claude.json",
+                                 "fetched_at": None, "credit": None,
+                                 "account_changed": False, "refreshes": [],
+                                 "since": None}
+        return report
+
+    def hint(self, report):
+        return present_quota(report, NOW)["hint"]
+
+    def fresh_windows(self):
+        return [window("five_hour", "5h", 12, NOW - timedelta(minutes=5),
+                       NOW + timedelta(hours=4)),
+                window("seven_day", "Weekly", 34, NOW - timedelta(minutes=5),
+                       NOW + DAY, period=10080)]
+
+    def test_a_fresh_reading_needs_no_hint_with_the_cache_reader_on(self):
+        report = self.cached(trail_report(self.fresh_windows()))
+        self.assertIsNone(self.hint(report))
+
+    def test_every_passed_reset_asks_for_the_usage_dialog(self):
+        report = self.cached(trail_report(expired(measured(24))))
+        self.assertEqual(self.hint(report), "Reset passed - open /usage")
+
+    def test_a_stale_reading_names_its_age_and_the_usage_dialog(self):
+        report = self.cached(trail_report(measured(6 * 24), seen=NOW - 6 * DAY))
+        self.assertEqual(self.hint(report), "Quota 6d old - open /usage")
+
+    def test_a_stale_reading_while_claude_is_in_use_keeps_the_old_wording(self):
+        report = self.cached(with_activity(trail_report(measured(6 * 24),
+                                                        seen=NOW - 6 * DAY)))
+        report["local_activity"] = activity(last_request_at=NOW - timedelta(seconds=60))
+        self.assertEqual(self.hint(report), "In use - quota 6d old")
+
+    def test_the_used_ago_variant_is_replaced_only_with_the_cache_reader(self):
+        # Without the cache reader the Phase 5 wording is untouched.
+        report = with_activity(trail_report(measured(6 * 24), seen=NOW - 6 * DAY))
+        report["local_activity"] = activity(last_request_at=NOW - timedelta(hours=3))
+        self.assertEqual(self.hint(report), "Used 3h ago - quota 6d old")
+        # With it, the age and the action replace it; the card keeps the detail.
+        cached = self.cached(with_activity(trail_report(measured(6 * 24),
+                                                         seen=NOW - 6 * DAY)))
+        cached["local_activity"] = activity(last_request_at=NOW - timedelta(hours=3))
+        self.assertEqual(self.hint(cached), "Quota 6d old - open /usage")
+
+    def test_the_longest_age_keeps_the_action_and_the_longest_one_drops_it(self):
+        oldest = [window("five_hour", "5h", 12, NOW - timedelta(days=400), NOW + DAY)]
+        report = self.cached(trail_report(oldest))
+        self.assertEqual(self.hint(report), "Quota 400d old - open /usage")
+        self.assertEqual(len("Quota 400d old - open /usage"), 28)
+        absurd = [window("five_hour", "5h", 12, NOW - timedelta(days=1000), NOW + DAY)]
+        report = self.cached(trail_report(absurd))
+        self.assertEqual(self.hint(report), "Quota 1000d old")
+
+    def test_no_reading_yet_and_no_cache_file_asks_for_the_usage_dialog(self):
+        report = self.cached(trail_report(unmeasured(), seen=None), available=False,
+                              reason="no usage cache found")
+        self.assertEqual(self.hint(report), "Run /usage in Claude Code")
+
+    def test_a_heartbeat_does_not_hide_the_missing_cache_file(self):
+        # The collector was seen, but no quota was ever measured and Claude
+        # Code has not written its cache: opening /usage is still the action.
+        report = self.cached(trail_report(unmeasured(), seen=NOW), available=False,
+                              reason="no usage cache found")
+        self.assertEqual(self.hint(report), "Run /usage in Claude Code")
+
+    def test_a_cache_problem_keeps_the_existing_phase_four_hints(self):
+        report = self.cached(trail_report(unmeasured(), seen=None), available=False,
+                              reason="format changed")
+        self.assertEqual(self.hint(report), HINTS["rule1"])
+        report = self.cached(trail_report(measured(6 * 24), seen=NOW - 6 * DAY),
+                              available=False, reason="access denied")
+        self.assertEqual(self.hint(report), HINTS["rule4b"])
+
+    def test_the_cache_reader_off_keeps_every_existing_hint(self):
+        for windows, seen, expected in ((unmeasured(), None, HINTS["rule1"]),
+                                        (unmeasured(), NOW, HINTS["rule2"]),
+                                        (expired(measured(24)), NOW, HINTS["rule3"]),
+                                        (measured(24), NOW - timedelta(minutes=5),
+                                         HINTS["rule4a"]),
+                                        (measured(6 * 24), NOW - 6 * DAY, HINTS["rule4b"])):
+            report = trail_report(windows, seen=seen)
+            with self.subTest(expected=expected):
+                self.assertEqual(self.hint(report), expected)
+
+    def test_every_cache_hint_is_ascii_and_within_28_characters(self):
+        absurd = [window("five_hour", "5h", 12, NOW - timedelta(days=1000), NOW + DAY)]
+        cases = (self.cached(trail_report(expired(measured(24)))),
+                 self.cached(with_activity(trail_report(measured(6 * 24),
+                                                        seen=NOW - 6 * DAY))),
+                 self.cached(trail_report(measured(6 * 24), seen=NOW - 6 * DAY)),
+                 self.cached(trail_report(absurd)),
+                 self.cached(trail_report(unmeasured(), seen=None), available=False,
+                             reason="no usage cache found"))
+        for report in cases:
+            hint = self.hint(report)
+            with self.subTest(hint=hint):
+                self.assertTrue(hint and hint.isascii(), hint)
+                self.assertLessEqual(len(hint), 28, hint)
+
+
+class CacheHintFontTests(unittest.TestCase):
+    """The longest cache hints fit the Home note slot in the real font."""
+
+    HINTS = ("Reset passed - open /usage", "Quota 6d old - open /usage",
+             "Quota 400d old - open /usage", "Quota 1000d old",
+             "In use - quota 2h old", "Run /usage in Claude Code")
+
+    def test_every_cache_hint_fits_the_home_note_slot(self):
+        preview_dir = Path(__file__).resolve().parents[2] / "tools" / "presto_preview"
+        sys.path.insert(0, str(preview_dir))
+        from framebuffer import Framebuffer
+
+        display = Framebuffer()
+        display.set_font("bitmap8")
+        # The Home row is 240 wide: 14 for the marker, 8 of margin, 8 of slack.
+        available = display.width - 14 - 8 - 8
+        for hint in self.HINTS:
+            with self.subTest(hint=hint):
+                self.assertLessEqual(display.measure_text(hint, 1), available, hint)
+                self.assertTrue(hint.isascii(), hint)
+                self.assertLessEqual(len(hint), 28, hint)
+
+
 if __name__ == "__main__":
     unittest.main()

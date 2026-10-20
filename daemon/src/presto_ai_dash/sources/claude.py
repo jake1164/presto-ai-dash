@@ -20,7 +20,8 @@ class ClaudeSource(Source):
     product = "Claude"
     stale_after_seconds = 900
     report_note = ("Claude Code terminal export; idle readings become stale. "
-                   "VS Code panel coverage is unverified.")
+                   "The VS Code panel does not run the status line, so quota "
+                   "only updates from terminal sessions.")
     accepts_push = True
     push_window_ids = ("five_hour", "seven_day")
     config_fields = (

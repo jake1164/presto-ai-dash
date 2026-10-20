@@ -64,6 +64,15 @@ and off by default.
   but extracts only the fields listed in Phase 5 (timestamps, model, token
   counts) and never stores, logs or sends anything else.
 - Missing, expired or old readings are never shown as a fresh 0%.
+- **Provenance and no loss of detail (decided 2026-10-20).** Every number or
+  state shown to the user says where it came from: a quota reading from the
+  terminal status line (with its time and host), activity from local session
+  logs, or a reading pushed from another computer. A change must not remove an
+  existing detail, explanation or capability unless it replaces it with
+  something at least as informative; when adding a new source of information,
+  label it rather than blending it into an existing line. Applies to the
+  Presto screens, the detail cards, the admin page, the API payload and the
+  docs.
 - Keep `AGENTS.md` rules: tests via the repo `.venv`, PSL visual check, and
   device sync after any `presto/` change.
 

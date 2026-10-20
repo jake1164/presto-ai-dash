@@ -6,7 +6,8 @@ mode. On-device Wi-Fi, authenticated polling, and recovery are verified in
 `milestones.md`. Trends are deferred. Live Home shows real subscription quota
 bars (Codex, Claude, OpenCode Go) and Ollama Cloud activity; only the static
 preview mode uses fixed values, labelled DEMO. Known gaps: Codex dashboard
-sign-in, Claude graphical-panel coverage, and Ollama Cloud credit balance.
+sign-in, Claude quota from the VS Code panel (it does not run the status line,
+so only terminal sessions report quota), and Ollama Cloud credit balance.
 
 Things this project honestly cannot do, and why. If a number on the Presto
 looks wrong or missing, it is probably here.

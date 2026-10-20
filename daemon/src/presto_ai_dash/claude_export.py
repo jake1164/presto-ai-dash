@@ -37,7 +37,9 @@ def normalized_export(data, observed=None):
     observed = observed or now_utc()
     report = quota_report("anthropic", "Claude",
                           [dict(window, observed_at=iso(observed)) for window in windows], 900)
-    report["note"] = "Claude Code terminal export; idle readings become stale. VS Code panel coverage is unverified."
+    report["note"] = ("Claude Code terminal export; idle readings become stale. "
+                      "The VS Code panel does not run the status line, so quota "
+                      "only updates from terminal sessions.")
     if version is not None:
         report["collector_version"] = version
     return report, evidence

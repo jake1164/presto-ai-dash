@@ -195,5 +195,11 @@ The connected Presto fetched these same percentages and reset times. All six
 accounts/seven cards passed real-font layout, swipe/wraparound, selected-account
 preservation, and clipped Home scrolling checks. The dashboard was restarted
 after verification and COM3 released. M9 is **terminal implemented; live verified**.
-A separate comparison against Claude's usage page and graphical-panel workflow
-coverage remain unverified; terminal observations must not imply panel coverage.
+A separate comparison against Claude's usage page remains unverified.
+
+**Graphical-panel coverage (settled 2026-10-20).** The VS Code panel does not
+run the status line: the author used the panel continuously for over a week with
+the export installed and received no reading, while a single terminal session
+produced real 5h and weekly numbers within minutes. Quota therefore arrives only
+from terminal sessions. Terminal observations must not imply panel coverage; the
+optional local activity reader (below) shows panel use without quota.

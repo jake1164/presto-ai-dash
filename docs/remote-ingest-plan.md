@@ -815,6 +815,25 @@ In order (item 0 is an urgent defect and goes first):
    Step B1/B4 shipped: the offline screen and serial log now show the
    exception type, where the fetch stopped (conn/send/head/body/parse), the
    failure count, uptime, free memory and Wi-Fi state.
+   **Decision (2026-10-20): item 0 is closed as a network problem, not an app
+   defect.** The router log shows the Presto repeatedly joining and leaving the
+   2.4 GHz network (sessions of 3 s to 8 min, almost no traffic, no disconnect
+   reason, signal -64 to -65 dBm, 0% client retries), and the same happens on
+   the pre-Phase-9 app. It is handled outside this project (router and Wi-Fi
+   settings). What stays: the payload slimming (shipped), and the offline screen
+   and serial log that show the failure stage, count, uptime, memory and Wi-Fi
+   state, so a future failure explains itself. A radio watchdog and Wi-Fi
+   power-save off remain optional experiments, not scheduled.
+   **Accepted for later: summary plus lazy detail (option 2 below).** Home polls a
+   small summary (the Home row data and each card's title, status and
+   primary/secondary lines); a card's detail lines are requested only when the
+   user opens that card, from a per-source path, so one source's detail can grow
+   without enlarging every poll. Measured now: the device payload is about 4.1
+   KB, of which card detail lines are roughly 0.9 KB, so the saving today is
+   modest; it pays off as sources are added or a source's detail grows (for
+   example a longer activity breakdown). Do it when a source needs more detail
+   than fits the poll, or beyond about 12 services. Keep `/api/v1/status` working
+   for old devices and add a versioned path.
    **Device protocol options** (author's idea to send each source
    independently, assessed 2026-10-20): (1) slim single payload: one request,
    about 5 KB peak, scales to roughly 12 services; (2) summary plus lazy

@@ -283,7 +283,12 @@ def resolve_admin_token(config, shared_token):
     if not token:
         token = secrets.token_urlsafe(32)
         config["admin"]["token"] = token
-        log.warning("temporary admin token: %s", token)
+        # A flag for the admin page, so the Settings tab can say the token is
+        # temporary without ever showing it. INFO, not WARNING: this is a setup
+        # notice that returns at every start, not a fault.
+        config["admin"]["token_generated"] = True
+        log.info("temporary admin token (new at every start; set admin.token in "
+                 "dash.toml to keep one): %s", token)
     if token == shared_token:
         raise ValueError("admin token must be different from the device shared token")
     return token

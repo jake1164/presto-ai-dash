@@ -26,6 +26,7 @@ ENVIRONMENT = "environment"
 FILE = "dash.toml"
 DATABASE = "database"
 DEFAULT = "default"
+GENERATED = "generated at start"
 
 # The environment variables that decide a value, per setting.
 ENVIRONMENT_VARIABLES = {
@@ -102,6 +103,14 @@ def effective_settings(config, storage=None, config_path=None, environ=None, now
     add("Admin port", admin.get("port"),
         FILE if _file_value(file_values, "admin", "port") is not None else DEFAULT)
     add("Log level", logging_section.get("level"), origin_for("log_level", "logging"))
+    # Never the token itself: only whether it lasts across restarts.
+    if admin.get("token_generated"):
+        add("Admin token", "temporary: new at every start; set admin.token in dash.toml "
+            "to keep one", GENERATED)
+    elif "DASH_ADMIN_TOKEN" in names:
+        add("Admin token", "set", ENVIRONMENT)
+    elif admin.get("enabled") or admin.get("token"):
+        add("Admin token", "set", FILE)
     add("Timezone", _timezone_label(now), ENVIRONMENT)
 
     stored_overflow = storage.overflow_rows_setting() if storage is not None else None

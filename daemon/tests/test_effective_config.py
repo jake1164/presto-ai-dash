@@ -104,3 +104,41 @@ class UptimeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AdminTokenRowTests(unittest.TestCase):
+    """The page says whether the admin token lasts, and never shows it."""
+
+    def rows(self, admin, environ=None):
+        from presto_ai_dash.config import resolve_admin_token
+        config = {"daemon": {}, "admin": dict(admin), "logging": {}}
+        if admin.get("enabled"):
+            resolve_admin_token(config, "shared")
+        entries = effective_settings(config, None, None, environ or {})
+        return {entry["name"]: entry for entry in entries}
+
+    def test_a_generated_token_is_called_temporary_and_not_shown(self):
+        from presto_ai_dash.config import resolve_admin_token
+        config = {"daemon": {}, "admin": {"enabled": True, "token": ""}, "logging": {}}
+        token = resolve_admin_token(config, "shared")
+        entries = effective_settings(config, None, None, {})
+        entry = next(item for item in entries if item["name"] == "Admin token")
+        self.assertEqual(entry["origin"], "generated at start")
+        self.assertIn("temporary", entry["value"])
+        self.assertNotIn(token, repr(entries))
+
+    def test_a_configured_token_says_set(self):
+        entry = self.rows({"enabled": True, "token": "chosen-token"})["Admin token"]
+        self.assertEqual((entry["value"], entry["origin"]), ("set", FILE))
+
+    def test_the_environment_token_says_so(self):
+        entry = self.rows({"enabled": True, "token": "x"},
+                          {"DASH_ADMIN_TOKEN": "x"})["Admin token"]
+        self.assertEqual(entry["origin"], ENVIRONMENT)
+
+    def test_the_generated_token_is_logged_at_info_not_warning(self):
+        import logging
+        from presto_ai_dash.config import resolve_admin_token
+        with self.assertLogs("presto_ai_dash.config", level="DEBUG") as captured:
+            resolve_admin_token({"admin": {"token": ""}}, "shared")
+        self.assertEqual([record.levelno for record in captured.records], [logging.INFO])

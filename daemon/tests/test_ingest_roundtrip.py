@@ -101,7 +101,7 @@ class RoundTripTests(AdminServerBase):
         self.assertEqual(card["status"], "ok")
         self.assertEqual(card["primary"], "5h: 12%")
         self.assertEqual(card["secondary"], "Weekly: 34.5%")
-        self.assertEqual(windows[0]["id"], "five_hour")
+        self.assertEqual(windows[0]["label"], "5h")  # the Presto reads labels, not window ids
         self.assertEqual(windows[0]["used_percent"], 12.0)
         self.assertEqual(windows[0]["state"], "available")
         self.assertIsNotNone(windows[0]["resets_at"])

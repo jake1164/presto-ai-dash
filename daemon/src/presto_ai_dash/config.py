@@ -16,6 +16,7 @@ DEFAULTS = {
                "ingest_enabled": False},
     "logging": {"level": "INFO"},
     "admin": {"enabled": False, "port": 8788, "token": "", "key_file": ""},
+    "display": {"overflow_rows": 1},
     "sources": {
         "fake": {"enabled": True, "scenario_interval": 20},
         "ollama": {"enabled": False, "base_url": "http://localhost:11434",
@@ -43,6 +44,12 @@ INGEST_ENV = "DASH_INGEST_ENABLED"
 TRUTHY_FLAGS = frozenset(("1", "true", "yes", "on"))
 FALSY_FLAGS = frozenset(("0", "false", "no", "off"))
 
+OVERFLOW_ENV = "DASH_OVERFLOW_ROWS"
+OVERFLOW_MIN = 0
+OVERFLOW_MAX = 3
+DEFAULT_OVERFLOW_ROWS = 1
+_warned_overflow = False
+
 
 def parse_flag(value, name):
     """Parse a boolean environment flag, rejecting anything ambiguous."""
@@ -52,6 +59,46 @@ def parse_flag(value, name):
     if lowered in FALSY_FLAGS:
         return False
     raise ConfigError("%s must be a boolean flag (1/true/yes/on or 0/false/no/off)" % name)
+
+
+def parse_overflow_rows(value):
+    """The strip-line maximum from a string, or None when it is unusable."""
+    try:
+        number = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    if number < OVERFLOW_MIN or number > OVERFLOW_MAX:
+        return None
+    return number
+
+
+def overflow_rows(config, stored=None, environ=None):
+    """The effective strip-line maximum, resolved afresh on every payload.
+
+    The environment beats the admin's stored setting, which beats TOML; one
+    line by default. Reading the environment here - not once at startup - is
+    what lets an admin change apply without a daemon restart. A garbled
+    variable fails closed to the default and is logged once.
+    """
+    global _warned_overflow
+    names = os.environ if environ is None else environ
+    if OVERFLOW_ENV in names:
+        value = parse_overflow_rows(names[OVERFLOW_ENV])
+        if value is None:
+            if not _warned_overflow:
+                _warned_overflow = True
+                log.error("%s is set to an unusable value; the strip keeps one line",
+                          OVERFLOW_ENV)
+            return DEFAULT_OVERFLOW_ROWS
+        return value
+    if stored is not None:
+        return stored
+    section = config.get("display") if isinstance(config, dict) else None
+    if isinstance(section, dict):
+        value = section.get("overflow_rows", DEFAULT_OVERFLOW_ROWS)
+        if type(value) is int and OVERFLOW_MIN <= value <= OVERFLOW_MAX:
+            return value
+    return DEFAULT_OVERFLOW_ROWS
 
 
 def ingest_enabled(config, stored=None, environ=None):
@@ -103,6 +150,12 @@ def load_config(path=None):
             config[section][key] = value
     if INGEST_ENV in os.environ:
         config["daemon"]["ingest_enabled"] = parse_flag(os.environ[INGEST_ENV], INGEST_ENV)
+    if OVERFLOW_ENV in os.environ:
+        overflow = parse_overflow_rows(os.environ[OVERFLOW_ENV])
+        if overflow is None:
+            raise ConfigError("%s must be an integer in range %d..%d" %
+                              (OVERFLOW_ENV, OVERFLOW_MIN, OVERFLOW_MAX))
+        config["display"]["overflow_rows"] = overflow
     for section, key, minimum, maximum in (
         (config["daemon"], "port", 1, 65535),
         (config["daemon"], "poll_interval", 1, None),
@@ -121,6 +174,10 @@ def load_config(path=None):
             raise ConfigError("daemon.%s must be a valid string" % key)
     if type(config["daemon"]["ingest_enabled"]) is not bool:
         raise ConfigError("daemon.ingest_enabled must be a boolean")
+    overflow = config["display"].get("overflow_rows")
+    if type(overflow) is not int or overflow < OVERFLOW_MIN or overflow > OVERFLOW_MAX:
+        raise ConfigError("display.overflow_rows must be an integer in range %d..%d" %
+                          (OVERFLOW_MIN, OVERFLOW_MAX))
     token = config["daemon"]["shared_token"]
     if token and (not token.isascii() or any(char.isspace() for char in token)):
         raise ConfigError("daemon.shared_token must be ASCII without whitespace")

@@ -101,6 +101,21 @@ M11 connects the reusable windows to Home:
   When no quota account exists the local services are the list and keep their
   two-line rows. The list scrolls by its total height, so the mixed row
   heights scroll correctly and the last row stays fully reachable.
+- Overflow strip: when the list is taller than the list area, the rows that
+  are not fully visible are named in a strip at the bottom of the list area,
+  each with its status marker, in the saved order; a row cut by the edge of
+  the area is named there as well as drawn. As the user scrolls, rows move
+  between the strip and the list, so nothing is lost: every account is still
+  a full row when it is scrolled to. `+N` appears in the last slot of the
+  last line when the names did not fit, in the worst colour of exactly the
+  rows it replaced. The strip setting is the **maximum** number of lines
+  (0 to 3, default 1, 0 turns it off): the strip uses only as many lines as
+  the hidden names need, up to that maximum, and `+N` appears only when the
+  maximum is not enough. The line count is decided from the layout (the
+  rows, their names, the setting and the width), never from the scroll
+  position, so the list does not jump while scrolling; each extra line costs
+  18 px of list height (at the maximum of 3 the list area is 150 px). The
+  strip disappears entirely when the whole list fits.
 - Honest states: a stale window reads `last known 6d ago` (no age while the
   device itself is cut off), a passed reset reads `awaiting refresh`, an
   unknown window shows `--` (distinct from a measured `0%`), and an

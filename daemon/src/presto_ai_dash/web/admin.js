@@ -4,7 +4,7 @@
   let csrfToken = "", unlocked = false, catalog = [], sources = [], editing = null;
   let busy = false;
   let dragging = null;
-  let ingestState = null, tokenReveal = null;
+  let ingestState = null, tokenReveal = null, displayState = null;
   function message(text, error = false) {
     element("message").textContent = text;
     element("message").classList.toggle("error", error);
@@ -38,6 +38,20 @@
     element("ingest-enabled").checked = !!ingestState?.enabled;
     element("ingest-enabled").disabled = !!ingestState?.locked_by_environment;
     element("ingest-lock").hidden = !ingestState?.locked_by_environment;
+  }
+  async function loadDisplay() {
+    // The Home display settings travel with the status payload, so the
+    // control is read on its own, like the ingest switch.
+    try {
+      displayState = await request("/api/admin/display");
+      renderDisplay();
+    } catch (_) { /* keep the last known setting */ }
+  }
+  function renderDisplay() {
+    const value = displayState?.overflow_rows;
+    element("overflow-rows").value = String(value ?? 1);
+    element("overflow-rows").disabled = !!displayState?.locked_by_environment;
+    element("display-lock").hidden = !displayState?.locked_by_environment;
   }
   function renderFields(settings = {}) {
     const type = selectedType();
@@ -461,7 +475,7 @@
   }
   function lock() {
     csrfToken = ""; unlocked = false; sources = []; catalog = []; editing = null;
-    ingestState = null; tokenReveal = null;
+    ingestState = null; tokenReveal = null; displayState = null;
     element("admin-token").value = ""; element("source-form").reset();
     element("source-list").replaceChildren(); element("source-fields").replaceChildren();
     element("workspace").hidden = true; element("login-panel").hidden = false;
@@ -470,6 +484,7 @@
   async function unlock() {
     await reload();
     await loadIngest();
+    await loadDisplay();
     element("source-type").replaceChildren(...catalog.map((type) => {
         const option = document.createElement("option"); option.value = type.id;
         option.textContent = type.id === "fake" ? "Fake (demo/test data)" : type.name; return option;
@@ -515,6 +530,17 @@
         "Remote reports refused. Existing tokens are kept.");
     } catch (error) { message(error.message, true); }
     finally { busy = false; renderIngest(); }
+  });
+  element("overflow-rows").addEventListener("change", async () => {
+    if (busy) { renderDisplay(); return; }
+    busy = true;
+    const lines = Number(element("overflow-rows").value);
+    try {
+      displayState = await request("/api/admin/display", "PUT", {overflow_rows: lines});
+      message("Home overflow strip: " + displayState.overflow_rows +
+        " line(s) of names for services that do not fit.");
+    } catch (error) { message(error.message, true); }
+    finally { busy = false; renderDisplay(); }
   });
   element("add-source").addEventListener("click", () => { if (!busy) { openEditor(); message(""); } });
   element("close-editor").addEventListener("click", () => { if (!busy) closeEditor(); });

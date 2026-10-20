@@ -904,9 +904,12 @@ class ActivityPrivacyEndToEndTests(ManagementBase):
             "laptop", client_time=datetime.now(timezone.utc))
         self.assertTrue(ingest(self.storage, self.row["id"], envelope))
         ManagedCollector(self.manager, self.config, threading.Event()).collect_once()
-        payload = self.manager.status_payload()
-        self.assertTrue(payload["sources"][0]["quota"]["local_activity"]["available"])
-        return json.dumps(payload) + json.dumps(self.manager.list_sources())
+        # The privacy sweep covers everything the daemon holds: the full payload
+        # (a superset of what the Presto is sent), the device view, the admin list.
+        full = self.manager.full_status_payload()
+        self.assertTrue(full["sources"][0]["quota"]["local_activity"]["available"])
+        return (json.dumps(full) + json.dumps(self.manager.status_payload()) +
+                json.dumps(self.manager.list_sources()))
 
     def test_sentinels_never_reach_the_payload_or_reports(self):
         text = self._exercise()

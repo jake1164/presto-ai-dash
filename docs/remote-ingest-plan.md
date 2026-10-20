@@ -722,8 +722,98 @@ untouched, as the amendment requires.
 
 ## Backlog and priority (set by the author, 2026-10-20)
 
-In order, after Phase 9 and the provenance fixes land:
+In order (item 0 is an urgent defect and goes first):
 
+0. **Presto connectivity failure (MAJOR; next; added 2026-10-20).** The physical
+   Presto intermittently shows "Daemon offline" while the daemon is healthy and
+   the PSL preview is fine. A device restart fixes it only sometimes and it
+   fails again within minutes. Evidence so far (read-only measurements on the
+   author's machine): 124 device-style requests over 75 s all succeeded (median
+   0.10 s, worst 0.19 s); the device's configured address matches this PC; the
+   daemon answers on every LAN address; the status payload has grown to 10.3 KB
+   (device cap 64 KiB), about half of it data the device never reads, with each
+   source's quota report sent twice (under `quota` and `metrics.quota`). In the
+   device code, `StatusClient.fetch_async` turns ANY exception during the fetch
+   or parse, including `MemoryError`, into `NetworkUnavailable`, which the
+   screen shows as "Daemon offline / Check daemon and LAN address"; the offline
+   screen only appears after 30 s without a good fetch. The strongest
+   hypothesis is device memory (heap fragmentation or exhaustion while reading
+   and parsing a payload that has grown) or slow reads on the device Wi-Fi.
+   It is a hypothesis: the device does not report why a fetch failed, so none of
+   this is confirmed. Work, in order, each step shippable on its own:
+   - **A. Slim the status payload (daemon only; can run now).** Send the device
+     only what `presto/` reads (about 5 KB measured, half of today's), and send
+     each quota report once. The admin page does not use this payload. Proof by
+     a differential test: draw Home and every card from the full and the slim
+     payload and require identical output. Add a payload size budget test
+     (fixture with every source type and both readers on; fail above 8 KB) so it
+     cannot quietly grow back, and document the budget.
+   - **B. Make the device say why it failed (needs presto/ changes; after the
+     Home overflow strip agent finishes, which edits the same files).**
+     Distinguish `MemoryError`, timeout, connection reset and incomplete body
+     instead of one generic message; show the error type, bytes received and
+     free memory on the offline screen detail (ASCII, short); call
+     `gc.collect()` before parsing and read the body without repeated
+     concatenation (preallocated buffer or fewer, larger chunks); keep a failure
+     counter and the last error.
+   - **C. Device-to-daemon diagnostics header.** The device sends on every
+     request `X-Presto-Client` (its `DEVICE_NAME`), `X-Presto-Revision` and
+     `X-Presto-Diag` (for example `err=MemoryError;n=3;free=41200;up=312`, at
+     most 120 ASCII characters; untrusted input, sanitised, memory only). The
+     daemon logs a change of diagnostics once and the Status tab (admin page
+     reorganization) shows each client's last error and free memory. This gives
+     visibility without a serial cable.
+   - **D. Decision gate for the protocol** (see "Device protocol options"
+     below): move to summary plus lazy cards if the failure persists at about 5
+     KB, or when more than about 12 services are expected; to fully independent
+     per-source fetches only if per-device source selection becomes a
+     requirement.
+   - **Acceptance.** The device stays connected for 24 hours with the daemon
+     running; any failure is visible with its reason on the device and in the
+     daemon; the payload for the author's setup is at most 5 KB and a test
+     enforces the budget. Record the outcome here.
+   **UPDATE 2026-10-20 (later): the failure is the Presto's Wi-Fi link, not the
+   payload or the daemon.** After slimming the payload to 4.4 KB (step A, 58%
+   smaller, identical screens; shipped to the daemon) the device still dropped
+   offline after running for a while. Measurements from the PC while it was
+   failing: the Presto's connection attempts reached the daemon but stuck in
+   `SYN_RECEIVED` (3 of 3 in 90 s: the daemon answered and the device never
+   completed the handshake); the PC's neighbor (ARP) entry for the Presto was
+   `Unreachable`/`Incomplete` with no MAC address; pings to the Presto were 3 of
+   12 answered (latency to 1.9 s), then 0 of 60, while the gateway answered 6 of
+   6 and the daemon answered 124 of 124 local requests. A power cycle brings it
+   back for a short time. So the device's network stack stops answering at the
+   link layer; "Daemon offline" is the app's generic label for that. A soft
+   relaunch of the app (the sync tool) does not reset the Wi-Fi chip, which would
+   explain "a restart fixes it only sometimes". The cause on the device is still
+   unproven; candidates, most likely first: Wi-Fi power-save (the default mode
+   sleeps the radio and can stop answering ARP and incoming packets); weak
+   signal or interference at the device's position; DHCP lease renewal failing;
+   the radio wedging after errors with the app still believing it is connected
+   (`wifi.isconnected()` stays true, so `poll_once` never reconnects).
+   Revised steps (A is done): **B2** turn off Wi-Fi power-save after connecting
+   (`wlan.config(pm=0xa11140)`, in try/except) and re-apply it after every
+   reconnect; **B3** a network watchdog in the app: after N consecutive failed
+   fetches cycle the radio (disconnect, deactivate, activate, reconnect), and
+   after M minutes of continuous failure reset the device in a way that returns
+   to AI Dash (check how the launcher restarts apps first); **B4** report Wi-Fi
+   state with the failure on the offline screen and in the diagnostics header
+   (isconnected, status code, RSSI, IP, uptime, failure count); **B1** (error
+   type, bytes and free memory) stays. PC-side checks to repeat when it fails:
+   `Get-NetNeighbor` for the device address, ping loss, `netstat` for
+   `SYN_RECEIVED` from the device. Also check the router's client list for the
+   Presto's signal strength and the DHCP lease time.
+   **Device protocol options** (author's idea to send each source
+   independently, assessed 2026-10-20): (1) slim single payload: one request,
+   about 5 KB peak, scales to roughly 12 services; (2) summary plus lazy
+   cards: Home polls a small summary (the Home row data only), the detail
+   lines of a card are fetched only when the user swipes to it; one request per
+   poll plus one for the visible card, peak about 3 KB; (3) fully independent
+   per-source fetches: best isolation and peak memory (about 1-1.5 KB) but
+   N+1 requests per poll (31 with 30 services; at an estimated 0.1-0.3 s per
+   Wi-Fi connection that is several seconds per cycle, not measured on the
+   device), partial-update rules, and the most device code. Any change keeps
+   `/api/v1/status` working for old devices and adds a versioned path.
 1. **M12 alert polish.** Needs decisions first (LED colour for "in use" versus
    a warning, default thresholds, whether a stale reading may ever alert,
    sounds and quiet hours). Also in scope (author, 2026-10-20): **an alarm
@@ -746,6 +836,8 @@ In order, after Phase 9 and the provenance fixes land:
    the scroll position, so the list does not jump while scrolling; each
    extra line costs 18 px of list height. The strip disappears entirely when
    the whole list fits.
+   **Done 2026-10-20**: the strip, the `overflow_rows` setting (environment,
+   stored value, `dash.toml`, default 1) and the payload key are in place.
 1b. **Phase 5d**, the Claude usage cache reader (high value: quota for VS Code
    panel users). Runs after 1a; its prompt is written.
 1c. **Admin page reorganization (added 2026-10-20; before M12, which adds

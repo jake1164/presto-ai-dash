@@ -365,6 +365,27 @@ class Storage:
                 " ON CONFLICT(name) DO UPDATE SET value=excluded.value",
                 (b"1" if enabled else b"0",))
 
+    def overflow_rows_setting(self):
+        """The persisted strip-line maximum, or None while it was never set."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT value FROM configuration_meta WHERE name = 'overflow_rows'").fetchone()
+        if row is None:
+            return None
+        try:
+            return int(bytes(row["value"]).decode("ascii"))
+        except (ValueError, UnicodeDecodeError):
+            return None
+
+    def save_overflow_rows(self, value):
+        if type(value) is not int or value < 0 or value > 3:
+            raise ValueError("overflow_rows must be an integer in range 0..3")
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO configuration_meta (name, value) VALUES ('overflow_rows', ?)"
+                " ON CONFLICT(name) DO UPDATE SET value=excluded.value",
+                (str(value).encode("ascii"),))
+
 
     def save_claude_bridge(self, instance_id, settings_path, previous, command):
         try:

@@ -189,11 +189,19 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
         self.app.client.fetch_async.return_value = self.mixed_payload()
         await self.app.poll_once()
         total = 4 * 46 + 2 * 18
-        self.assertEqual(self.app.home_scroll.limit, total - 184)
+        # The list is taller than the list area, so the overflow strip takes
+        # one line of it: 204 - 18 = 186 pixels of list.
+        self.assertEqual(self.app.home_layout.lines, 1)
+        self.assertEqual(self.app.home_layout.region, 186)
+        self.assertEqual(self.app.home_scroll.limit, total - 186)
         self.app._render()
         texts = [row[0] for row in self.device.display.rows]
         self.assertIn('Cloud 0', texts)
-        self.assertNotIn('Gateway 0', texts)  # the local rows are below the fold
+        # The local rows are named in the overflow strip until they are
+        # scrolled into the list.
+        band = [row[0] for row in self.device.display.rows if row[2] >= 190]
+        self.assertIn('Gateway 0', band)
+        self.assertIn('Gateway 1', band)
         # At the end of the scroll the local rows are on the list, in place.
         self.app.home_scroll.offset = self.app.home_scroll.limit
         self.app._render()
@@ -220,6 +228,41 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
         self.device.touch.x, self.device.touch.y = 180, 150
         self.app._poll_touch()
         self.assertEqual(self.app.home_scroll.offset, 20)
+
+    async def test_a_drag_in_the_strip_band_scrolls_the_list(self):
+        self.app.client.fetch_async.return_value = self.mixed_payload()
+        await self.app.poll_once()
+        self.assertGreater(self.app.home_scroll.limit, 0)
+        # The band is at the bottom of the list area; a drag that starts
+        # there scrolls the list.
+        self.device.touch.state = True
+        self.device.touch.x, self.device.touch.y = 120, 195
+        self.app._poll_touch()
+        self.device.touch.x, self.device.touch.y = 120, 175
+        self.app._poll_touch()
+        self.assertEqual(self.app.home_scroll.offset, 20)
+
+    async def test_a_horizontal_swipe_in_the_strip_band_still_changes_cards(self):
+        self.app.client.fetch_async.return_value = self.mixed_payload()
+        await self.app.poll_once()
+        self.device.touch.state = True
+        self.device.touch.x, self.device.touch.y = 120, 195
+        self.app._poll_touch()
+        self.device.touch.x, self.device.touch.y = 120, 175
+        self.app._poll_touch()
+        self.assertEqual(self.app.home_scroll.offset, 20)
+        # A horizontal drag belongs to the cards, not to the list.
+        self.device.touch.state = False
+        self.app._handle_gestures(self.app._poll_touch())
+        self.device.touch.state = True
+        self.device.touch.x, self.device.touch.y = 60, 195
+        self.app._handle_gestures(self.app._poll_touch())
+        self.device.touch.x, self.device.touch.y = 180, 195
+        self.app._handle_gestures(self.app._poll_touch())
+        self.device.touch.state = False
+        self.app._handle_gestures(self.app._poll_touch())
+        self.assertEqual(self.app.home_scroll.offset, 20)
+        self.assertNotEqual(self.app._current_card().id, "dash")
 
     async def test_success_renders_configured_instances_not_demo_cloud_values(self):
         self.assertTrue(await self.app.poll_once())

@@ -11,14 +11,15 @@ from unittest.mock import patch
 import presto_path
 from datetime import datetime, timedelta, timezone
 from home import (DEMO_QUOTAS, HomeScroll, LOCAL_ROW, ROW_HEIGHT, SOURCE_HEIGHT, SOURCE_ROW,
-                  SOURCE_TOP, binding_window, home_total_height, quota_label,
+                  SOURCE_TOP, STRIP_LINE_HEIGHT, binding_window, home_total_height, quota_label,
                   quota_width, scroll_limit, source_rows)
 from net import embedded_payload
 from presto_ai_dash.models import SourceSnapshot
 from presto_ai_dash.quotas import quota_report, quota_window
 from test_management import ManagementBase
 from test_ui import Display
-from ui import (AMBER, PANEL, DAILY, WEEKLY, INK_DIM, Palette, draw_home, draw_sources)
+from ui import (AMBER, PANEL, DAILY, WEEKLY, INK_DIM, Palette, build_home_layout, draw_home,
+                draw_sources)
 
 
 HOME_NOW = datetime(2026, 10, 18, 12, tzinfo=timezone.utc)
@@ -482,10 +483,14 @@ class HomeOrderTests(unittest.TestCase):
         return rows, display
 
     def name_positions(self, display, names):
-        """The y of every account name, in the order the names were drawn."""
+        """The y of every account name in the list, in the order drawn.
+
+        The overflow strip repeats the names of the hidden rows, so only the
+        names drawn inside the list clip are counted.
+        """
         found = []
-        for text, x, y, wrap, scale, font in display.rows:
-            if text in names:
+        for index, (text, x, y, wrap, scale, font) in enumerate(display.rows):
+            if text in names and display.row_clips[index] is not None:
                 found.append((text, y))
         return found
 
@@ -543,8 +548,13 @@ class HomeOrderTests(unittest.TestCase):
         rows, _ = self.drawn(order)
         total = 4 * SOURCE_ROW + 2 * LOCAL_ROW
         self.assertEqual(home_total_height(rows), total)
-        self.assertEqual(scroll_limit(total, SOURCE_HEIGHT), total - SOURCE_HEIGHT)
-        limit = scroll_limit(total, SOURCE_HEIGHT)
+        # The list is taller than the list area, so the overflow strip takes
+        # one line of it and the list scrolls behind the strip.
+        layout = build_home_layout(Display(), rows, 1)
+        self.assertEqual(layout.lines, 1)
+        self.assertEqual(layout.region, SOURCE_HEIGHT - STRIP_LINE_HEIGHT)
+        limit = scroll_limit(total, layout.region)
+        self.assertEqual(layout.limit, limit)
         self.assertGreater(limit, 0)
         for offset in (0, limit // 2, limit):
             with self.subTest(offset=offset):
@@ -555,7 +565,7 @@ class HomeOrderTests(unittest.TestCase):
         self.assertEqual(found[-1][0], names[-1])
         # The last row is fully inside the list at the bottom of the scroll.
         self.assertGreaterEqual(found[-1][1], SOURCE_TOP)
-        self.assertLessEqual(found[-1][1] + 8, SOURCE_TOP + SOURCE_HEIGHT)
+        self.assertLessEqual(found[-1][1] + 8, SOURCE_TOP + layout.region)
         # One pixel past the limit does not scroll further.
         _, beyond = self.drawn(order, scroll=limit + 1)
         self.assertEqual(self.name_positions(beyond, names)[-1], found[-1])
@@ -564,22 +574,28 @@ class HomeOrderTests(unittest.TestCase):
         order = self.mixed_order()
         rows, _ = self.drawn(order)
         total = home_total_height(rows)
-        limit = scroll_limit(total, SOURCE_HEIGHT)
+        layout = build_home_layout(Display(), rows, 1)
+        limit = scroll_limit(total, layout.region)
         _, display = self.drawn(order, scroll=limit)
         thumbs = [args for pen, args in display.rectangles
                   if pen == INK_DIM and args[0] == 235 and args[2] == 2]
         self.assertEqual(len(thumbs), 1)
         x, y, width, height = thumbs[0]
-        self.assertEqual(height, max(12, SOURCE_HEIGHT * SOURCE_HEIGHT // total))
-        self.assertLessEqual(y + height, SOURCE_TOP + SOURCE_HEIGHT)
+        self.assertEqual(height, max(12, layout.region * layout.region // total))
+        self.assertLessEqual(y + height, SOURCE_TOP + layout.region)
 
     def test_the_list_is_clipped_while_its_rows_are_drawn(self):
         order = self.mixed_order()
-        _, display = self.drawn(order, scroll=10)
+        rows, display = self.drawn(order, scroll=10)
+        layout = build_home_layout(Display(), rows, 1)
         self.assertTrue(display.rows)
         for index, entry in enumerate(display.rows):
-            self.assertEqual(display.row_clips[index],
-                             (14, SOURCE_TOP, 218, SOURCE_HEIGHT), entry[0])
+            clip = display.row_clips[index]
+            if clip is None:
+                # The overflow strip is drawn outside the list clip.
+                self.assertGreaterEqual(entry[2], SOURCE_TOP + layout.region, entry[0])
+                continue
+            self.assertEqual(clip, (14, SOURCE_TOP, 218, layout.region), entry[0])
 
 
 class HomeOrderEndToEndTests(ManagementBase):

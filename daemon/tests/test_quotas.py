@@ -20,7 +20,7 @@ from presto_ai_dash.sources.ollama_cloud import OllamaCloudSource
 from test_management import ManagementBase
 import presto_path
 from home import source_rows, HomeScroll, home_total_height, SOURCE_TOP, SOURCE_HEIGHT
-from ui import Palette, draw_sources, PANEL
+from ui import Palette, build_home_layout, draw_sources, PANEL
 from test_ui import Display
 import test_home
 
@@ -256,12 +256,17 @@ class QuotaDeviceTests(unittest.TestCase):
         self.assertEqual(len(rows), 8)
         self.assertEqual([w["label"] for w in rows[0]["windows"]], ["5h", "Weekly", "Monthly"])
         scroll = HomeScroll(0)
-        scroll.set_height(home_total_height(rows), SOURCE_TOP, SOURCE_HEIGHT)
-        self.assertEqual(scroll.limit, 8 * 46 - 184)
+        # The list is taller than the list area, so the overflow strip takes
+        # its band out of the list and the list scrolls behind it.
+        layout = build_home_layout(Display(), rows, 1)
+        scroll.set_height(home_total_height(rows), SOURCE_TOP, SOURCE_HEIGHT,
+                          layout.region)
+        self.assertEqual(scroll.limit, 8 * 46 - layout.region)
         for offset in (0, 25, scroll.limit):
             with self.subTest(offset=offset):
                 display = Display()
-                draw_sources(display, Palette(display), rows, 0, 3, scroll=offset)
+                draw_sources(display, Palette(display), rows, 0, 3, scroll=offset,
+                             layout=layout)
                 test_home.HomeLayoutTests().assert_layout(display)
                 texts = [text for text, *_ in display.rows]
                 # Labelled values per window, and the binding window's reset.

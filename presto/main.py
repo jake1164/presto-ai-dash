@@ -35,7 +35,7 @@ from gestures import (
     GestureRecogniser,
 )
 from home import (DEMO_QUOTAS, HomeScroll, ROW_HEIGHT, SOURCE_HEIGHT, SOURCE_TOP,
-                  home_total_height, source_rows)
+                  overflow_rows, source_rows)
 from net import (
     StatusClient,
     StatusError,
@@ -44,7 +44,8 @@ from net import (
     embedded_payload,
     load_static_payload,
 )
-from ui import Palette, draw_boot, draw_card, draw_home, draw_sources, draw_message
+from ui import (Palette, build_home_layout, draw_boot, draw_card, draw_home,
+                draw_sources, draw_message)
 
 
 # Where to look for a sample payload, in order.
@@ -114,6 +115,7 @@ class App(object):
         self.cards = []
         self.index = 0
         self.home_scroll = HomeScroll(len(DEMO_QUOTAS) * ROW_HEIGHT)
+        self.home_layout = None
         self._touch_x = 0
         self._touch_y = 0
         self.detail_open = False
@@ -187,9 +189,13 @@ class App(object):
             if not self.static_demo:
                 self.live_rows = source_rows(payload)
                 # The list scrolls by its total height: quota rows and the
-                # compact local rows are not the same height.
-                self.home_scroll.set_height(home_total_height(self.live_rows or []),
-                                            SOURCE_TOP, SOURCE_HEIGHT)
+                # compact local rows are not the same height. The overflow
+                # strip takes its band out of the list, and the band is
+                # decided by the layout, not by the scroll position.
+                self.home_layout = build_home_layout(self.display, self.live_rows or [],
+                                                     overflow_rows(payload), self.width)
+                self.home_scroll.set_height(self.home_layout.total, SOURCE_TOP,
+                                            SOURCE_HEIGHT, self.home_layout.region)
         self.index = next((i for i, card in enumerate(cards) if card.id == selected), 0)
         if selected is not None and self._current_card().id != selected:
             self.detail_open = False
@@ -343,7 +349,8 @@ class App(object):
             draw_sources(self.display, self.palette, self.live_rows,
                          self.index, len(self.cards), status=card.status,
                          muted=self.alerts.muted, width=self.width, height=self.height,
-                         scroll=self.home_scroll.offset, stale=bool(self.connection_error))
+                         scroll=self.home_scroll.offset, stale=bool(self.connection_error),
+                         layout=self.home_layout)
         else:
             draw_card(
                 self.display, self.palette, card,

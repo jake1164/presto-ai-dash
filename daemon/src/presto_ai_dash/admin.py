@@ -157,6 +157,14 @@ def make_admin_handler(manager, token):
                         log.error("admin ingest state failed")
                         self._send(500, {"error": "ingest state could not be read"})
                 return
+            if path == "/api/admin/display":
+                if self._authorized():
+                    try:
+                        self._send(200, manager.display_state())
+                    except Exception:
+                        log.error("admin display state failed")
+                        self._send(500, {"error": "display settings could not be read"})
+                return
             if path != "/api/admin/sources":
                 self._send(404, {"error": "not found"})
                 return
@@ -175,8 +183,10 @@ def make_admin_handler(manager, token):
             reorder = method == "PUT" and path == "/api/admin/source-order"
             export = re.fullmatch(r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/claude-export", path)
             ingest_setting = method == "PUT" and path == "/api/admin/ingest"
+            display_setting = method == "PUT" and path == "/api/admin/display"
             if ((method == "POST" and path != "/api/admin/sources" and export is None) or
-                    (method != "POST" and match is None and not reorder and not ingest_setting)):
+                    (method != "POST" and match is None and not reorder and
+                     not ingest_setting and not display_setting)):
                 self._send(404, {"error": "not found"})
                 return
             if (self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json"
@@ -201,6 +211,8 @@ def make_admin_handler(manager, token):
                     result = manager.reorder(data)
                 elif ingest_setting:
                     result = manager.set_ingest_enabled(data)
+                elif display_setting:
+                    result = manager.set_display(data)
                 elif export:
                     result = manager.configure_claude_export(export[1], data)
                 elif method == "DELETE":

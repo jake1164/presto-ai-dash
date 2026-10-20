@@ -1,4 +1,11 @@
-"""Live source/quota rows, static preview data, and bounded Home scrolling."""
+"""Live source/quota rows, static preview data, and bounded Home scrolling.
+
+Home lists the accounts in the saved order. When the list is taller than the
+list area, the rows that are not fully visible are named in a strip at the
+bottom of that area, each with its status marker. The strip's height is a
+property of the layout, never of the scroll position, so the list does not
+jump while the user scrolls.
+"""
 
 from gestures import DRAG_SLOP_PX
 
@@ -9,9 +16,20 @@ ROW_HEIGHT = 50
 # Live Home: the accounts in the order they are saved. A quota account is two
 # lines; a local service among quota rows is one compact line.
 SOURCE_TOP = 4
-SOURCE_HEIGHT = 184
+SOURCE_HEIGHT = 204
 SOURCE_ROW = 46
 LOCAL_ROW = 18
+
+# The overflow strip: the names of the rows that do not fit in the list.
+LIST_X = 14
+STRIP_LINE_HEIGHT = 18
+STRIP_MAX_LINES = 3
+DEFAULT_OVERFLOW_ROWS = 1
+STRIP_MARKER = 6
+STRIP_GAP = 4
+STRIP_SEPARATOR = 8
+STRIP_SLACK = 2
+STRIP_MIN_CHARS = 4
 
 DEMO_QUOTAS = (
     {"name": "OpenAI", "daily": 62, "weekly": 38},
@@ -55,6 +73,250 @@ def home_total_height(rows):
     for entry in home_layout(rows):
         total += entry[1]
     return total
+
+
+def overflow_rows(payload):
+    """The maximum number of overflow-strip lines, from the payload.
+
+    The daemon sends the setting under "display". Anything the device does
+    not trust - a missing key, a null, a non-dict, a boolean, a float, a
+    number outside 0..3 - falls back to one line, so a broken setting can
+    never blank or crowd the Home list.
+    """
+    display = payload.get("display") if isinstance(payload, dict) else None
+    if not isinstance(display, dict):
+        return DEFAULT_OVERFLOW_ROWS
+    value = display.get("overflow_rows")
+    if type(value) is not int or value < 0 or value > STRIP_MAX_LINES:
+        return DEFAULT_OVERFLOW_ROWS
+    return value
+
+
+def strip_needed(total_height, setting):
+    """Does a list this tall need the overflow strip?
+
+    The strip appears only when the list is taller than the list area and
+    the setting allows it; a list that fits needs no band at all.
+    """
+    return bool(setting) and total_height > SOURCE_HEIGHT
+
+
+def _fit_name(name, measure, space):
+    """The longest form of this name that fits in ``space`` pixels.
+
+    Returns None when even four characters do not fit: such a name cannot be
+    shown at all, and the strip says how many rows are hidden instead.
+    """
+    from cards import truncate
+
+    text = str(name)
+    if measure(text) <= space:
+        return text
+    for length in range(len(text) - 1, STRIP_MIN_CHARS - 1, -1):
+        candidate = truncate(text, length)
+        if measure(candidate) <= space:
+            return candidate
+    return None
+
+
+def _pack(entries, measure, limit, max_lines, reserve=0):
+    """Pack the hidden names into strip lines, in order, without splitting one.
+
+    ``entries`` are (row, name) pairs. Returns (lines, leftover, unfit):
+    ``lines`` is a list of lines, each a list of (row, x, text) with x the
+    text's left edge; ``leftover`` is the entries that did not fit in
+    ``max_lines`` lines; ``unfit`` is the entries that do not fit on a line
+    of their own. ``reserve`` is the width kept free at the end of the last
+    line for the "+N" entry.
+    """
+    lines = []
+    current = []
+    x = LIST_X
+    leftover = []
+    unfit = []
+    for row, name in entries:
+        index = len(lines)
+        if max_lines is not None and index >= max_lines:
+            leftover.append((row, name))
+            continue
+        edge = limit
+        if reserve and max_lines is not None and index == max_lines - 1:
+            edge = limit - reserve
+        text = _fit_name(name, measure, edge - x - STRIP_MARKER - STRIP_GAP)
+        if text is None:
+            if not current:
+                unfit.append((row, name))
+                continue
+            lines.append(current)
+            current = []
+            x = LIST_X
+            index = len(lines)
+            if max_lines is not None and index >= max_lines:
+                leftover.append((row, name))
+                continue
+            edge = limit
+            if reserve and max_lines is not None and index == max_lines - 1:
+                edge = limit - reserve
+            text = _fit_name(name, measure, edge - x - STRIP_MARKER - STRIP_GAP)
+            if text is None:
+                unfit.append((row, name))
+                continue
+        current.append((row, x + STRIP_MARKER + STRIP_GAP, text))
+        x += STRIP_MARKER + STRIP_GAP + measure(text) + STRIP_SEPARATOR
+    if current:
+        lines.append(current)
+    return lines, leftover, unfit
+
+
+class HomeLayout(object):
+    """The Home list region, and the strip that names the rows that do not fit.
+
+    The strip's line count L is a property of the layout - the rows, their
+    names, the setting and the width - and never of the scroll offset: a band
+    that changed height while the user scrolled would move the viewport under
+    the finger.
+
+    Finding L: for L = 1..setting, take the region (204 - 18 * L pixels),
+    walk the scroll offsets where the set of fully visible rows changes (two
+    per row at most, so O(rows) offsets instead of O(pixels)), and measure the
+    names of the rows that are not fully visible. The first L whose names fit
+    in L lines at every offset wins. If no L up to the setting is enough, L is
+    the setting and the last slot of the last line shows "+N".
+
+    Cost: O(setting * rows^2) text measurements - a few thousand for thirty
+    accounts - once per payload, not once per frame.
+    """
+
+    def __init__(self, rows, setting=DEFAULT_OVERFLOW_ROWS, measure=None, width=0):
+        self.rows = home_layout(rows)
+        self.total = 0
+        for entry in self.rows:
+            self.total += entry[1]
+        self.measure = measure
+        self.width = width
+        if type(setting) is not int:
+            setting = DEFAULT_OVERFLOW_ROWS
+        self.setting = max(0, min(STRIP_MAX_LINES, setting))
+        self.lines = 0
+        self.region = SOURCE_HEIGHT
+        if strip_needed(self.total, self.setting):
+            for lines in range(1, self.setting + 1):
+                if self._names_fit(lines):
+                    self.lines = lines
+                    break
+            else:
+                self.lines = self.setting
+        if self.lines:
+            self.region = SOURCE_HEIGHT - STRIP_LINE_HEIGHT * self.lines
+        self.limit = scroll_limit(self.total, self.region)
+
+    def extra_lines(self, offset):
+        """How many lines the hidden names would need at this offset."""
+        hidden = self.hidden(offset)
+        if not hidden:
+            return 0
+        entries = [(row, row.get("name", "")) for row in hidden]
+        packed, leftover, unfit = _pack(entries, self.measure, self.strip_limit(),
+                                       self.setting)
+        return max(0, len(packed) + (1 if (leftover or unfit) else 0) - self.lines)
+
+    def strip_limit(self):
+        """The x the strip may not cross: the row width, less the draw slack."""
+        return LIST_X + self.width - STRIP_SLACK
+
+    def _offsets(self, region):
+        """The scroll offsets where the set of fully visible rows changes."""
+        limit = scroll_limit(self.total, region)
+        offsets = [0, limit]
+        top = 0
+        for entry in self.rows:
+            offsets.append(top)
+            offsets.append(top + entry[1] - region)
+            top += entry[1]
+        offsets.sort()
+        return [offset for offset in offsets if 0 <= offset <= limit]
+
+    def hidden(self, offset, region=None):
+        """The rows that are not fully visible at this scroll offset.
+
+        A row cut by either edge of the region counts as not fully visible,
+        so it is named in the strip as well as drawn.
+        """
+        if region is None:
+            region = self.region
+        hidden = []
+        top = 0
+        for entry in self.rows:
+            if top < offset or top + entry[1] > offset + region:
+                hidden.append(entry[0])
+            top += entry[1]
+        return hidden
+
+    def _names_fit(self, lines):
+        """Do the hidden names fit in ``lines`` lines at every scroll offset?"""
+        region = SOURCE_HEIGHT - STRIP_LINE_HEIGHT * lines
+        previous = None
+        for offset in self._offsets(region):
+            if offset == previous:
+                continue
+            previous = offset
+            hidden = self.hidden(offset, region)
+            if not hidden:
+                continue
+            entries = [(row, row.get("name", "")) for row in hidden]
+            packed, leftover, unfit = _pack(entries, self.measure,
+                                            self.strip_limit(), lines)
+            if leftover or unfit:
+                return False
+        return True
+
+    def _worst(self, rows):
+        """The most severe status among these rows."""
+        from cards import severity
+
+        worst = None
+        for row in rows:
+            status = row.get("status")
+            if worst is None or severity(status) > severity(worst):
+                worst = status
+        return worst
+
+    def strip(self, offset):
+        """The strip to draw at this scroll offset: (lines, plus).
+
+        ``lines`` is a list of lines, each a list of (row, x, text); ``plus``
+        is (text, status, x) for the "+N" entry, or None. A drawn strip is
+        never empty: the list is taller than the region, so at least one row
+        is never fully visible.
+        """
+        hidden = self.hidden(offset)
+        if not hidden or not self.lines:
+            return [], None
+        entries = [(row, row.get("name", "")) for row in hidden]
+        limit = self.strip_limit()
+        lines, leftover, unfit = _pack(entries, self.measure, limit, self.lines)
+        if unfit:
+            # A name that cannot fit even on a line of its own: the strip
+            # says how many rows are hidden instead of naming them.
+            return [], ("+%d" % len(hidden), self._worst(hidden), LIST_X)
+        if not leftover:
+            return lines, None
+        count = len(leftover)
+        text = "+%d" % count
+        for _ in range(4):
+            reserve = self.measure(text) + 1 + STRIP_SEPARATOR
+            lines, leftover, unfit = _pack(entries, self.measure, limit,
+                                           self.lines, reserve)
+            if unfit:
+                return [], ("+%d" % len(hidden), self._worst(hidden), LIST_X)
+            if len(leftover) == count:
+                break
+            count = len(leftover)
+            text = "+%d" % count
+        # The count is drawn one pixel inside the line: the firmware measures
+        # a line one pixel narrower than it draws it.
+        return lines, (text, self._worst([row for row, _name in leftover]),
+                       limit - self.measure(text) - 1)
 
 
 def iso_seconds(text):
@@ -258,19 +520,29 @@ def source_rows(payload):
 
 
 class HomeScroll(object):
-    """Finger-following vertical scroll; horizontal drags belong to cards."""
+    """Finger-following vertical scroll; horizontal drags belong to cards.
 
-    def __init__(self, total_height=0, top=LIST_TOP, height=LIST_HEIGHT):
+    ``height`` is the touch area, which covers the whole list area; ``view``
+    is the visible part of it, which the overflow strip takes away. The
+    scroll limit follows the view, so the list scrolls behind the strip.
+    """
+
+    def __init__(self, total_height=0, top=LIST_TOP, height=LIST_HEIGHT, view=None):
         self.top, self.height = top, height
-        self.limit = scroll_limit(total_height, height)
+        self.view = height if view is None else view
+        self.limit = scroll_limit(total_height, self.view)
         self.offset = 0
         self._down = False
         self._axis = None
 
-    def set_height(self, total_height, top=None, height=None):
+    def set_height(self, total_height, top=None, height=None, view=None):
         if top is not None:
             self.top, self.height = top, height
-        self.limit = scroll_limit(total_height, self.height)
+            if view is None:
+                view = height
+        if view is not None:
+            self.view = view
+        self.limit = scroll_limit(total_height, self.view)
         self.offset = min(self.offset, self.limit)
 
     def update(self, touched, x, y, enabled=True):

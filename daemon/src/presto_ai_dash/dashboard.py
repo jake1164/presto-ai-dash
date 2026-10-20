@@ -413,3 +413,65 @@ def build_instance_payload(snapshots, instances):
         if report:
             source["quota"] = present_quota(report)
     return payload
+
+
+# What the Presto reads from the status payload. The device has little memory and
+# parses the whole response at once, and "Daemon offline" on the Presto can be a
+# failed read or parse of a payload that grew, so the daemon sends the device only
+# these fields (tests/test_device_payload.py proves the device draws the same
+# screens from the slim payload, and that this list covers every key that
+# presto/home.py reads). Everything else stays available to the admin page, which
+# builds its own listing. Add a key here when presto/ starts reading it.
+DEVICE_SOURCE_KEYS = ("id", "type", "name", "status", "quota", "metrics")
+DEVICE_QUOTA_KEYS = ("windows", "activity", "hint", "reset_credits")
+DEVICE_WINDOW_KEYS = ("label", "used_percent", "state", "period_minutes",
+                      "resets_at", "observed_at")
+DEVICE_ACTIVITY_KEYS = ("request_count", "usage_usd", "from", "until", "state")
+DEVICE_RESET_KEYS = ("available", "expires_at")
+DEVICE_METRICS_KEYS = ("requests_today", "tokens_today", "loaded_model")
+
+
+def _pick(value, keys):
+    return {key: value[key] for key in keys if key in value}
+
+
+def _device_quota(quota):
+    if not isinstance(quota, dict):
+        return quota
+    result = _pick(quota, DEVICE_QUOTA_KEYS)
+    if isinstance(result.get("windows"), list):
+        result["windows"] = [_pick(window, DEVICE_WINDOW_KEYS) if isinstance(window, dict)
+                             else window for window in result["windows"]]
+    if isinstance(result.get("activity"), dict):
+        result["activity"] = _pick(result["activity"], DEVICE_ACTIVITY_KEYS)
+    if isinstance(result.get("reset_credits"), dict):
+        result["reset_credits"] = _pick(result["reset_credits"], DEVICE_RESET_KEYS)
+    return result
+
+
+def device_view(payload):
+    """The status payload as the Presto needs it: smaller, each report once.
+
+    Returns a new payload; the argument is not modified. The cards and every
+    top-level key other than ``sources`` are passed through untouched.
+    """
+    sources = payload.get("sources") if isinstance(payload, dict) else None
+    if not isinstance(sources, list):
+        return payload
+    slim = []
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        item = _pick(source, DEVICE_SOURCE_KEYS)
+        # build_instance_payload carries the quota report twice, under
+        # metrics.quota and under quota; the device reads only the latter.
+        item["quota"] = _device_quota(source.get("quota"))
+        if item["quota"] is None:
+            del item["quota"]
+        metrics = source.get("metrics")
+        if isinstance(metrics, dict):
+            item["metrics"] = _pick(metrics, DEVICE_METRICS_KEYS)
+        elif "metrics" in item:
+            del item["metrics"]
+        slim.append(item)
+    return dict(payload, sources=slim)

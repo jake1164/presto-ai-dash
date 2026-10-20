@@ -41,6 +41,17 @@
         reverse proxy with TLS. A remote token is write-only for one account and report bodies
         hold no secrets.</p>
       <p><a id="download-collector" href="/api/admin/collector" download="claude_statusline.py">Download collector (claude_statusline.py)</a></p>
+      <h2>Home display</h2>
+      <label for="overflow-rows">Overflow strip lines</label>
+      <select id="overflow-rows">
+        <option value="0">0 (off)</option>
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="3">3</option>
+      </select>
+      <p class="note">Most lines of names for services that do not fit; 0 turns it off.</p>
+      <p id="display-lock" class="note" hidden>The DASH_OVERFLOW_ROWS environment variable controls
+        the overflow strip for this daemon; edit the environment instead of this page.</p>
       <h2>Cloud and subscription sources</h2>
       <p class="note">Available subscription connectors show current allowance meters in your source list.
         OpenCode Go reports quota percentages. Ollama Cloud reports dated activity;

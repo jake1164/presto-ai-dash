@@ -307,32 +307,89 @@ def _draw_compact_local_row(display, palette, row, y, row_width, stale):
     _text(display, palette, detail, 14 + row_width - detail_w, text_y, rgb, scale=1)
 
 
+def build_home_layout(display, rows, setting=None, width=240):
+    """The Home layout for these rows: the list region and the strip band.
+
+    The names are measured with the display's own font metrics, in the font
+    the strip is drawn in, so the layout and the drawing always agree. The
+    measurement is the drawing's, not a guess at character counts.
+    """
+    from home import DEFAULT_OVERFLOW_ROWS, HomeLayout, LIST_X
+
+    if setting is None:
+        setting = DEFAULT_OVERFLOW_ROWS
+
+    def measure(text):
+        display.set_font("bitmap8")
+        return display.measure_text(text, 1)
+
+    return HomeLayout(rows, setting, measure, width - LIST_X - MARGIN)
+
+
+def _draw_strip(display, palette, layout, scroll, stale):
+    """The overflow strip: the names of the rows that are not fully visible.
+
+    Each name has its status marker; the last slot of the last line shows
+    "+N" when the names did not fit, in the worst colour of exactly the
+    rows it replaced.
+    """
+    from alerts import rgb_for_accent
+    from cards import accent_for
+    from home import SOURCE_TOP, STRIP_LINE_HEIGHT, STRIP_MARKER, STRIP_GAP
+
+    lines, plus = layout.strip(scroll)
+    if not lines and plus is None:
+        return
+    display.set_font("bitmap8")
+    band_top = SOURCE_TOP + layout.region
+    limit = layout.strip_limit()
+    for index, line in enumerate(lines):
+        y = band_top + index * STRIP_LINE_HEIGHT
+        text_y = y + (STRIP_LINE_HEIGHT - 8) // 2
+        for row, x, text in line:
+            _marker(display, palette, row, x - STRIP_MARKER - STRIP_GAP,
+                    y + (STRIP_LINE_HEIGHT - STRIP_MARKER) // 2, STRIP_MARKER, stale)
+            _text(display, palette, text, x, text_y,
+                  INK_DIM if stale else INK, scale=1,
+                  max_width=max(0, limit - x))
+    if plus:
+        text, status, x = plus
+        index = len(lines) - 1 if lines else 0
+        y = band_top + index * STRIP_LINE_HEIGHT
+        rgb = INK_DIM if stale else rgb_for_accent(accent_for(status))
+        _text(display, palette, text, x, y + (STRIP_LINE_HEIGHT - 8) // 2, rgb,
+              scale=1, max_width=max(0, limit - x))
+
+
 def draw_sources(display, palette, rows, index, total, status="offline",
-                 muted=False, width=240, height=240, scroll=0, stale=False):
+                 muted=False, width=240, height=240, scroll=0, stale=False,
+                 layout=None):
     """Live Home: the accounts in the saved order, quota rows and local ones."""
     from alerts import rgb_for_accent
     from cards import accent_for
-    from home import SOURCE_TOP, SOURCE_HEIGHT, home_layout, home_total_height, scroll_limit
+    from home import SOURCE_TOP
     display.set_pen(palette.pen(BACKGROUND))
     display.clear()
     accent = rgb_for_accent(accent_for(status), 0.45 if muted else 1.0)
     display.set_pen(palette.pen(accent))
     display.rectangle(0, 0, 5, height)
 
-    layout = home_layout(rows)
-    total_height = home_total_height(rows)
-    limit = scroll_limit(total_height, SOURCE_HEIGHT)
+    if layout is None:
+        layout = build_home_layout(display, rows, None, width)
+    region = layout.region
+    total_height = layout.total
+    limit = layout.limit
     scroll = max(0, min(limit, int(scroll)))
     row_width = width - 14 - MARGIN
-    display.set_clip(14, SOURCE_TOP, row_width, SOURCE_HEIGHT)
+    display.set_clip(14, SOURCE_TOP, row_width, region)
     if not rows:
         display.set_font("bitmap6")
         _text(display, palette, "No sources enabled", 14, SOURCE_TOP, INK_DIM, scale=1)
     y = SOURCE_TOP - scroll
-    for row, row_height, compact in layout:
+    for row, row_height, compact in layout.rows:
         # The list is clipped at its edges, so a partly scrolled row is cut
-        # there and never drawn over the footer.
-        if y + row_height > SOURCE_TOP and y < SOURCE_TOP + SOURCE_HEIGHT:
+        # there and never drawn over the strip or the footer.
+        if y + row_height > SOURCE_TOP and y < SOURCE_TOP + region:
             if compact:
                 _draw_compact_local_row(display, palette, row, y, row_width, stale)
             elif "windows" in row:
@@ -342,12 +399,13 @@ def draw_sources(display, palette, rows, index, total, status="offline",
         y += row_height
     display.remove_clip()
     if limit:
-        thumb = max(12, SOURCE_HEIGHT * SOURCE_HEIGHT // total_height)
+        thumb = max(12, region * region // total_height)
         display.set_pen(palette.pen(PANEL))
-        display.rectangle(width - 5, SOURCE_TOP, 2, SOURCE_HEIGHT)
+        display.rectangle(width - 5, SOURCE_TOP, 2, region)
         display.set_pen(palette.pen(INK_DIM))
-        display.rectangle(width - 5, SOURCE_TOP + (SOURCE_HEIGHT - thumb) * scroll // limit,
+        display.rectangle(width - 5, SOURCE_TOP + (region - thumb) * scroll // limit,
                           2, thumb)
+    _draw_strip(display, palette, layout, scroll, stale)
     display.set_font("bitmap6")
     if stale:
         _text(display, palette, "STALE - retrying", 14, 210, INK_DIM, scale=1)

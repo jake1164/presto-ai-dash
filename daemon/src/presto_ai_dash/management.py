@@ -9,9 +9,9 @@ from uuid import uuid4
 
 from .codex_login import CodexLoginManager
 from .collectors import claude_statusline
-from .config import ingest_enabled
+from .config import ingest_enabled, overflow_rows
 from .credentials import load_cipher
-from .dashboard import build_instance_payload
+from .dashboard import build_instance_payload, device_view
 from .sources import source_catalog, source_type
 from .models import SourceSnapshot
 from .quotas import claude_provenance, mark_passed_resets, present_quota, present_snapshot
@@ -152,6 +152,25 @@ class SourceConfiguration:
         self.storage.save_ingest_enabled(data["enabled"])
         return self.ingest_state()
 
+    def display_state(self):
+        """The Home display settings; the environment locks the control."""
+        return {"overflow_rows": overflow_rows(self.config,
+                                               self.storage.overflow_rows_setting()),
+                "locked_by_environment": os.environ.get("DASH_OVERFLOW_ROWS") is not None}
+
+    def set_display(self, data):
+        if not isinstance(data, dict) or set(data) != {"overflow_rows"} or \
+                type(data["overflow_rows"]) is not int:
+            raise ValueError("display needs an overflow_rows integer")
+        value = data["overflow_rows"]
+        if value < 0 or value > 3:
+            raise ValueError("overflow_rows must be between 0 and 3")
+        if self.display_state()["locked_by_environment"]:
+            raise ConfigurationConflict(
+                "overflow_rows is set by DASH_OVERFLOW_ROWS; edit the environment to change it")
+        self.storage.save_overflow_rows(value)
+        return self.display_state()
+
     def create_ingest_token(self, instance_id):
         """Mint or rotate one write-only push token, shown exactly once."""
         token = self.storage.create_ingest_token(instance_id)
@@ -284,11 +303,21 @@ class SourceConfiguration:
             raise ValueError("Codex logout is only available for Codex sources")
         return self.codex_logins.logout(instance_id)
 
-    def status_payload(self):
+    def full_status_payload(self):
+        """Every field of every report: the superset the Presto's view is cut from."""
         with self.storage._lock:
             records = self.storage.source_instances()
             snapshots = self.storage.latest_snapshots()
         return build_instance_payload(snapshots, records)
+
+    def status_payload(self):
+        # The Presto parses the whole response in a few hundred KB of RAM, so it
+        # gets only the fields it reads (dashboard.device_view).
+        payload = device_view(self.full_status_payload())
+        # The Home display settings travel with the payload, so a change
+        # applies on the next poll without restarting the daemon.
+        payload["display"] = {"overflow_rows": self.display_state()["overflow_rows"]}
+        return payload
 
     def save_observation(self, record, snapshot):
         # An in-flight probe cannot restore stale data after an edit/disable/delete.

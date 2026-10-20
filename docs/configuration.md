@@ -151,6 +151,28 @@ part of this checkpoint.
 Encryption protects credentials in database copies. Access to the running
 daemon account and its master key still permits decryption.
 
+## Home display
+
+`overflow_rows` is the maximum number of lines the Home overflow strip may
+use to name the accounts that do not fit in the list. It is an integer from 0
+to 3, and 1 is the default. The strip uses only as many lines as the hidden
+names need, up to that maximum, shows `+N` when the maximum is not enough,
+and disappears when the whole list fits. 0 turns the strip off.
+
+It is read afresh for every status payload, so a change applies on the next
+poll without restarting the daemon. Three sources, in this order:
+
+1. The `DASH_OVERFLOW_ROWS` environment variable. A value that is not an
+   integer in 0..3 stops the daemon at startup with a configuration error.
+2. The value stored in SQLite by the admin page (the **Home display** section).
+   When the environment variable is set, the page's control is read-only and
+   the request returns 409.
+3. `[display] overflow_rows` in `dash.toml`, for a bootstrap default.
+4. One line, when none of the above says otherwise.
+
+A garbled environment variable found at run time (not at startup) fails closed
+to the default and is logged once.
+
 ## Management API
 
 The admin port serves the page plus:
@@ -161,6 +183,8 @@ The admin port serves the page plus:
 | POST | `/api/admin/sources` | Add an instance |
 | PUT | `/api/admin/sources/{id}` | Edit, replace/remove key, enable/disable |
 | PUT | `/api/admin/source-order` | Save a complete account order, including disabled accounts |
+| GET | `/api/admin/display` | The Home display settings and whether the environment locks them |
+| PUT | `/api/admin/display` | Save the Home display settings (409 when the environment locks them) |
 | DELETE | `/api/admin/sources/{id}` | Delete the instance and its saved key |
 | POST | `/api/admin/session` | Exchange the current admin bearer token for a seven-day browser session |
 | GET | `/api/admin/session` | Restore a valid cookie session and obtain its CSRF token |

@@ -50,7 +50,7 @@ class _IngestRateLimiter:
 
 
 def make_handler(storage, shared_token, source_ids=None, status_provider=None,
-                 *, ingest_enabled=None, ingest_rate_limiter=None):
+                 *, ingest_enabled=None, ingest_rate_limiter=None, client_registry=None):
     if not shared_token:
         raise ValueError("API requires a nonempty shared token")
     limiter = ingest_rate_limiter if ingest_rate_limiter is not None else _IngestRateLimiter()
@@ -97,6 +97,15 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                 log.exception("could not build status payload")
                 self._send_json(500, {"error": "internal_error"})
                 return
+            if client_registry is not None:
+                # Who is polling: remembered in memory only, and never part of
+                # the response, which stays exactly as it was.
+                try:
+                    client_registry.record(self.headers.get("X-Presto-Client"),
+                                           self.client_address[0],
+                                           self.headers.get("X-Presto-Revision"))
+                except Exception:
+                    log.debug("could not record the client", exc_info=True)
             self._send_json(200, payload)
 
         def _ingest_allowed(self):
@@ -180,13 +189,14 @@ class _ExclusiveHTTPServer(ThreadingHTTPServer):
 class ApiServer:
     def __init__(self, host, port, storage, shared_token, source_ids=None,
                  status_provider=None, *, ingest_enabled=None, ingest_rate_limiter=None,
-                 handler_class=None):
+                 handler_class=None, client_registry=None):
         self.host = host
         self._server = _ExclusiveHTTPServer(
             (host, port), handler_class or make_handler(
                 storage, shared_token, source_ids, status_provider,
                 ingest_enabled=ingest_enabled,
-                ingest_rate_limiter=ingest_rate_limiter))
+                ingest_rate_limiter=ingest_rate_limiter,
+                client_registry=client_registry))
         self._server.daemon_threads = False
         self._server.block_on_close = True
         self._server._active_condition = threading.Condition()

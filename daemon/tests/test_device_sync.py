@@ -35,13 +35,22 @@ class BundleTests(unittest.TestCase):
     def test_inventory_excludes_private_files_and_automatically_adds_modules(self):
         first = bundle.snapshot(self.root)
         self.assertEqual(set(first["files"]), {"/ai_dash.py", "/ai_dash_files/ai_dash_app.py",
-                                             "/ai_dash_files/ui.py", "/ai_dash_files/home.py"})
+                                             "/ai_dash_files/ui.py", "/ai_dash_files/home.py",
+                                             bundle.REVISION_TARGET})
         # A new helper must not require updating a second copy or deployment list.
         (self.root / "presto" / "new_helper.py").write_text("value = 3\n", encoding="utf-8")
         changed = bundle.snapshot(self.root)
         self.assertIn("/ai_dash_files/new_helper.py", changed["files"])
         self.assertNotEqual(changed["revision"], first["revision"])
         self.assertNotIn("/main.py", changed["files"])
+
+    def test_the_revision_file_carries_the_revision_and_is_not_part_of_it(self):
+        current = bundle.snapshot(self.root)
+        written = current["files"][bundle.REVISION_TARGET].decode("ascii").strip()
+        self.assertEqual(written, current["revision"][:bundle.REVISION_CHARS])
+        without = {target: digest for target, digest in current["hashes"].items()
+                   if target != bundle.REVISION_TARGET}
+        self.assertEqual(bundle.revision(without), current["revision"])
 
     def test_private_settings_do_not_affect_code_revision(self):
         original = bundle.snapshot(self.root)["revision"]

@@ -8,7 +8,7 @@
   <script src="/admin.js" defer></script>
 </head>
 <body>
-  <header><div><p class="eyebrow">PRESTO AI DASH</p><h1>Source configuration</h1></div>
+  <header><div><p class="eyebrow">PRESTO AI DASH</p><h1>Configuration</h1></div>
     <button id="logout" hidden>Lock configuration</button></header>
   <p id="message" role="status" aria-live="polite"></p>
   <section id="login-panel" class="panel">
@@ -23,43 +23,111 @@
     </form>
   </section>
   <main id="workspace" hidden>
-    <section class="panel">
-      <div class="section-title"><h2>Your sources</h2><button id="add-source">Add source</button></div>
+    <div id="tablist" class="tablist" role="tablist" aria-label="Sections">
+      <button type="button" role="tab" id="tab-services" data-tab="services"
+        aria-controls="panel-services" aria-selected="true" tabindex="0">Services</button>
+      <button type="button" role="tab" id="tab-status" data-tab="status"
+        aria-controls="panel-status" aria-selected="false" tabindex="-1">Status</button>
+      <button type="button" role="tab" id="tab-settings" data-tab="settings"
+        aria-controls="panel-settings" aria-selected="false" tabindex="-1">Settings</button>
+    </div>
+
+    <section class="panel" role="tabpanel" id="panel-services" aria-labelledby="tab-services" tabindex="0">
+      <div class="section-title"><h2>Your services</h2><button id="add-source">Add source</button></div>
       <p>Manage accounts, keys, and refresh settings here. Changes are saved in the database.
         Disable demo data before enabling a live source.</p>
       <p class="note">Drag an account by its grip to change the order, or use the arrow buttons.
         Order saves automatically and appears on Presto Home and swipe cards on the next poll.
         Uncheck Enabled to pause a source and hide it on Presto; its settings, key, and position are kept.</p>
+      <p class="scope-badge">Every card on this tab applies to one account only. Settings that apply to every service are on the Settings tab.</p>
       <div id="source-list" aria-label="Accounts in display order"></div>
       <p class="note">Changes apply automatically after any current probe finishes.</p>
-      <h2>Remote reports (optional)</h2>
-      <label class="check" id="ingest-label"><input id="ingest-enabled" type="checkbox"> Accept remote reports</label>
-      <p id="ingest-lock" class="note" hidden>The DASH_INGEST_ENABLED environment variable controls
-        remote reports for this daemon; edit the environment instead of this page.</p>
-      <p class="note">Remote collectors send observations to this daemon over plain HTTP from
-        other computers. Enable it only on a private network such as Tailscale, or behind a
-        reverse proxy with TLS. A remote token is write-only for one account and report bodies
-        hold no secrets.</p>
-      <p><a id="download-collector" href="/api/admin/collector" download="claude_statusline.py">Download collector (claude_statusline.py)</a></p>
-      <h2>Home display</h2>
-      <label for="overflow-rows">Overflow strip lines</label>
-      <select id="overflow-rows">
-        <option value="0">0 (off)</option>
-        <option value="1">1</option>
-        <option value="2">2</option>
-        <option value="3">3</option>
-      </select>
-      <p class="note">Most lines of names for services that do not fit; 0 turns it off.</p>
-      <p id="display-lock" class="note" hidden>The DASH_OVERFLOW_ROWS environment variable controls
-        the overflow strip for this daemon; edit the environment instead of this page.</p>
-      <h2>Cloud and subscription sources</h2>
-      <p class="note">Available subscription connectors show current allowance meters in your source list.
-        OpenCode Go reports quota percentages. Ollama Cloud reports dated activity;
-        its monthly credit balance is not available from the current reporting API.
-        Codex uses your existing ChatGPT login in the local Codex app. Claude uses a Claude Code terminal quota export. Subscription allowances are separate from API billing.</p>
-      <p class="note">Fake remains available for demos and connection testing. You can delete
-        its saved instance; it will not return on restart.</p>
     </section>
+
+    <section class="panel" role="tabpanel" id="panel-status" aria-labelledby="tab-status" tabindex="0" hidden>
+      <div class="section-title"><h2>Status</h2><p class="note" id="status-updated">Not loaded yet</p></div>
+      <p class="note">Everything here is read-only. It refreshes every 10 seconds while this tab is open and the browser tab is in the foreground.</p>
+      <h3>Daemon</h3>
+      <dl id="status-daemon" class="facts"></dl>
+      <h3>Clients</h3>
+      <p class="note">Every device that fetches the status endpoint. Clients behind NAT, a reverse proxy or Docker Desktop can share one address, so two clients with the same name and address cannot be told apart. Nothing about a client is stored.</p>
+      <div id="status-clients"></div>
+      <h3>Accounts</h3>
+      <div id="status-accounts"></div>
+      <h3>Readers and collectors</h3>
+      <div id="status-readers"></div>
+      <h3>Problems</h3>
+      <p class="note">Recent warnings and errors from the daemon. The list is kept in memory only, holds the last 50 entries, and is empty again after a restart.</p>
+      <div id="status-problems"></div>
+    </section>
+
+    <section class="panel" role="tabpanel" id="panel-settings" aria-labelledby="tab-settings" tabindex="0" hidden>
+      <div class="section-title"><h2>Settings</h2></div>
+      <p class="note">These settings apply to every service. Each section is collapsed except the first one.</p>
+
+      <details class="setting" open>
+        <summary><span class="setting-title">Home display</span><span class="scope-badge">Applies to all services</span></summary>
+        <div class="setting-body">
+          <label for="overflow-rows">Overflow strip lines</label>
+          <select id="overflow-rows">
+            <option value="0">0 (off)</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+          </select>
+          <p class="note">Most lines of names for services that do not fit; 0 turns it off.</p>
+          <p id="display-lock" class="note" hidden>The DASH_OVERFLOW_ROWS environment variable controls
+            the overflow strip for this daemon; edit the environment instead of this page.</p>
+        </div>
+      </details>
+
+      <details class="setting">
+        <summary><span class="setting-title">Remote reports</span><span class="scope-badge">Applies to all services</span></summary>
+        <div class="setting-body">
+          <label class="check" id="ingest-label"><input id="ingest-enabled" type="checkbox"> Accept remote reports</label>
+          <p id="ingest-lock" class="note" hidden>The DASH_INGEST_ENABLED environment variable controls
+            remote reports for this daemon; edit the environment instead of this page.</p>
+          <p class="note">Remote collectors send observations to this daemon over plain HTTP from
+            other computers. Enable it only on a private network such as Tailscale, or behind a
+            reverse proxy with TLS. A remote token is write-only for one account and report bodies
+            hold no secrets.</p>
+          <p class="warning">Remote reports travel over plain HTTP. On an untrusted network put the
+            daemon behind a reverse proxy with TLS, or use a private network.</p>
+          <p><a id="download-collector" href="/api/admin/collector" download="claude_statusline.py">Download collector (claude_statusline.py)</a></p>
+        </div>
+      </details>
+
+      <details class="setting">
+        <summary><span class="setting-title">Effective daemon configuration</span><span class="scope-badge">Applies to all services</span></summary>
+        <div class="setting-body">
+          <p class="note">Read-only. These values need a daemon restart, so they are edited in dash.toml or in the environment, not on this page.</p>
+          <div id="config-table"></div>
+        </div>
+      </details>
+
+      <details class="setting">
+        <summary><span class="setting-title">About and help</span><span class="scope-badge">Applies to all services</span></summary>
+        <div class="setting-body">
+          <h4>Cloud and subscription sources</h4>
+          <p class="note">Available subscription connectors show current allowance meters in your source list.
+            OpenCode Go reports quota percentages. Ollama Cloud reports dated activity;
+            its monthly credit balance is not available from the current reporting API.
+            Codex uses your existing ChatGPT login in the local Codex app. Claude uses a Claude Code terminal quota export. Subscription allowances are separate from API billing.</p>
+          <h4>The Fake demo source</h4>
+          <p class="note">Fake remains available for demos and connection testing. You can delete
+            its saved instance; it will not return on restart.</p>
+          <h4>Order</h4>
+          <p class="note">The order of the accounts on the Services tab is the order of the Presto Home
+            list and of the swipe cards. It saves automatically and applies on the next poll.</p>
+          <h4>Logs and diagnostics</h4>
+          <p class="note">The daemon writes its own log to the console it was started from
+            (<code>python -m presto_ai_dash.app --config dash.toml --admin</code>). The Problems list on
+            the Status tab shows the recent warnings and errors without reading the log file.
+            The device prints its fetch diagnostics to the Presto's serial console.</p>
+        </div>
+      </details>
+    </section>
+
     <div id="editor-modal" class="modal" hidden>
       <div class="modal-card panel">
         <div class="section-title"><h2 id="editor-title">Add source</h2><button id="close-editor" type="button">Close</button></div>

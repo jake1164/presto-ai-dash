@@ -4,6 +4,11 @@ The live app uses bounded asyncio streams so touch/rendering can continue
 during network waits. The synchronous requests wrapper is retained for smoke
 checks and existing transport tests. Both send the same shared bearer token.
 
+Every request also says which client it is: ``X-Presto-Client`` carries the
+device's name (``DEVICE_NAME`` in the device's own ``config.py``, "presto" by
+default) and ``X-Presto-Revision`` the app revision it runs. The daemon keeps
+both in memory to show who is connected; it never stores them.
+
 MicroPython's ``requests`` supports custom headers (verified in
 micropython-lib ``python-ecosys/requests``), which is what lets the Presto send
 the shared bearer token the daemon requires.
@@ -11,6 +16,20 @@ the shared bearer token the daemon requires.
 
 import gc
 import json
+import sys
+
+# The name and the revision this client reports. The preview is not a device,
+# so it overrides them.
+DEFAULT_CLIENT_NAME = "presto"
+DEFAULT_REVISION = "unknown"
+CLIENT_NAME_OVERRIDE = None
+REVISION_OVERRIDE = None
+
+# The deployment writes the app revision next to the app files, so the device
+# reports the build it actually runs.
+REVISION_FILE = "revision.txt"
+REVISION_FILES = (REVISION_FILE, "/ai_dash_files/revision.txt")
+MAX_LABEL = 32
 
 
 def _collect():
@@ -54,13 +73,82 @@ def build_url(host, port, path="/api/v1/status"):
     return "http://{}:{}{}".format(host, port, path)
 
 
-def build_headers(token):
+def safe_label(value, limit=MAX_LABEL):
+    """A printable ASCII label of at most ``limit`` characters.
+
+    Header values are untrusted, so anything else becomes "unknown" rather
+    than a partly-trusted string.
+    """
+    if not isinstance(value, str) or not value:
+        return "unknown"
+    if len(value) > limit:
+        return "unknown"
+    for char in value:
+        if not (" " <= char <= "~"):
+            return "unknown"
+    text = value.strip()
+    return text or "unknown"
+
+
+def device_setting(name, default):
+    """One setting from the device's own ``config.py``, when it is loaded.
+
+    The app's config module holds the daemon address and the shared token;
+    only the display name and the revision are read here.
+    """
+    module = sys.modules.get("config")
+    if module is None:
+        return default
+    value = getattr(module, name, None)
+    return default if value is None else value
+
+
+def read_revision(path=None):
+    """The app revision installed with this build, or "unknown".
+
+    The deployment writes the revision next to the app files. A missing file
+    is not an error: the device then says "unknown" instead of a revision it
+    cannot prove.
+    """
+    for candidate in ((path,) if path else REVISION_FILES):
+        try:
+            with open(candidate, "r") as handle:
+                text = handle.read().strip()
+        except OSError:
+            continue
+        except Exception:
+            continue
+        return safe_label(text)
+    return DEFAULT_REVISION
+
+
+def current_client_name():
+    """The name this client reports to the daemon."""
+    if CLIENT_NAME_OVERRIDE:
+        return safe_label(CLIENT_NAME_OVERRIDE)
+    return safe_label(device_setting("DEVICE_NAME", DEFAULT_CLIENT_NAME))
+
+
+def current_revision():
+    """The app revision this client reports to the daemon."""
+    if REVISION_OVERRIDE:
+        return safe_label(REVISION_OVERRIDE)
+    configured = device_setting("DEVICE_REVISION", None)
+    if configured:
+        return safe_label(configured)
+    return read_revision()
+
+
+def build_headers(token, client=None, revision=None):
     """The request headers, including the shared bearer token.
 
     An empty token is still sent as an empty bearer so the daemon's error is a
-    clean 401 rather than a confusing connection failure.
+    clean 401 rather than a confusing connection failure. Every request also
+    names the client and the app revision it runs.
     """
-    return {"Authorization": "Bearer {}".format(token or "")}
+    return {"Authorization": "Bearer {}".format(token or ""),
+            "X-Presto-Client": safe_label(client) if client else current_client_name(),
+            "X-Presto-Revision": safe_label(revision) if revision else current_revision()}
 
 
 def parse_payload(text):
@@ -174,13 +262,16 @@ class StatusClient(object):
         self.received = 0
         try:
             path = self.path if self.path.startswith("/") else "/" + self.path
+            headers = self.headers
             if any(char in str(value) for value in (self.host, self.token, path)
                    for char in ("\r", "\n")):
                 raise StatusError("invalid connection settings")
             reader, writer = await asyncio.open_connection(self.host, self.port)
             request = ("GET %s HTTP/1.1\r\nHost: %s:%s\r\n"
-                       "Authorization: Bearer %s\r\nConnection: close\r\n\r\n" %
-                       (path, self.host, self.port, self.token or ""))
+                       "Authorization: %s\r\nX-Presto-Client: %s\r\n"
+                       "X-Presto-Revision: %s\r\nConnection: close\r\n\r\n" %
+                       (path, self.host, self.port, headers["Authorization"],
+                        headers["X-Presto-Client"], headers["X-Presto-Revision"]))
             self.stage = "send"
             writer.write(request.encode("utf-8"))
             await writer.drain()

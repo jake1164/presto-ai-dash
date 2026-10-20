@@ -15,7 +15,7 @@ not start a phase until the previous one passes its tests.
 | 5 | Claude activity from local session logs (VS Code panel and CLI); 5b Stop hook and 5c remote push optional | Done (2026-10-19) |
 | 5d | Claude usage cache reader: quota for VS Code panel users from `~/.claude.json` | Done (2026-10-20) |
 | 6 | Codex over push | Optional |
-| 7 | "Adding a source" guide and template | Not started (an earlier attempt was discarded) |
+| 7 | Documentation site on GitHub Pages (7a site and user docs, 7b developer docs and the adding-a-source guide and template, 7c in-app help links) | Not started (an earlier source-guide attempt was discarded) |
 | 8 | OpenTelemetry activity detail | Optional, only if asked |
 | 9 | Banked reset credits (Codex) | Done (2026-10-20) |
 
@@ -936,6 +936,26 @@ In order (item 0 is an urgent defect and goes first):
      lost on restart; the Status tab refreshes itself every 10 seconds while
      it is visible and the browser tab is in the foreground. Still to
      confirm: three tabs rather than four.
+   - **Done 2026-10-20**: three tabs (Services, Status, Settings), the ARIA
+     tab pattern with the keyboard, the active tab in the URL hash and in
+     `localStorage` (in a try/catch), collapsed account cards that show a
+     status dot, the name, the key numbers, a freshness chip and a source
+     chip, and everything the page showed before inside the opened card.
+     The Settings tab has Home display, Remote reports, the read-only
+     effective configuration with the origin of every value, and the About
+     and help text. The Status tab shows the daemon, the clients, the
+     account health, the readers and collectors, and the Problems list; it
+     refreshes every 10 seconds while it is visible. Two new read-only
+     endpoints, `GET /api/admin/status` and `GET /api/admin/config`; the
+     existing admin API, CSRF and sessions are unchanged. The daemon now
+     remembers one record per (name, address) for the clients that fetch
+     `/api/v1/status`, in memory only, at most 16, with hostile header
+     values replaced by "unknown"; the device sends `X-Presto-Client` and
+     `X-Presto-Revision` on every request, and the PSL preview sends "psl".
+     Verified in a real browser against a throwaway admin server on a
+     temporary database, at phone width and with the keyboard. Codex
+     sign-in and sign-out are not on the page today and are not part of this
+     change.
    - **Clients (several Prestos and the PSL).** The daemon has one shared
      token, so it cannot tell clients apart by authentication, and the
      admin page must not pretend it can. Design: each client declares a
@@ -987,8 +1007,67 @@ In order (item 0 is an urgent defect and goes first):
      socket with an unread body is what makes Windows reset the connection
      (the same quirk the 413 path already works around). That is a
      hypothesis, not a confirmed cause.
-3. **Phase 7**, the source guide and template (pull sources now; add a
-   "Running in Docker" section after the Docker work).
+3. **Phase 7, the documentation site (expanded 2026-10-20).** User and developer
+   documentation as a website on GitHub Pages, built from Markdown, with the
+   adding-a-source guide and template as part of it, and help links from the
+   admin page into it. It copies the stack the author already runs for
+   M3Undle (`D:\github\IPTV\M3Undle`: `mkdocs.yml`, `docs/requirements.txt`,
+   `.github/workflows/docs.yml`): MkDocs with the Material theme, navigation
+   tabs, search, light and dark palettes, `docs_dir: docs/user`, a strict build
+   so a broken internal link fails, a Markdown link check (lychee) for external
+   links, a PR preview artifact, and deploy through `actions/deploy-pages` on a
+   push to main. One-time setting for the author: repository Settings > Pages >
+   Source = GitHub Actions. Site URL `https://jake1164.github.io/presto-ai-dash/`.
+   - **Published versus internal.** Only `docs/user/` is published. The
+     working notes (this plan, the readiness files, milestones, the project
+     plan, agent prompts) stay in the repository and are never in the site.
+     Examples use placeholder addresses (`192.168.1.50`), never real ones; two
+     existing files contain a real LAN address (`milestones.md`, `setup.md`).
+     User-facing content that exists today (setup, configuration, sources,
+     claude, codex, quotas, limitations, subscription monitoring) moves into
+     `docs/user/` so there is one source of truth, not two copies that
+     drift; each move updates every reference to the old path (README,
+     AGENTS.md, code comments, any test that reads a doc) in the same change.
+   - **7a, the site and the user documentation.** Navigation: Getting started
+     (what it does, install the daemon, set up the Presto, add the first
+     source), Concepts (sources, quotas, where every number comes from, stale
+     readings, remote reports), Guides (one per source: Claude including the
+     status-line export, the activity logs and the usage cache; Codex; OpenCode
+     Go; Ollama Cloud; Ollama; LiteLLM; Home display; remote collectors; alerts
+     after M12; Docker after the Docker work), Troubleshooting ("Daemon offline"
+     and Wi-Fi drops with the router-side checks learned on 2026-10-20, no
+     Claude data, the VS Code panel, stale readings), Reference (configuration
+     keys and environment variables, ports and endpoints, the status payload),
+     Privacy ("what it reads, what it never does, what leaves the machine":
+     the read-only rule in plain words). Acceptance: the strict build and link
+     check pass in CI; the site is live; every admin setting is documented.
+   - **7b, developer documentation and the adding-a-source guide.** A
+     Developers tab: architecture, running the tests, the preview and the
+     device sync, how a source is registered (`config_fields`, `collect()`,
+     provenance labels, the read-only rule, the device payload whitelist and
+     its guard test), and a worked example. A source template (a commented
+     source class and its test file, kept working by a test that
+     instantiates it) so a new source starts from running code. The guide's
+     example must be run, not just written.
+   - **7c, in-app help links (after the admin page reorganization lands).** A
+     small "?" next to each admin section and setting links to its page and
+     anchor on the site, opening in a new tab. One base URL constant. The
+     existing in-page explanations stay (no loss of detail; the page must
+     still help a LAN-only user). Nothing identifying goes into a link: no
+     install id, names, hosts, tokens or accounts. A test fails if an admin
+     help link points to a page or anchor that does not exist in
+     `docs/user/`. The Settings tab says that Help opens the public docs site.
+   - **Parked (author, 2026-10-20): usage tracking.** Not part of this phase.
+     Recorded for later: any analytics goes only on the website, never in the
+     app or daemon, and a link marker such as `?app=true` (or `?ref=admin`)
+     can say "clicked from the app" without sending any data from the install.
+     Choices when it is picked up: Google Analytics (M3Undle already does this
+     through `extra.analytics`; it needs a consent banner for EU visitors,
+     which Material supports, and ad blockers will hide many self-hosters),
+     or a cookieless counter such as GoatCounter or Plausible (no banner).
+     Passive adoption signals that need nothing on the site: GitHub traffic,
+     clones and referrers, release download counts, container image pulls,
+     stars and forks.
 4. **Phase 8**, OpenTelemetry, as extra detail (cost, duration, errors). First
    verify with a throwaway local listener that the VS Code panel emits it.
 5. **M8 acceptance**: sign-in, cancel and sign-out accepted live; expired-login

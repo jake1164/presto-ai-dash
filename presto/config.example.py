@@ -13,6 +13,15 @@ DAEMON_PORT = 8787
 # Must match `daemon.shared_token` in the daemon config.
 SHARED_TOKEN = "change-me"
 
+# The name this device reports to the daemon, so several devices can be told
+# apart on the daemon's Status tab. Printable ASCII, at most 32 characters.
+DEVICE_NAME = "presto"
+
+# The app revision this device reports. Leave it empty: the deployment writes
+# the revision next to the app files, and the device then reports the build it
+# actually runs.
+DEVICE_REVISION = ""
+
 # Seconds between polls when the daemon is reachable.
 POLL_INTERVAL = 15
 

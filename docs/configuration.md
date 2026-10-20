@@ -28,6 +28,39 @@ have separate cookies. The admin listener always
 binds to loopback; for a remote headless server, use an SSH port forward to its
 admin port. The status listener remains on `daemon.host`.
 
+## The three tabs
+
+The page has three tabs: **Services**, **Status** and **Settings**.
+
+- **Services** configures and arranges the accounts. Every account is a card
+  that is collapsed by default and shows, on one line, a status dot, the
+  name, its key numbers (`5h 6% / Wk 59%`, `in use 3m`, `12 req`), a
+  freshness chip (`fresh 3m`, `stale 2d`, `no data`) and a chip that says
+  where the numbers came from (`terminal export`, `usage cache`, `local
+  logs`). Opening a card shows everything the page has always shown for that
+  account: the window meters, the labelled Quota / Activity / Usage cache /
+  Status note lines, and that account's own actions (the Claude export
+  setup, the remote token, the collector trail). The order arrows, the
+  **Enabled** checkbox, **Edit** and **Add source** stay where they were.
+  Everything on this tab applies to one account at a time.
+- **Status** is read-only and says whether everything works: the daemon, the
+  clients, the health of every account, the local readers, the remote
+  collectors and the recent problems. It refreshes itself every ten seconds
+  while the tab is open and the browser tab is in the foreground.
+- **Settings** holds what applies to every service, in collapsible sections
+  (the first open, the rest folded away). Every section is headed
+  *Applies to all services*.
+
+The active tab is in the URL hash (`#services`, `#status`, `#settings`), so a
+link points at a tab, and it is remembered in `localStorage` for the next
+visit. A browser that refuses `localStorage` (private mode, a full disk)
+still works: the hash and the default tab are enough. The tabs follow the
+ARIA tab pattern: they are reachable with the keyboard, the left and right
+arrow keys move between them, and Home and End jump to the first and the
+last one. The page is plain HTML, CSS and JavaScript with no dependencies,
+and it works at phone width. Every value that comes from the daemon is
+written with `textContent`, so a report can never become markup.
+
 ## Sources and accounts
 
 The page supports adding, editing, disabling, and deleting multiple source
@@ -180,6 +213,65 @@ poll without restarting the daemon. Three sources, in this order:
 A garbled environment variable found at run time (not at startup) fails closed
 to the default and is logged once.
 
+## The Status tab
+
+**Daemon.** The version, the database schema version, the uptime, the poll
+interval, the start time, the address the status listener binds to and the log
+level.
+
+**Clients.** Every device that fetches `/api/v1/status`: its name, its
+address, when it last fetched, how often, the app revision it reports and
+whether it is connected. A client that has not been seen for three poll
+intervals is shown as *not connected*.
+
+The daemon has one shared token, so authentication cannot tell clients apart.
+Each client therefore declares a name in the `X-Presto-Client` request header
+and may declare its app revision in `X-Presto-Revision`. The Presto sends
+`DEVICE_NAME` from its own `config.py` (default `presto`); the PSL preview
+sends `psl`. Header values are untrusted: a value is kept only when it is
+printable ASCII of at most 32 characters, and anything else becomes
+`unknown`. The daemon keeps at most 16 records in memory, one per (name,
+address), and drops the least recently seen one; the records are lost when the
+daemon restarts and nothing about a client is stored or sent anywhere else.
+
+The address is best effort. Behind NAT, a reverse proxy or Docker Desktop,
+several clients can share one address, so the name is what identifies a
+client and two clients with the same name and address cannot be told apart.
+The page says so.
+
+**Accounts.** One row per account: when it was last collected, its status and
+its last problem in plain words ("no reading yet", "the provider refused the
+key").
+
+**Readers and collectors.** The local activity reader (ok, scanning, or the
+reason it is unavailable), the usage cache reader (when it was fetched, or
+the reason it could not be read) and the remote collectors (when each account
+last received a report, and from which host).
+
+**Problems.** The recent `WARNING` and `ERROR` records of the daemon, in an
+in-memory ring buffer of the last 50, de-duplicated. This is where "format
+changed" and "access denied" become visible without reading a log file. The
+buffer holds only the log message: paths and credential-shaped text are
+replaced, and an exception contributes its type only, so no file contents or
+secrets can end up on the page. The buffer is memory only and is empty again
+after a restart.
+
+## The Settings tab
+
+**Home display** holds the overflow strip setting above.
+
+**Remote reports** holds the ingest switch, the collector download and the
+plain-HTTP warning.
+
+**Effective daemon configuration** is read-only. Every value says where it
+came from: `environment`, `dash.toml`, `database`, or `default` when nothing
+decided it. These values need a daemon restart, so they are edited in
+`dash.toml` or in the environment rather than on the page.
+
+**About and help** holds the explanatory text: the cloud and subscription
+sources, the Fake demo source, the order note, and where the logs and the
+diagnostics commands are.
+
 ## Management API
 
 The admin port serves the page plus:
@@ -192,6 +284,8 @@ The admin port serves the page plus:
 | PUT | `/api/admin/source-order` | Save a complete account order, including disabled accounts |
 | GET | `/api/admin/display` | The Home display settings and whether the environment locks them |
 | PUT | `/api/admin/display` | Save the Home display settings (409 when the environment locks them) |
+| GET | `/api/admin/status` | The Status tab: the daemon, the clients, the account health, the readers, the collectors and the recent problems. Read-only |
+| GET | `/api/admin/config` | The effective daemon configuration and where each value came from. Read-only |
 | DELETE | `/api/admin/sources/{id}` | Delete the instance and its saved key |
 | POST | `/api/admin/session` | Exchange the current admin bearer token for a seven-day browser session |
 | GET | `/api/admin/session` | Restore a valid cookie session and obtain its CSRF token |
@@ -207,6 +301,11 @@ Reordering accepts `order` and `expected_order` arrays of account IDs. Each
 account must appear exactly once in `order`; `expected_order` must match the
 current sequence, otherwise the request returns 409. A reorder is atomic and
 does not change account revisions or discard in-flight provider readings.
+
+The two new endpoints, `/api/admin/status` and `/api/admin/config`, are GET
+only and change nothing. They need the same authorization as the other
+sources endpoints (the admin bearer token or a browser session) and the same
+host and origin checks. A request to them with any other method returns 404.
 
 The cookie is host-only, restricted to `/api/admin`, and named for the admin
 port. The loopback listener uses HTTP, so it does not set the HTTPS-only Secure

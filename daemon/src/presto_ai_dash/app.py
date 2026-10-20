@@ -6,14 +6,17 @@ import signal
 import sqlite3
 import sys
 import threading
+import time
 
 from . import __version__
 from .api import ApiServer
 from .admin import AdminServer
+from .clients import ClientRegistry
 from .config import (ConfigError, configure_logging, ingest_enabled, load_config,
                      resolve_shared_token, resolve_admin_token)
 from .management import SourceConfiguration, ManagedCollector
 from .models import now_utc
+from .problems import ProblemBuffer
 from .sources import build_sources
 from .storage import Storage
 
@@ -52,8 +55,12 @@ class Collector:
 
 
 class Daemon:
-    def __init__(self, config):
+    def __init__(self, config, config_path=None):
         self.config = config
+        # The bootstrap file, so the admin page can say where a value came
+        # from, and the start time, so it can show the uptime.
+        self.config_path = config_path
+        self.started_at = time.time()
         self.shared_token = resolve_shared_token(config)
         self.storage = Storage(config["daemon"]["database"])
         self.stop_event = threading.Event()
@@ -62,6 +69,8 @@ class Daemon:
         self.admin = None
         self.source_configuration = None
         self.maintenance_thread = None
+        self.clients = None
+        self.problems = None
         self._stop_lock = threading.Lock()
         self._stopped = False
 
@@ -69,25 +78,37 @@ class Daemon:
         """The route's live switch, so an admin toggle applies without a restart."""
         return ingest_enabled(self.config, self.storage.ingest_enabled_setting())
 
+    def _attach_problems(self):
+        """Keep the recent warnings and errors, in memory only."""
+        logging.getLogger().addHandler(self.problems)
+
     def setup(self):
         try:
             managed = (self.config["admin"]["enabled"] or
                        self.storage.configuration_marker() is not None or
                        bool(self.storage.source_instances()))
             if managed:
-                self.source_configuration = SourceConfiguration(self.storage, self.config)
+                self.source_configuration = SourceConfiguration(
+                    self.storage, self.config, config_path=self.config_path,
+                    started_at=self.started_at)
                 self.collectors = [ManagedCollector(self.source_configuration,
                                                     self.config, self.stop_event)]
+                self.clients = self.source_configuration.clients
+                self.problems = self.source_configuration.problems
             else:
                 self.collectors = [Collector(source, self.storage, self.config, self.stop_event)
                                    for source in build_sources(self.config)]
+                self.clients = ClientRegistry()
+                self.problems = ProblemBuffer()
+            self._attach_problems()
             self.api = ApiServer(self.config["daemon"]["host"], self.config["daemon"]["port"],
                                  self.storage, self.shared_token,
                                  source_ids=([collector.source.id for collector in self.collectors]
                                              if not managed else None),
                                  status_provider=(self.source_configuration.status_payload
                                                   if managed else None),
-                                 ingest_enabled=self.ingest_allowed)
+                                 ingest_enabled=self.ingest_allowed,
+                                 client_registry=self.clients)
             if self.config["admin"]["enabled"]:
                 token = resolve_admin_token(self.config, self.shared_token)
                 self.admin = AdminServer(self.config["admin"]["port"],
@@ -136,6 +157,11 @@ class Daemon:
                 return
             self._stopped = True
             self.stop_event.set()
+            if self.problems is not None:
+                try:
+                    logging.getLogger().removeHandler(self.problems)
+                except Exception:  # pragma: no cover - defensive
+                    pass
             try:
                 try:
                     if self.admin is not None:
@@ -187,7 +213,7 @@ def main(argv=None):
 
     daemon = None
     try:
-        daemon = Daemon(config)
+        daemon = Daemon(config, config_path=args.config)
         daemon.setup()
         for signum in (signal.SIGINT, signal.SIGTERM):
             signal.signal(signum, lambda *_: daemon.stop_event.set())

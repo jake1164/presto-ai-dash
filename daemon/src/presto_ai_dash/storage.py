@@ -349,6 +349,12 @@ class Storage:
                                      (instance_id,)).fetchone()
         return row["type"] if row else None
 
+    def schema_version(self):
+        """The schema version of the open database."""
+        with self._lock:
+            row = self._conn.execute("PRAGMA user_version").fetchone()
+        return int(row[0]) if row else 0
+
     def ingest_enabled_setting(self):
         """The persisted admin switch, or None while it has never been set."""
         with self._lock:

@@ -1,14 +1,78 @@
 "use strict";
 (() => {
   const element = (id) => document.getElementById(id);
+  const TABS = ["services", "status", "settings"];
+  // The URL of each tab. The hash is what a link points at.
+  const TAB_HASHES = { services: "#services", status: "#status", settings: "#settings" };
+  const STORAGE_KEY = "presto-ai-dash.tab";
   let csrfToken = "", unlocked = false, catalog = [], sources = [], editing = null;
   let busy = false;
   let dragging = null;
   let ingestState = null, tokenReveal = null, displayState = null;
+  let statusState = null, configState = null;
+  let activeTab = "services";
+  // Which account cards are open. Kept across the ten-second refresh, so the
+  // list does not collapse under the reader.
+  const expanded = new Set();
+
+  // -- small helpers --------------------------------------------------------
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined && text !== null) node.textContent = String(text);
+    return node;
+  }
   function message(text, error = false) {
     element("message").textContent = text;
     element("message").classList.toggle("error", error);
   }
+  function ageText(value) {
+    if (!value) return null;
+    const moment = Date.parse(value);
+    if (Number.isNaN(moment)) return null;
+    const seconds = Math.max(0, Math.round((Date.now() - moment) / 1000));
+    if (seconds < 60) return seconds + "s";
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return minutes + "m";
+    const hours = Math.floor(minutes / 60);
+    if (hours < 48) return hours + "h";
+    return Math.floor(hours / 24) + "d";
+  }
+  function whenText(value) {
+    if (!value) return "never";
+    const moment = Date.parse(value);
+    if (Number.isNaN(moment)) return "unknown";
+    return new Date(moment).toLocaleString();
+  }
+  function agoText(value) {
+    const age = ageText(value);
+    return age ? age + " ago" : "unknown";
+  }
+  function chip(text, className) {
+    return el("span", "chip " + (className || ""), text);
+  }
+  function buildTable(headers, rows) {
+    const table = el("table", "grid compact");
+    const head = el("thead");
+    const headRow = el("tr");
+    for (const header of headers) headRow.append(el("th", "", header));
+    head.append(headRow);
+    const body = el("tbody");
+    for (const row of rows) {
+      const line = el("tr");
+      for (const cell of row) line.append(el("td", "", cell));
+      body.append(line);
+    }
+    table.append(head, body);
+    // A wide table scrolls inside its own box, so the page never widens.
+    const wrapper = el("div", "table-wrap");
+    wrapper.append(table);
+    return wrapper;
+  }
+
+  // -- requests -------------------------------------------------------------
+
   async function request(path, method = "GET", data, adminToken) {
     const headers = {};
     if (adminToken) headers.Authorization = "Bearer " + adminToken;
@@ -24,6 +88,50 @@
     }
     return body;
   }
+
+  // -- the tabs -------------------------------------------------------------
+
+  function readStoredTab() {
+    // Private browsing and a full disk can both refuse localStorage.
+    try { return window.localStorage.getItem(STORAGE_KEY); } catch (_) { return null; }
+  }
+  function storeTab(name) {
+    try { window.localStorage.setItem(STORAGE_KEY, name); } catch (_) { /* not available */ }
+  }
+  function tabFromHash() {
+    const name = (window.location.hash || "").replace(/^#/, "");
+    return TABS.includes(name) ? name : null;
+  }
+  function showTab(name, updateHash = true) {
+    const tab = TABS.includes(name) ? name : "services";
+    activeTab = tab;
+    for (const other of TABS) {
+      const button = element("tab-" + other);
+      const panel = element("panel-" + other);
+      const selected = other === tab;
+      button.setAttribute("aria-selected", selected ? "true" : "false");
+      button.tabIndex = selected ? 0 : -1;
+      panel.hidden = !selected;
+    }
+    storeTab(tab);
+    if (updateHash) {
+      try { window.history.replaceState(null, "", TAB_HASHES[tab]); }
+      catch (_) { window.location.hash = TAB_HASHES[tab]; }
+    }
+    if (tab === "status") refreshStatus();
+    if (tab === "settings") refreshConfig();
+  }
+  function moveTabFocus(from, step) {
+    const index = TABS.indexOf(from);
+    let next = index + step;
+    if (next < 0) next = TABS.length - 1;
+    if (next >= TABS.length) next = 0;
+    showTab(TABS[next]);
+    element("tab-" + TABS[next]).focus();
+  }
+
+  // -- settings that belong to the whole daemon ------------------------------
+
   function selectedType() {
     return catalog.find((type) => type.id === element("source-type").value);
   }
@@ -53,6 +161,26 @@
     element("overflow-rows").disabled = !!displayState?.locked_by_environment;
     element("display-lock").hidden = !displayState?.locked_by_environment;
   }
+  async function refreshConfig() {
+    try {
+      configState = await request("/api/admin/config");
+      renderConfig();
+    } catch (error) { message(error.message, true); }
+  }
+  function renderConfig() {
+    const container = element("config-table");
+    container.replaceChildren();
+    const settings = configState?.settings || [];
+    if (!settings.length) {
+      container.append(el("p", "note", "No effective configuration to show."));
+      return;
+    }
+    container.append(buildTable(["Setting", "Value", "Comes from"],
+      settings.map((entry) => [entry.name, String(entry.value), entry.origin])));
+  }
+
+  // -- the editor -----------------------------------------------------------
+
   function renderFields(settings = {}) {
     const type = selectedType();
     element("source-fields").replaceChildren();
@@ -144,6 +272,9 @@
       message("This source type is unavailable. Restore its module or delete this source.", true);
     }
   }
+
+  // -- order, enable, edit --------------------------------------------------
+
   async function saveOrder(order, focusId) {
     const expected = sources.map(source => source.id);
     if (order.every((id, index) => id === expected[index])) return;
@@ -225,23 +356,66 @@
     const order = [...element("source-list").children].map(row => row.dataset.id);
     saveOrder(order, drag.row.dataset.id);
   }
-  document.addEventListener("keydown", event => {
-    if (event.key === "Escape" && dragging) { event.preventDefault(); finishDrag(true); }
-  });
-  element("source-list").addEventListener("pointermove", event => {
-    if (!dragging || event.pointerId !== dragging.pointerId) return;
-    dragging.x = event.clientX; dragging.y = event.clientY;
-    if (!dragging.active && Math.abs(event.clientY - dragging.startY) > 5) {
-      dragging.active = true; dragging.row.classList.add("dragging"); updateDrag();
+
+  // -- the account cards ----------------------------------------------------
+
+  function summaryFigures(source) {
+    const quota = source.quota || {};
+    const parts = [];
+    const activity = quota.local_activity;
+    if (activity && activity.available && activity.last_request_at) {
+      const age = ageText(activity.last_request_at);
+      const minutes = age && age.endsWith("m") ? parseInt(age, 10) : 9999;
+      const hours = age && age.endsWith("h") ? parseInt(age, 10) : 9999;
+      if (minutes <= Math.round((quota.active_seconds || 300) / 60)) parts.push("in use " + age);
+      else if (hours < 24) parts.push("used " + age + " ago");
     }
-  });
-  element("source-list").addEventListener("pointerup", event => {
-    if (event.pointerId === dragging?.pointerId) finishDrag();
-  });
-  element("source-list").addEventListener("pointercancel", event => {
-    if (event.pointerId === dragging?.pointerId) finishDrag(true);
-  });
-  element("source-list").addEventListener("lostpointercapture", () => { if (dragging) finishDrag(true); });
+    if (quota.windows && quota.windows.length) {
+      parts.push(quota.windows.map(window => window.label + " " + windowPercent(window)).join(" / "));
+    } else if (quota.activity && typeof quota.activity.request_count === "number") {
+      parts.push(quota.activity.request_count + " req");
+    }
+    if (!parts.length) parts.push(source.enabled ? (source.status || "no data") : "disabled");
+    return parts.join(" · ");
+  }
+  function windowPercent(window) {
+    return typeof window.used_percent === "number" ? Math.round(window.used_percent) + "%" : "--";
+  }
+  function freshnessChip(source) {
+    const quota = source.quota || {};
+    const measured = (quota.windows || []).filter(window => typeof window.used_percent === "number");
+    if (!measured.length) return chip("no data", "chip-muted");
+    const newest = measured.map(window => Date.parse(window.observed_at))
+      .filter(moment => !Number.isNaN(moment)).sort((a, b) => b - a)[0];
+    const age = newest ? ageText(new Date(newest).toISOString()) : null;
+    const stale = measured.some(window => window.state === "stale");
+    return chip((stale ? "stale " : "fresh ") + (age || "?"), stale ? "chip-stale" : "chip-fresh");
+  }
+  function sourceChip(source) {
+    const quota = source.quota || {};
+    const measured = (quota.windows || []).filter(window => typeof window.used_percent === "number");
+    if (measured.length) {
+      const newest = measured.slice().sort((a, b) =>
+        Date.parse(b.observed_at) - Date.parse(a.observed_at))[0];
+      if (newest.source) return chip(newest.source, "chip-source");
+    }
+    if (quota.local_activity && quota.local_activity.available) return chip("local logs", "chip-source");
+    return null;
+  }
+  function toggleCard(id) {
+    const open = !expanded.has(id);
+    if (open) expanded.add(id); else expanded.delete(id);
+    const card = [...element("source-list").children].find(row => row.dataset.id === id);
+    if (!card) return;
+    const detail = card.querySelector(".card-detail");
+    const toggle = card.querySelector('[data-action="toggle"]');
+    if (detail) detail.hidden = !open;
+    if (toggle) {
+      toggle.setAttribute("aria-expanded", open ? "true" : "false");
+      const chevron = toggle.querySelector(".chevron");
+      if (chevron) chevron.textContent = open ? "▾" : "▸";
+    }
+  }
   function copyCell(text) {
     const container = document.createElement("div"); container.className = "ingest-line";
     const code = document.createElement("code"); code.className = "ingest-code";
@@ -289,185 +463,306 @@
       list.append(empty);
     }
     for (const [index, source] of sources.entries()) {
-      const row = document.createElement("div"); row.className = "source";
-      row.classList.toggle("is-disabled", !source.enabled);
-      row.dataset.id = source.id;
-      const head = document.createElement("div"); head.className = "source-head";
-      const handle = document.createElement("button"); handle.className = "drag-handle";
-      handle.dataset.action = "reorder";
-      handle.type = "button"; handle.textContent = "\u283f";
-      handle.setAttribute("aria-label", "Reorder " + source.name + ", position " + (index + 1) +
-        " of " + sources.length + ". Drag or use Up and Down arrow keys.");
-      handle.title = "Drag to reorder, or use Up / Down arrow keys";
-      handle.disabled = sources.length < 2;
-      handle.addEventListener("keydown", event => {
-        if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-          event.preventDefault(); moveAccount(source.id, event.key === "ArrowUp" ? -1 : 1);
-        }
-      });
-      handle.addEventListener("pointerdown", event => {
-        if (busy || event.button !== 0 || sources.length < 2) return;
-        event.preventDefault(); handle.focus(); busy = true;
-        dragging = {row, handle, pointerId: event.pointerId, x: event.clientX, y: event.clientY,
-          startY: event.clientY, active: false};
-        // Capture on the stable list: moving a captured row would lose capture.
-        element("source-list").setPointerCapture(event.pointerId);
-      });
-      const name = document.createElement("strong"); name.textContent = source.name;
-      const enabledLabel = document.createElement("label"); enabledLabel.className = "check source-enabled";
-      const enabled = document.createElement("input"); enabled.type = "checkbox";
-      enabled.checked = source.enabled; enabled.dataset.action = "enabled";
-      enabled.setAttribute("aria-label", "Enable " + source.name);
-      enabled.addEventListener("change", () => setEnabled(source, enabled));
-      enabledLabel.append(enabled, document.createTextNode("Enabled"));
-      const ordering = document.createElement("div"); ordering.className = "order-controls";
-      for (const [direction, label, text] of [[-1, "up", "\u2191"], [1, "down", "\u2193"]]) {
-        const move = document.createElement("button"); move.type = "button";
-        move.className = "move-account"; move.textContent = text;
-        move.dataset.action = label;
-        move.title = "Move " + source.name + " " + label;
-        move.setAttribute("aria-label", move.title);
-        move.disabled = direction < 0 ? index === 0 : index === sources.length - 1;
-        move.addEventListener("click", () => moveAccount(source.id, direction));
-        ordering.append(move);
-      }
-      const button = document.createElement("button"); button.textContent = "Edit";
-      button.dataset.action = "edit";
-      button.addEventListener("click", () => { if (!busy) openEditor(source); });
-      head.append(handle, name, enabledLabel, ordering, button);
-      const detail = document.createElement("p");
-      const type = catalog.find((item) => item.id === source.type);
-      const keyStatus = source.has_key ? "key stored" :
-        type && !type.has_secret ? (source.type === "claude" ? "Claude Code quota export" :
-          source.type === "codex" ? "Codex-managed subscription login" :
-          source.type === "ollama" ? "local API · no key required" :
-          "no API key required") : "no stored key";
-      detail.textContent = source.type + " · " + (source.enabled ? source.status : "disabled") +
-        " · " + keyStatus;
-      row.append(head, detail);
-      if (source.type === "claude") {
-        const setup = document.createElement("button");
-        setup.textContent = source.export_installed ? "Remove Claude export setup" : "Set up Claude export";
-        setup.addEventListener("click", async () => {
-          if (busy) return;
-          busy = true; setup.disabled = true;
-          try {
-            await request("/api/admin/sources/" + source.id + "/claude-export", "POST",
-              {revision: source.revision, action: source.export_installed ? "remove" : "install"});
-            await reload();
-            message(source.export_installed ? "Claude export removed; previous status line restored where applicable." :
-              "Claude export configured. Reopen Claude Code in this profile and use it normally; quotas appear after a response.");
-          } catch (error) { message(error.message, true); }
-          finally { busy = false; setup.disabled = false; }
-        });
-        row.append(setup);
-      }
-      if (source.ingest) {
-        const reported = document.createElement("p"); reported.className = "note";
-        reported.textContent = source.ingest.collector_seen_at ?
-          "Last report: " + new Date(source.ingest.collector_seen_at).toLocaleString() +
-          " from " + source.ingest.collector_host : "No reports yet";
-        row.append(reported);
-        const controls = document.createElement("div"); controls.className = "actions";
-        const create = document.createElement("button"); create.type = "button";
-        create.textContent = source.ingest.token_exists ? "Rotate remote token" : "Create remote token";
-        create.addEventListener("click", async () => {
-          if (busy) return;
-          busy = true; create.disabled = true;
-          try {
-            tokenReveal = await request("/api/admin/sources/" + source.id + "/ingest-token", "POST");
-            tokenReveal.id = source.id;
-            await reload();
-            message("Remote token ready. Copy it now: it is shown only once.");
-          } catch (error) { message(error.message, true); }
-          finally { busy = false; create.disabled = false; renderList(); }
-        });
-        controls.append(create);
-        if (source.ingest.token_exists) {
-          const revoke = document.createElement("button"); revoke.type = "button";
-          revoke.className = "danger"; revoke.textContent = "Revoke";
-          revoke.addEventListener("click", async () => {
-            if (!window.confirm("Revoke this account's remote token? Collectors using it are refused.")) return;
-            if (busy) return;
-            busy = true; revoke.disabled = true;
-            try {
-              await request("/api/admin/sources/" + source.id + "/ingest-token", "DELETE");
-              tokenReveal = null;
-              await reload();
-              message("Remote token revoked. Install a new one to report again.");
-            } catch (error) { message(error.message, true); }
-            finally { busy = false; revoke.disabled = false; }
-          });
-          controls.append(revoke);
-        }
-        row.append(controls);
-        const reveal = revealToken(source);
-        if (reveal) row.append(reveal);
-      }
-      if (source.quota) {
-        for (const quota of source.quota.windows) {
-          const meter = document.createElement("div"); meter.className = "quota " + quota.state;
-          const text = document.createElement("p");
-          const percentage = typeof quota.used_percent === "number" ? quota.used_percent.toFixed(1) + "%" : "";
-          // A passed reset means the value is the last known one, not a reading.
-          const passed = quota.reset_passed === true;
-          const state = quota.state === "available" ? percentage :
-            quota.state === "stale" ? percentage + (passed ? " (stale, last known)" : " (stale)") :
-            quota.state;
-          text.textContent = quota.label + " · " + state;
-          if (quota.source) {
-            // Every number says where it came from.
-            text.textContent += " · " + quota.source;
-          }
-          if (quota.currency && typeof quota.used_amount === "number") {
-            text.textContent += " · $" + quota.used_amount.toFixed(2);
-            if (typeof quota.limit_amount === "number") text.textContent += " / $" + quota.limit_amount.toFixed(2);
-          }
-          meter.append(text);
-          if (percentage && (quota.state === "available" || quota.state === "stale")) {
-            const bar = document.createElement("progress"); bar.max = 100; bar.value = quota.used_percent;
-            bar.setAttribute("aria-label", quota.label + " allowance used"); meter.append(bar);
-          }
-          if (quota.resets_at) {
-            const reset = document.createElement("p"); reset.className = "note";
-            reset.textContent = "Reset: " + new Date(quota.resets_at).toLocaleString() +
-              (passed ? " (passed)" : "");
-            meter.append(reset);
-          }
-          row.append(meter);
-        }
-        if (source.quota.error) {
-          const error = document.createElement("p"); error.textContent = source.quota.error; row.append(error);
-        }
-        if (source.quota.activity) {
-          const activity = source.quota.activity;
-          const summary = document.createElement("p");
-          summary.textContent = (activity.state === "stale" ? "Stale activity: " : "Reported activity: ") + activity.request_count + " requests · $" +
-            activity.usage_usd.toFixed(6) + " · " + (activity.input_tokens + activity.output_tokens) + " tokens";
-          row.append(summary);
-          const range = document.createElement("p"); range.className = "note";
-          range.textContent = "Period: " + new Date(activity.from).toLocaleString() + " – " +
-            new Date(activity.until).toLocaleString(); row.append(range);
-        }
-        if (source.quota.note) {
-          const note = document.createElement("p"); note.className = "note";
-          note.textContent = source.quota.note; row.append(note);
-        }
-      }
-      if (source.provenance) {
-        // Labelled lines: each one says where its number comes from.
-        for (const key of ["quota", "activity", "usage_cache", "usage_cache_refreshes",
-                           "credit", "status_note"]) {
-          const line = source.provenance[key];
-          if (!line) continue;
-          const paragraph = document.createElement("p"); paragraph.className = "note";
-          paragraph.textContent = line; row.append(paragraph);
-        }
-      }
-      list.append(row);
+      list.append(buildCard(source, index));
     }
     if (focusedId && focusedAction) focusAccount(focusedId, focusedAction);
   }
+  function buildCard(source, index) {
+    const card = document.createElement("article");
+    card.className = "source card";
+    card.classList.toggle("is-disabled", !source.enabled);
+    card.dataset.id = source.id;
+
+    const head = document.createElement("div"); head.className = "source-head";
+    const toggle = document.createElement("button");
+    toggle.className = "card-toggle"; toggle.type = "button"; toggle.dataset.action = "toggle";
+    toggle.setAttribute("aria-expanded", expanded.has(source.id) ? "true" : "false");
+    toggle.setAttribute("aria-controls", "detail-" + source.id);
+    toggle.setAttribute("aria-label", "Show the details of " + source.name);
+    const dot = document.createElement("span");
+    dot.className = "dot dot-" + (source.enabled ? (source.status || "unknown") : "disabled");
+    dot.setAttribute("aria-hidden", "true");
+    const name = document.createElement("strong"); name.textContent = source.name;
+    const figures = document.createElement("span");
+    figures.className = "figures"; figures.textContent = summaryFigures(source);
+    toggle.append(dot, name, figures, freshnessChip(source));
+    const origin = sourceChip(source);
+    if (origin) toggle.append(origin);
+    const chevron = document.createElement("span");
+    chevron.className = "chevron"; chevron.setAttribute("aria-hidden", "true");
+    chevron.textContent = expanded.has(source.id) ? "▾" : "▸";
+    toggle.append(chevron);
+    toggle.addEventListener("click", () => toggleCard(source.id));
+
+    const handle = document.createElement("button"); handle.className = "drag-handle";
+    handle.dataset.action = "reorder";
+    handle.type = "button"; handle.textContent = "⠿";
+    handle.setAttribute("aria-label", "Reorder " + source.name + ", position " + (index + 1) +
+      " of " + sources.length + ". Drag or use Up and Down arrow keys.");
+    handle.title = "Drag to reorder, or use Up / Down arrow keys";
+    handle.disabled = sources.length < 2;
+    handle.addEventListener("keydown", event => {
+      if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+        event.preventDefault(); moveAccount(source.id, event.key === "ArrowUp" ? -1 : 1);
+      }
+    });
+    handle.addEventListener("pointerdown", event => {
+      if (busy || event.button !== 0 || sources.length < 2) return;
+      event.preventDefault(); handle.focus(); busy = true;
+      dragging = {row: card, handle, pointerId: event.pointerId, x: event.clientX, y: event.clientY,
+        startY: event.clientY, active: false};
+      // Capture on the stable list: moving a captured row would lose capture.
+      element("source-list").setPointerCapture(event.pointerId);
+    });
+    const enabledLabel = document.createElement("label"); enabledLabel.className = "check source-enabled";
+    const enabled = document.createElement("input"); enabled.type = "checkbox";
+    enabled.checked = source.enabled; enabled.dataset.action = "enabled";
+    enabled.setAttribute("aria-label", "Enable " + source.name);
+    enabled.addEventListener("change", () => setEnabled(source, enabled));
+    enabledLabel.append(enabled, document.createTextNode("Enabled"));
+    const ordering = document.createElement("div"); ordering.className = "order-controls";
+    for (const [direction, label, text] of [[-1, "up", "↑"], [1, "down", "↓"]]) {
+      const move = document.createElement("button"); move.type = "button";
+      move.className = "move-account"; move.textContent = text;
+      move.dataset.action = label;
+      move.title = "Move " + source.name + " " + label;
+      move.setAttribute("aria-label", move.title);
+      move.disabled = direction < 0 ? index === 0 : index === sources.length - 1;
+      move.addEventListener("click", () => moveAccount(source.id, direction));
+      ordering.append(move);
+    }
+    const button = document.createElement("button"); button.textContent = "Edit";
+    button.dataset.action = "edit";
+    button.addEventListener("click", () => { if (!busy) openEditor(source); });
+    head.append(toggle, handle, enabledLabel, ordering, button);
+
+    const detail = document.createElement("div");
+    detail.className = "card-detail"; detail.id = "detail-" + source.id;
+    detail.hidden = !expanded.has(source.id);
+    card.append(head, detail);
+    renderCardDetail(source, detail);
+    return card;
+  }
+  function renderCardDetail(source, detail) {
+    // Everything the page showed before the cards were collapsed.
+    const type = catalog.find((item) => item.id === source.type);
+    const keyStatus = source.has_key ? "key stored" :
+      type && !type.has_secret ? (source.type === "claude" ? "Claude Code quota export" :
+        source.type === "codex" ? "Codex-managed subscription login" :
+        source.type === "ollama" ? "local API · no key required" :
+        "no API key required") : "no stored key";
+    const summary = document.createElement("p");
+    summary.textContent = source.type + " · " + (source.enabled ? source.status : "disabled") +
+      " · " + keyStatus;
+    detail.append(summary);
+    if (source.type === "claude") {
+      const setup = document.createElement("button");
+      setup.textContent = source.export_installed ? "Remove Claude export setup" : "Set up Claude export";
+      setup.addEventListener("click", async () => {
+        if (busy) return;
+        busy = true; setup.disabled = true;
+        try {
+          await request("/api/admin/sources/" + source.id + "/claude-export", "POST",
+            {revision: source.revision, action: source.export_installed ? "remove" : "install"});
+          await reload();
+          message(source.export_installed ? "Claude export removed; previous status line restored where applicable." :
+            "Claude export configured. Reopen Claude Code in this profile and use it normally; quotas appear after a response.");
+        } catch (error) { message(error.message, true); }
+        finally { busy = false; setup.disabled = false; }
+      });
+      detail.append(setup);
+    }
+    if (source.ingest) {
+      const reported = document.createElement("p"); reported.className = "note";
+      reported.textContent = source.ingest.collector_seen_at ?
+        "Last report: " + new Date(source.ingest.collector_seen_at).toLocaleString() +
+        " from " + source.ingest.collector_host : "No reports yet";
+      detail.append(reported);
+      const controls = document.createElement("div"); controls.className = "actions";
+      const create = document.createElement("button"); create.type = "button";
+      create.textContent = source.ingest.token_exists ? "Rotate remote token" : "Create remote token";
+      create.addEventListener("click", async () => {
+        if (busy) return;
+        busy = true; create.disabled = true;
+        try {
+          tokenReveal = await request("/api/admin/sources/" + source.id + "/ingest-token", "POST");
+          tokenReveal.id = source.id;
+          await reload();
+          message("Remote token ready. Copy it now: it is shown only once.");
+        } catch (error) { message(error.message, true); }
+        finally { busy = false; create.disabled = false; renderList(); }
+      });
+      controls.append(create);
+      if (source.ingest.token_exists) {
+        const revoke = document.createElement("button"); revoke.type = "button";
+        revoke.className = "danger"; revoke.textContent = "Revoke";
+        revoke.addEventListener("click", async () => {
+          if (!window.confirm("Revoke this account's remote token? Collectors using it are refused.")) return;
+          if (busy) return;
+          busy = true; revoke.disabled = true;
+          try {
+            await request("/api/admin/sources/" + source.id + "/ingest-token", "DELETE");
+            tokenReveal = null;
+            await reload();
+            message("Remote token revoked. Install a new one to report again.");
+          } catch (error) { message(error.message, true); }
+          finally { busy = false; revoke.disabled = false; }
+        });
+        controls.append(revoke);
+      }
+      detail.append(controls);
+      const reveal = revealToken(source);
+      if (reveal) detail.append(reveal);
+    }
+    if (source.quota) {
+      for (const quota of source.quota.windows) {
+        const meter = document.createElement("div"); meter.className = "quota " + quota.state;
+        const text = document.createElement("p");
+        const percentage = typeof quota.used_percent === "number" ? quota.used_percent.toFixed(1) + "%" : "";
+        // A passed reset means the value is the last known one, not a reading.
+        const passed = quota.reset_passed === true;
+        const state = quota.state === "available" ? percentage :
+          quota.state === "stale" ? percentage + (passed ? " (stale, last known)" : " (stale)") :
+          quota.state;
+        text.textContent = quota.label + " · " + state;
+        if (quota.source) {
+          // Every number says where it came from.
+          text.textContent += " · " + quota.source;
+        }
+        if (quota.currency && typeof quota.used_amount === "number") {
+          text.textContent += " · $" + quota.used_amount.toFixed(2);
+          if (typeof quota.limit_amount === "number") text.textContent += " / $" + quota.limit_amount.toFixed(2);
+        }
+        meter.append(text);
+        if (percentage && (quota.state === "available" || quota.state === "stale")) {
+          const bar = document.createElement("progress"); bar.max = 100; bar.value = quota.used_percent;
+          bar.setAttribute("aria-label", quota.label + " allowance used"); meter.append(bar);
+        }
+        if (quota.resets_at) {
+          const reset = document.createElement("p"); reset.className = "note";
+          reset.textContent = "Reset: " + new Date(quota.resets_at).toLocaleString() +
+            (passed ? " (passed)" : "");
+          meter.append(reset);
+        }
+        detail.append(meter);
+      }
+      if (source.quota.error) {
+        const error = document.createElement("p"); error.textContent = source.quota.error; detail.append(error);
+      }
+      if (source.quota.activity) {
+        const activity = source.quota.activity;
+        const summary = document.createElement("p");
+        summary.textContent = (activity.state === "stale" ? "Stale activity: " : "Reported activity: ") + activity.request_count + " requests · $" +
+          activity.usage_usd.toFixed(6) + " · " + (activity.input_tokens + activity.output_tokens) + " tokens";
+        detail.append(summary);
+        const range = document.createElement("p"); range.className = "note";
+        range.textContent = "Period: " + new Date(activity.from).toLocaleString() + " – " +
+          new Date(activity.until).toLocaleString(); detail.append(range);
+      }
+      if (source.quota.note) {
+        const note = document.createElement("p"); note.className = "note";
+        note.textContent = source.quota.note; detail.append(note);
+      }
+    }
+    if (source.provenance) {
+      // Labelled lines: each one says where its number comes from.
+      for (const key of ["quota", "activity", "usage_cache", "usage_cache_refreshes",
+                         "credit", "status_note"]) {
+        const line = source.provenance[key];
+        if (!line) continue;
+        const paragraph = document.createElement("p"); paragraph.className = "note";
+        paragraph.textContent = line; detail.append(paragraph);
+      }
+    }
+  }
+
+  // -- the status tab -------------------------------------------------------
+
+  async function refreshStatus() {
+    if (!unlocked || busy) return;
+    try {
+      statusState = await request("/api/admin/status");
+      renderStatus();
+    } catch (error) { message(error.message, true); }
+  }
+  function renderStatus() {
+    const state = statusState;
+    if (!state) return;
+    const daemon = element("status-daemon");
+    daemon.replaceChildren();
+    const facts = [
+      ["Version", state.daemon.version],
+      ["Database schema", "v" + state.daemon.schema_version],
+      ["Uptime", state.daemon.uptime],
+      ["Poll interval", state.daemon.poll_interval + " s"],
+      ["Started", whenText(state.daemon.started_at)],
+      ["Listening on", state.daemon.host + ":" + state.daemon.port],
+      ["Log level", state.daemon.log_level],
+    ];
+    for (const [name, value] of facts) {
+      daemon.append(el("dt", "", name), el("dd", "", String(value)));
+    }
+    const clients = state.clients || [];
+    const clientBox = element("status-clients");
+    clientBox.replaceChildren();
+    if (!clients.length) {
+      clientBox.append(el("p", "note", "No client has fetched the status endpoint yet."));
+    } else {
+      clientBox.append(buildTable(["Name", "Address", "Last seen", "Fetches", "Revision", "State"],
+        clients.map(client => [client.name, client.address,
+          whenText(client.last_seen) + " (" + agoText(client.last_seen) + ")",
+          String(client.fetches), client.revision,
+          client.connected ? "connected" : "not connected"])));
+    }
+    const accounts = state.accounts || [];
+    const accountBox = element("status-accounts");
+    accountBox.replaceChildren();
+    if (!accounts.length) {
+      accountBox.append(el("p", "note", "No accounts are configured."));
+    } else {
+      accountBox.append(buildTable(["Account", "Last collection", "Status", "Last problem"],
+        accounts.map(account => [account.name + (account.enabled ? "" : " (disabled)"),
+          whenText(account.last_collection), account.status, account.last_problem])));
+    }
+    const readerBox = element("status-readers");
+    readerBox.replaceChildren();
+    const readers = state.readers || [];
+    const collectors = state.collectors || [];
+    if (!readers.length && !collectors.length) {
+      readerBox.append(el("p", "note", "No local readers and no remote collectors are in use."));
+    } else {
+      if (readers.length) {
+        readerBox.append(el("h4", "", "Local readers"));
+        readerBox.append(buildTable(["Account", "Reader", "State", "Detail"],
+          readers.map(reader => [reader.account, reader.reader, reader.state, reader.detail])));
+      }
+      if (collectors.length) {
+        readerBox.append(el("h4", "", "Remote collectors"));
+        readerBox.append(buildTable(["Account", "Host", "Last seen", "State"],
+          collectors.map(collector => [collector.account, collector.host,
+            whenText(collector.last_seen), collector.state])));
+      }
+    }
+    const problemBox = element("status-problems");
+    problemBox.replaceChildren();
+    const problems = state.problems || [];
+    if (!problems.length) {
+      problemBox.append(el("p", "note", "No warnings or errors since the daemon started."));
+    } else {
+      for (const problem of problems) {
+        const line = el("p", "problem");
+        line.append(el("strong", "", problem.level + ": "));
+        line.append(document.createTextNode(problem.message));
+        line.append(el("span", "note", " · " + whenText(problem.time) +
+          (problem.count > 1 ? " · " + problem.count + " times" : "")));
+        problemBox.append(line);
+      }
+    }
+    element("status-updated").textContent = "Updated " + new Date().toLocaleTimeString();
+  }
+
+  // -- loading, locking, unlocking -----------------------------------------
+
   async function reload(poll = false) {
     const data = await request("/api/admin/sources");
     if (poll && busy) return;
@@ -476,6 +771,7 @@
   function lock() {
     csrfToken = ""; unlocked = false; sources = []; catalog = []; editing = null;
     ingestState = null; tokenReveal = null; displayState = null;
+    statusState = null; configState = null; expanded.clear();
     element("admin-token").value = ""; element("source-form").reset();
     element("source-list").replaceChildren(); element("source-fields").replaceChildren();
     element("workspace").hidden = true; element("login-panel").hidden = false;
@@ -500,7 +796,43 @@
     edit(); element("admin-token").value = ""; unlocked = true;
     element("login-panel").hidden = true; element("workspace").hidden = false;
     element("logout").hidden = false; message("Configuration unlocked. Login remembered for seven days.");
+    showTab(tabFromHash() || readStoredTab() || "services");
   }
+
+  // -- events ---------------------------------------------------------------
+
+  document.addEventListener("keydown", event => {
+    if (event.key === "Escape" && dragging) { event.preventDefault(); finishDrag(true); }
+  });
+  element("source-list").addEventListener("pointermove", event => {
+    if (!dragging || event.pointerId !== dragging.pointerId) return;
+    dragging.x = event.clientX; dragging.y = event.clientY;
+    if (!dragging.active && Math.abs(event.clientY - dragging.startY) > 5) {
+      dragging.active = true; dragging.row.classList.add("dragging"); updateDrag();
+    }
+  });
+  element("source-list").addEventListener("pointerup", event => {
+    if (event.pointerId === dragging?.pointerId) finishDrag();
+  });
+  element("source-list").addEventListener("pointercancel", event => {
+    if (event.pointerId === dragging?.pointerId) finishDrag(true);
+  });
+  element("source-list").addEventListener("lostpointercapture", () => { if (dragging) finishDrag(true); });
+  element("tablist").addEventListener("keydown", event => {
+    const tab = event.target.closest('[role="tab"]');
+    if (!tab) return;
+    if (event.key === "ArrowRight") { event.preventDefault(); moveTabFocus(tab.dataset.tab, 1); }
+    else if (event.key === "ArrowLeft") { event.preventDefault(); moveTabFocus(tab.dataset.tab, -1); }
+    else if (event.key === "Home") { event.preventDefault(); showTab("services"); element("tab-services").focus(); }
+    else if (event.key === "End") { event.preventDefault(); showTab("settings"); element("tab-settings").focus(); }
+  });
+  for (const tab of TABS) {
+    element("tab-" + tab).addEventListener("click", () => showTab(tab));
+  }
+  window.addEventListener("hashchange", () => {
+    const name = tabFromHash();
+    if (name && name !== activeTab) showTab(name, false);
+  });
   element("login-form").addEventListener("submit", async (event) => {
     event.preventDefault(); if (busy) return;
     busy = true; element("unlock").disabled = true;
@@ -526,7 +858,7 @@
       ingestState = await request("/api/admin/ingest", "PUT",
         {enabled: element("ingest-enabled").checked});
       message(element("ingest-enabled").checked ?
-        "Remote reports accepted. Each remote account needs its own token below." :
+        "Remote reports accepted. Each remote account needs its own token on the Services tab." :
         "Remote reports refused. Existing tokens are kept.");
     } catch (error) { message(error.message, true); }
     finally { busy = false; renderIngest(); }
@@ -582,7 +914,15 @@
     } catch (error) { message(error.message, true); }
     finally { busy = false; }
   });
+  // The account list refreshes every ten seconds, as before.
   setInterval(() => { if (unlocked && !busy) reload(true).catch((error) => message(error.message, true)); }, 10000);
+  // The status tab refreshes itself while it is open and the browser tab is in
+  // the foreground. Nothing is fetched while another tab is showing.
+  setInterval(() => {
+    if (!unlocked || busy || activeTab !== "status") return;
+    if (document.visibilityState !== "visible") return;
+    refreshStatus();
+  }, 10000);
   async function restoreLogin() {
     busy = true; element("unlock").disabled = true;
     try {

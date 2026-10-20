@@ -11,6 +11,11 @@ ROOT = Path(__file__).resolve().parents[1]
 PRESTO = ROOT / "presto"
 RECEIPT = ROOT / ".preview" / "device-sync.json"
 
+# The revision is written next to the app files, so the device can report the
+# build it actually runs. It is not part of the revision itself.
+REVISION_TARGET = "/ai_dash_files/revision.txt"
+REVISION_CHARS = 12
+
 
 def app_files(root=ROOT):
     """Source -> installed path; new public app modules join automatically."""
@@ -41,9 +46,14 @@ def revision(hashes):
 def snapshot(root=ROOT):
     files = {target: source.read_bytes() for source, target in app_files(root).items()}
     for target, data in files.items():
-        compile(data, target, "exec")
+        if target.endswith(".py"):
+            compile(data, target, "exec")
     hashes = {target: hashlib.sha256(data).hexdigest() for target, data in files.items()}
-    return {"revision": revision(hashes), "hashes": hashes, "files": files}
+    code_revision = revision(hashes)
+    # The device reports the revision it runs, so it is written with the app.
+    files[REVISION_TARGET] = (code_revision[:REVISION_CHARS] + "\n").encode("ascii")
+    hashes[REVISION_TARGET] = hashlib.sha256(files[REVISION_TARGET]).hexdigest()
+    return {"revision": code_revision, "hashes": hashes, "files": files}
 
 
 def sync_status(code_revision, receipt=RECEIPT):

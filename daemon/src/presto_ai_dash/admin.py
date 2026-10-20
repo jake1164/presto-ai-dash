@@ -165,6 +165,25 @@ def make_admin_handler(manager, token):
                         log.error("admin display state failed")
                         self._send(500, {"error": "display settings could not be read"})
                 return
+            if path == "/api/admin/status":
+                # Read-only: the Status tab's daemon, client, reader and
+                # problem information. It changes nothing.
+                if self._authorized():
+                    try:
+                        self._send(200, manager.status_view())
+                    except Exception:
+                        log.error("admin status view failed")
+                        self._send(500, {"error": "status could not be read"})
+                return
+            if path == "/api/admin/config":
+                # Read-only: the effective configuration and where it came from.
+                if self._authorized():
+                    try:
+                        self._send(200, manager.effective_config())
+                    except Exception:
+                        log.error("admin effective configuration failed")
+                        self._send(500, {"error": "configuration could not be read"})
+                return
             if path != "/api/admin/sources":
                 self._send(404, {"error": "not found"})
                 return

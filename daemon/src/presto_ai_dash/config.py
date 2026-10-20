@@ -121,6 +121,23 @@ def ingest_enabled(config, stored=None, environ=None):
     return config["daemon"].get("ingest_enabled", False)
 
 
+def read_config_file(path=None):
+    """The raw TOML tables of the bootstrap file, or an empty dict.
+
+    The admin page shows where each effective value came from, so it needs to
+    know what the file said, not only what the merged configuration holds. An
+    unreadable or invalid file yields an empty dict: the effective values come
+    from the environment, the database or the built-in defaults.
+    """
+    if not path:
+        return {}
+    try:
+        with open(path, "rb") as handle:
+            return tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+
+
 def _merge(base, override, prefix=""):
     for key, value in override.items():
         if key in base and isinstance(base[key], dict):

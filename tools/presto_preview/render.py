@@ -89,6 +89,10 @@ def _load_app_modules(real_sleep=False):
     spec.loader.exec_module(main)
     main.__presto_revision__ = bundle["revision"]
     import net
+    # The preview is not a device: it says so, and it reports the revision of
+    # the shared app code it runs.
+    net.CLIENT_NAME_OVERRIDE = "psl"
+    net.REVISION_OVERRIDE = bundle["revision"][:12]
     return main, net
 
 

@@ -1,24 +1,75 @@
 """Database-backed source instances, secret updates, and live reconfiguration."""
 
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 import os
 import threading
 import time
 from urllib.parse import urlsplit
 from uuid import uuid4
 
+from . import __version__
+from .clients import ClientRegistry
 from .codex_login import CodexLoginManager
 from .collectors import claude_statusline
 from .config import ingest_enabled, overflow_rows
 from .credentials import load_cipher
 from .dashboard import build_instance_payload, device_view
+from .effective import effective_settings, uptime_label, uptime_seconds
+from .problems import ProblemBuffer
 from .sources import source_catalog, source_type
-from .models import SourceSnapshot
+from .models import SourceSnapshot, iso, now_utc
 from .quotas import claude_provenance, mark_passed_resets, present_quota, present_snapshot
 from .storage import ConfigurationConflict
 
 # The snippet URL is deliberately a placeholder: the user edits the address.
 INGEST_URL_PLACEHOLDER = "http://REPLACE-WITH-DASH-ADDRESS:8787/api/v1/ingest"
+
+
+def _stamp(value):
+    """A UTC timestamp for an epoch moment, or None."""
+    if value is None:
+        return None
+    try:
+        return iso(datetime.fromtimestamp(float(value), timezone.utc))
+    except (TypeError, ValueError, OSError, OverflowError):
+        return None
+
+
+def _activity_state(activity):
+    """ok, scanning, or unavailable: what the local activity reader says."""
+    if not activity.get("available"):
+        return "unavailable"
+    return "ok" if activity.get("complete", True) else "scanning"
+
+
+def _activity_detail(activity):
+    """Why the activity reader says what it says, in plain words."""
+    if not activity.get("available"):
+        return str(activity.get("reason") or activity.get("message") or
+                   "unavailable")[:160]
+    if not activity.get("complete", True):
+        return "still scanning the session logs"
+    last = activity.get("last_request_at")
+    if not last:
+        return "no request recorded yet"
+    return "last request at %s" % str(last)
+
+
+def _cache_state(cache):
+    """ok or unavailable: what the usage cache reader says."""
+    return "ok" if cache.get("available") else "unavailable"
+
+
+def _cache_detail(cache):
+    """When the usage cache was read, or why it could not be read."""
+    if not cache.get("available"):
+        return str(cache.get("message") or cache.get("reason") or
+                   "unavailable")[:160]
+    fetched = cache.get("fetched_at")
+    if not fetched:
+        return "no reading yet"
+    return "fetched at %s" % str(fetched)
 
 
 def validate_settings(cls, settings):
@@ -61,9 +112,17 @@ def validate_settings(cls, settings):
 
 
 class SourceConfiguration:
-    def __init__(self, storage, config):
+    def __init__(self, storage, config, config_path=None, started_at=None):
         self.storage = storage
         self.config = config
+        # The bootstrap file and the start time are only used to explain the
+        # effective configuration and the uptime on the Status tab.
+        self.config_path = config_path
+        self.started_at = time.time() if started_at is None else float(started_at)
+        # In memory only: the clients that fetch the status endpoint, and the
+        # recent problems. Both are lost when the daemon restarts.
+        self.clients = ClientRegistry()
+        self.problems = ProblemBuffer()
         self.changed = threading.Event()
         self._edit_lock = threading.RLock()
         marker = storage.configuration_marker()
@@ -318,6 +377,97 @@ class SourceConfiguration:
         # applies on the next poll without restarting the daemon.
         payload["display"] = {"overflow_rows": self.display_state()["overflow_rows"]}
         return payload
+
+    def effective_config(self):
+        """The effective daemon configuration and where each value came from."""
+        return {"settings": effective_settings(self.config, self.storage, self.config_path)}
+
+    def status_view(self):
+        """Everything the Status tab shows: read-only, and never a secret."""
+        listing = self.list_sources()
+        sources = listing["sources"]
+        snapshots = self.storage.latest_snapshots()
+        poll_interval = self.config["daemon"]["poll_interval"]
+        uptime = uptime_seconds(self.started_at)
+        return {
+            "daemon": {
+                "version": __version__,
+                "schema_version": self.storage.schema_version(),
+                "uptime_seconds": uptime,
+                "uptime": uptime_label(uptime),
+                "poll_interval": poll_interval,
+                "started_at": _stamp(self.started_at),
+                "now": iso(now_utc()),
+                "log_level": self.config["logging"]["level"],
+                "host": self.config["daemon"]["host"],
+                "port": self.config["daemon"]["port"],
+            },
+            "clients": [dict(record, last_seen=_stamp(record["last_seen"]),
+                            first_seen=_stamp(record["first_seen"]))
+                        for record in self.clients.clients(poll_interval=poll_interval)],
+            "accounts": [self._account_health(source, snapshots.get(source["id"]))
+                         for source in sources],
+            "readers": self._readers(sources),
+            "collectors": self._collectors(sources),
+            "problems": [dict(record, time=_stamp(record["time"]))
+                         for record in self.problems.problems()],
+        }
+
+    @staticmethod
+    def _account_health(source, snapshot):
+        """One account's health: when it was last read, and its last problem."""
+        quota = source.get("quota") or {}
+        problem = "none"
+        if snapshot is None:
+            problem = "no reading yet"
+        elif snapshot.error:
+            problem = str(snapshot.error)
+        elif quota.get("error"):
+            problem = str(quota["error"])
+        return {"id": source["id"], "name": source["name"], "type": source["type"],
+                "enabled": source["enabled"], "status": source["status"],
+                "last_collection": iso(snapshot.updated_at) if snapshot else None,
+                "last_problem": problem}
+
+    @staticmethod
+    def _readers(sources):
+        """The local readers: the activity reader and the usage cache reader."""
+        rows = []
+        for source in sources:
+            quota = source.get("quota") or {}
+            config = source.get("config") or {}
+            activity = quota.get("local_activity")
+            if isinstance(activity, dict):
+                rows.append({"account": source["name"], "reader": "local activity",
+                             "state": _activity_state(activity),
+                             "detail": _activity_detail(activity)})
+            elif config.get("activity_logs"):
+                rows.append({"account": source["name"], "reader": "local activity",
+                             "state": "unavailable", "detail": "no reading yet"})
+            cache = quota.get("usage_cache")
+            if isinstance(cache, dict):
+                rows.append({"account": source["name"], "reader": "usage cache",
+                             "state": _cache_state(cache),
+                             "detail": _cache_detail(cache)})
+            elif config.get("usage_cache"):
+                rows.append({"account": source["name"], "reader": "usage cache",
+                             "state": "unavailable", "detail": "no reading yet"})
+        return rows
+
+    @staticmethod
+    def _collectors(sources):
+        """The remote collectors: when each account last received a report."""
+        rows = []
+        for source in sources:
+            ingest = source.get("ingest")
+            if not isinstance(ingest, dict):
+                continue
+            seen = ingest.get("collector_seen_at")
+            rows.append({"account": source["name"],
+                         "host": ingest.get("collector_host") or "unknown",
+                         "last_seen": seen,
+                         "state": "reporting" if seen else "no reports yet"})
+        return rows
 
     def save_observation(self, record, snapshot):
         # An in-flight probe cannot restore stale data after an edit/disable/delete.

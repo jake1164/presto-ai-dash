@@ -4,6 +4,7 @@ import unittest
 
 import presto_path  # noqa: F401
 
+import net
 from net import (
     EMBEDDED_SAMPLE,
     NetworkUnavailable,
@@ -46,14 +47,56 @@ class TestBuildUrl(unittest.TestCase):
 class TestBuildHeaders(unittest.TestCase):
 
     def test_bearer_token(self):
-        self.assertEqual(
-            build_headers("secret"),
-            {"Authorization": "Bearer secret"})
+        headers = build_headers("secret")
+        self.assertEqual(headers["Authorization"], "Bearer secret")
 
     def test_empty_token_still_sends_a_header(self):
         headers = build_headers("")
         self.assertIn("Authorization", headers)
         self.assertEqual(headers["Authorization"], "Bearer ")
+
+    def test_every_request_names_the_client_and_the_revision(self):
+        headers = build_headers("secret")
+        self.assertEqual(headers["X-Presto-Client"], net.current_client_name())
+        self.assertEqual(net.DEFAULT_CLIENT_NAME, "presto")
+        self.assertIn("X-Presto-Revision", headers)
+
+    def test_the_client_name_comes_from_the_device_settings(self):
+        original = net.CLIENT_NAME_OVERRIDE
+        net.CLIENT_NAME_OVERRIDE = "kitchen-presto"
+        try:
+            self.assertEqual(build_headers("t")["X-Presto-Client"], "kitchen-presto")
+        finally:
+            net.CLIENT_NAME_OVERRIDE = original
+
+    def test_a_hostile_client_name_is_not_sent(self):
+        self.assertEqual(net.safe_label("bad\x00name"), "unknown")
+        self.assertEqual(net.safe_label("a" * 33), "unknown")
+        self.assertEqual(net.safe_label(""), "unknown")
+        self.assertEqual(net.safe_label(None), "unknown")
+        self.assertEqual(net.safe_label("presto"), "presto")
+
+    def test_the_revision_override_is_used(self):
+        original = net.REVISION_OVERRIDE
+        net.REVISION_OVERRIDE = "abc123456789"
+        try:
+            self.assertEqual(build_headers("t")["X-Presto-Revision"], "abc123456789")
+        finally:
+            net.REVISION_OVERRIDE = original
+
+    def test_a_missing_revision_file_is_unknown(self):
+        self.assertEqual(net.read_revision("no-such-revision-file.txt"), "unknown")
+
+    def test_the_installed_revision_file_is_read(self):
+        import os
+        import tempfile
+        handle, path = tempfile.mkstemp(suffix=".txt")
+        try:
+            with os.fdopen(handle, "w") as stream:
+                stream.write("abc123456789\n")
+            self.assertEqual(net.read_revision(path), "abc123456789")
+        finally:
+            os.remove(path)
 
 
 class TestParsePayload(unittest.TestCase):
@@ -117,7 +160,9 @@ class TestStatusClient(unittest.TestCase):
         payload = client.fetch()
         self.assertEqual(payload, {"cards": []})
         self.assertEqual(calls[0][0], "http://host:8787/api/v1/status")
-        self.assertEqual(calls[0][1], {"Authorization": "Bearer tok"})
+        self.assertEqual(calls[0][1]["Authorization"], "Bearer tok")
+        self.assertEqual(calls[0][1]["X-Presto-Client"], "presto")
+        self.assertIn("X-Presto-Revision", calls[0][1])
         self.assertEqual(calls[0][2], 5)
 
     def test_response_is_closed(self):

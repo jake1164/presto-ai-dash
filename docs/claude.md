@@ -75,6 +75,8 @@ export accounts.
 This is a **Claude Code terminal export**. Coverage from the VS Code graphical
 panel has not been verified, and terminal inactivity must not be presented as
 fresh panel telemetry. Use terminal mode for the verified reporting route.
+The optional usage cache reader below adds a second, unofficial route for
+panel users; every number it produces says which source it came from.
 
 ## Remote computers
 
@@ -181,6 +183,94 @@ these files. No percentage is ever derived from tokens — subscription limits
 are not published, so tokens are shown as load only. Quota percentages still
 come only from the terminal status-line export above.
 
+## Usage cache (VS Code panel and CLI)
+
+The status line is the only *supported* source of Claude quota, and the VS
+Code panel does not run it. Claude Code does, however, cache the numbers
+behind its own `/usage` dialog on disk: the JSON file `~/.claude.json` (a
+sibling of the `~/.claude` directory, not inside it) holds a
+`cachedUsageUtilization` object with the fetch time, the 5-hour and weekly
+percentages with their reset times, and the included credit. The optional
+usage cache reader turns that file into a quota source, so a panel user sees
+quota numbers again. It changes no provider setting and makes no provider
+request; it only reads a file Claude Code wrote itself.
+
+1. Open the Claude account on the admin page and tick **Read Claude Code's
+   local usage cache (usage numbers only)**. Off by default.
+2. Leave **Claude Code state file** blank for the automatic search, or point
+   it at the file yourself.
+3. Nothing else. The daemon re-reads the file only when its size or its
+   modification time changed.
+
+**What is read.** Only `fetchedAtMs`, the `five_hour` and `seven_day`
+utilization percentages and their reset times, and the included credit. The
+credit is found by *shape* (a dict with numeric `limit_dollars` and
+`used_dollars`), never by its obfuscated key, which Claude Code changes.
+
+**What is never read, stored, logged or sent.** The same file also holds the
+account id, the email, the organisation, the project history and the MCP
+server list. The reader opens the file read-only, parses it in memory and
+extracts only the fields listed above. It never writes, renames, locks or
+touches the file, and it never hashes those private fields for storage. The
+account id is only compared, as a SHA-256 kept in memory, to notice that the
+account behind the cache changed since the daemon started; when it did, the
+readings are hidden until the daemon restarts or the source is re-saved.
+
+**Where the file is.** Claude Code's `CLAUDE_CONFIG_DIR` (documented at
+<https://code.claude.com/docs/en/env-vars>) overrides the configuration
+directory, which defaults to `~/.claude`; the documentation does not name the
+state file itself. The reader therefore looks in two places: inside the
+settings file's own directory (the custom `CLAUDE_CONFIG_DIR` layout) and,
+only when that directory is the default `.claude` folder, in its parent (the
+default `~/.claude.json` layout). The admin page names the file it used, and
+the **Claude Code state file** setting overrides the search.
+
+**Where the numbers come from.** Every window says so: the detail card shows
+`Quota via cache, 2 h old` or `Quota via export, 6 days old`, and the admin
+page labels each window `usage cache` or `terminal export`. The newest
+reading per window wins; when both sources report the same moment, the
+terminal export wins. The included credit appears as `Credit: $100 of $100
+(exp 11-05)`.
+
+**The cache refreshes at irregular moments**, not on every response: it is
+written when Claude Code fetches usage, which happens now and then, and
+opening `/usage` in Claude Code forces a refresh. A reading that is older
+than seven days is still shown, but it is labelled as old, and the status
+note says that opening `/usage` refreshes it.
+
+**The log messages.** The reader logs under `presto_ai_dash.claude_usage_cache`
+and never logs a value or any file content — only paths, key names, JSON
+types and exception class names.
+
+| Message | What it means |
+| --- | --- |
+| `reading <path>` (INFO) | The file it reads. Logged once per file. |
+| `FILE NOT FOUND` (WARNING) | No usage cache exists yet. It appears when Claude Code first fetches usage: open `/usage` once. |
+| `FILE TOO LARGE` (WARNING) | The file is above the 32 MB safety limit, so it was not read. |
+| `NOT A FILE` (WARNING) | The path is not a regular file, so it was not read. |
+| `ACCESS DENIED` (WARNING) | The daemon user cannot read the file (a lock, antivirus or a shared-ACL problem). It goes away by itself after a few polls; only a persistent one is reported. |
+| `FORMAT CHANGED` (WARNING) | The file no longer has the expected shape. The message names the field path and the type that was found, never a value. Claude Code was probably updated. |
+| `NO QUOTA READING` (WARNING) | The file is valid but holds no quota for either window. |
+| `ACCOUNT CHANGED` (WARNING) | The account behind the cache is not the one the daemon started with, so the readings are hidden. Restart the daemon or re-save the source. |
+| `RECOVERED` (INFO) | The file is readable again after a problem. |
+| `transient read problem` (DEBUG) | A poll hit a file that was being rewritten; the last known reading is kept. Two of these in a row are tolerated, the third becomes a persistent problem. |
+
+A problem is warned about once, then at most once every 30 minutes; a change
+of problem is reported at once, and a recovery always is. Nothing here ever
+stops the quota reporting of the other sources.
+
+**Diagnostics.** `python -m presto_ai_dash.collectors.claude_usage_cache
+--path <file>` prints what the reader extracted (the windows, the fetch time
+and the credit) or the same clear message, and exits 1 when nothing could be
+read. Without `--path` it searches the default layout.
+
+**Limits.** The file format is **not an official interface** (assumption E):
+it can change without notice, and the reader then reports the usage cache as
+unavailable instead of breaking the quota display. The banked "Full reset"
+of Claude's usage page is **not** in this file. The reader is a local pull
+source: on a container or another computer the file is not there, and the
+cache would have to be pushed from the Claude machine (a later phase).
+
 
 ## Implementation checkpoint — 2026-10-11
 
@@ -209,6 +299,9 @@ A separate comparison against Claude's usage page remains unverified.
 **Graphical-panel coverage (settled 2026-10-20).** The VS Code panel does not
 run the status line: the author used the panel continuously for over a week with
 the export installed and received no reading, while a single terminal session
-produced real 5h and weekly numbers within minutes. Quota therefore arrives only
-from terminal sessions. Terminal observations must not imply panel coverage; the
-optional local activity reader (below) shows panel use without quota.
+produced real 5h and weekly numbers within minutes. Quota therefore arrives
+from terminal sessions. Terminal observations must not imply panel coverage;
+the optional local activity reader (below) shows panel use without quota.
+The optional usage cache reader (below) is the third route: it reads the
+numbers Claude Code caches on disk for its own `/usage` dialog, so a panel
+user can see quota again, from an unofficial file that is labelled as such.

@@ -1,15 +1,32 @@
-"""Claude Code subscription windows exported by its documented status line."""
+"""Claude Code subscription windows: the status-line export and the usage cache."""
 
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 
 from ..collectors.claude_activity import ActivityReader
+from ..collectors.claude_usage_cache import UsageCacheReader, candidate_paths
 from ..models import SourceSnapshot, now_utc
 from ..quotas import quota_report, quota_window, timestamp
 from . import Source, register
 
 WINDOWS = (("five_hour", "5h", 300), ("seven_day", "Weekly", 10080))
+
+# Where a number came from. Every window carries one, so a reading is never
+# presented as if another source had produced it.
+SOURCE_EXPORT = "terminal export"
+SOURCE_CACHE = "usage cache"
+
+NOTE_EXPORT = ("Claude Code terminal export; idle readings become stale. "
+               "The VS Code panel does not run the status line, so quota only "
+               "updates from terminal sessions.")
+NOTE_CACHE = ("Claude Code terminal export and its local usage cache; idle readings "
+              "become stale. The VS Code panel does not run the status line, so quota "
+              "arrives from terminal sessions and from the usage cache Claude Code "
+              "writes for its /usage dialog (opening /usage refreshes it).")
+NOTE_AWAITING = "Awaiting quota export from normal Claude Code terminal use"
+NOTE_AWAITING_CACHE = ("Awaiting quota export from normal Claude Code terminal use "
+                       "or its local usage cache")
 
 
 @register
@@ -19,9 +36,7 @@ class ClaudeSource(Source):
     provider = "anthropic"
     product = "Claude"
     stale_after_seconds = 900
-    report_note = ("Claude Code terminal export; idle readings become stale. "
-                   "The VS Code panel does not run the status line, so quota "
-                   "only updates from terminal sessions.")
+    report_note = NOTE_EXPORT
     accepts_push = True
     push_window_ids = ("five_hour", "seven_day")
     config_fields = (
@@ -34,6 +49,11 @@ class ClaudeSource(Source):
          "type": "bool", "default": False},
         {"key": "active_seconds", "label": "Treat Claude as in use for (seconds) after a request",
          "type": "int", "default": 300, "minimum": 30, "maximum": 3600},
+        {"key": "usage_cache",
+         "label": "Read Claude Code's local usage cache (usage numbers only)",
+         "type": "bool", "default": False},
+        {"key": "usage_cache_path", "label": "Claude Code state file (blank: automatic)",
+         "type": "string", "default": ""},
     )
 
     def __init__(self, config=None):
@@ -41,6 +61,9 @@ class ClaudeSource(Source):
         # One reader per source instance, so polls stay incremental; a settings
         # edit rebuilds the source and the new instance performs a fresh scan.
         self._activity_reader = None
+        # The usage cache reader lives as long as the configuration: it holds
+        # the account fingerprint in memory, and a re-save starts a new one.
+        self._usage_reader = None
 
     def attach_storage(self, storage):
         self.storage = storage
@@ -52,16 +75,71 @@ class ClaudeSource(Source):
             self._activity_reader = ActivityReader(root)
         return self._activity_reader.refresh(now)
 
+    def _usage_cache(self, now):
+        """The usage cache reading, or None when the reader is off."""
+        if not self.config.get("usage_cache"):
+            return None
+        if self._usage_reader is None:
+            override = (self.config.get("usage_cache_path") or "").strip()
+            candidates = candidate_paths(self.config.get("settings_path"),
+                                         override or None)
+            self._usage_reader = UsageCacheReader(candidates)
+        return self._usage_reader.refresh(now)
+
+    def _merge_cache(self, report, cache):
+        """The newest reading per window wins; the terminal export wins a tie.
+
+        Nothing is stored for the cache: the merge happens here, at collect
+        time, and is recomputed on every poll.
+        """
+        if not cache.get("available") or not cache.get("fetched_at"):
+            return
+        observed = timestamp(cache["fetched_at"])
+        windows = list(report.get("windows", []))
+        positions = {window.get("id"): index for index, window in enumerate(windows)}
+        for entry in cache.get("windows", []):
+            percent = entry.get("used_percent")
+            if percent is None:
+                continue  # a window that is not reported stays as it was
+            position = positions.get(entry.get("id"))
+            if position is not None:
+                existing = windows[position]
+                if (existing.get("used_percent") is not None and
+                        timestamp(existing["observed_at"]) >= observed):
+                    continue  # the terminal export is newer, or it is a tie
+            window = quota_window(entry["id"], entry["label"], percent,
+                                  entry.get("resets_at"), observed,
+                                  entry.get("period_minutes"), source=SOURCE_CACHE)
+            if position is None:
+                positions[entry["id"]] = len(windows)
+                windows.append(window)
+            else:
+                windows[position] = window
+        report["windows"] = windows
+
     def collect(self):
         now = now_utc()
         observation = self.storage.observation(self.id) if hasattr(self, "storage") else None
+        cache = self._usage_cache(now)
         if observation is None:
             report = quota_report(self.provider, self.product, [
-                quota_window(key, label, None, None, now, minutes, state="unavailable")
+                quota_window(key, label, None, None, now, minutes, state="unavailable",
+                             source=SOURCE_EXPORT)
                 for key, label, minutes in WINDOWS])
-            report["note"] = "Awaiting quota export from normal Claude Code terminal use"
+            report["note"] = NOTE_AWAITING
         else:
             report = deepcopy(observation["report"])
+        # Every window says where it came from.
+        for window in report["windows"]:
+            window.setdefault("source", SOURCE_EXPORT)
+        if cache is not None:
+            report["usage_cache"] = {key: value for key, value in cache.items()
+                                     if key != "windows"}
+            self._merge_cache(report, cache)
+            if cache.get("available"):
+                report["note"] = NOTE_CACHE
+            elif observation is None:
+                report["note"] = NOTE_AWAITING_CACHE
         # Every report carries the collector trail (None before the first
         # push), so payload building can produce freshness hints (Phase 4).
         report["stale_after_seconds"] = self.config.get("stale_after_seconds", 900)
@@ -87,7 +165,7 @@ class ClaudeSource(Source):
                                for w in report["windows"])
                 return SourceSnapshot(self.id, status, updated_at=observed,
                                       metrics={"quota": report})
-        if observation is None:
+        if observation is None and not available:
             return self.snapshot("warning", metrics={"quota": report})
         status = ("rate_limited" if any(w["used_percent"] >= 100 for w in available)
                   else "ok" if available else "warning")

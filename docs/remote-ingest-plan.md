@@ -13,7 +13,7 @@ not start a phase until the previous one passes its tests.
 | 3 | `POST /api/v1/ingest`, tokens (schema v7), admin controls | Done |
 | 4 | Freshness hints and the Presto display | Done (2026-10-18) |
 | 5 | Claude activity from local session logs (VS Code panel and CLI); 5b Stop hook and 5c remote push optional | Done (2026-10-19) |
-| 5d | Claude usage cache reader: quota for VS Code panel users from `~/.claude.json` | **Proposed, high value** |
+| 5d | Claude usage cache reader: quota for VS Code panel users from `~/.claude.json` | Done (2026-10-20) |
 | 6 | Codex over push | Optional |
 | 7 | "Adding a source" guide and template | Not started (an earlier attempt was discarded) |
 | 8 | OpenTelemetry activity detail | Optional, only if asked |
@@ -546,6 +546,8 @@ Open points for the author: confirm the per-profile path; how often Claude
 Code refreshes the cache passively (watch the backups over a few days);
 whether the included-credit line is wanted.
 
+Done 2026-10-20: implemented with tests. The opt-in reader (`collectors/claude_usage_cache.py`, stdlib only) opens Claude Code's state file read-only, extracts only the fetch time, the two windows and the credit (found by shape, never by its obfuscated key), remembers a SHA-256 of the account id in memory only, and degrades to "unavailable" with a precise reason instead of raising; the newest reading per window wins over the terminal export, ties go to the terminal export, and every window, card and admin line names its source.
+
 ### Phase 6 (optional): Codex over push
 
 Write `collectors/codex_appserver.py` that runs on the developer machine,
@@ -704,9 +706,98 @@ In order, after Phase 9 and the provenance fixes land:
    Home list shows full rows in the saved order until the space runs out. The
    rows that are not fully visible appear as names, each with a status marker,
    in a strip at the bottom; `+N` takes the worst hidden status colour. As the
-   user scrolls, rows move between the strip and the list. The strip is
-   configurable in the admin page, 0 to 3 lines, default 1 (0 turns it off),
-   and it disappears entirely when the whole list fits.
+   user scrolls, rows move between the strip and the list. The strip setting
+   in the admin page is the MAXIMUM number of lines, 0 to 3, default 1 (0
+   turns it off): the strip uses only as many lines as the hidden names need,
+   up to that maximum, and shows `+N` only when the maximum is not enough. The
+   line count is decided from the layout (rows, names, setting), never from
+   the scroll position, so the list does not jump while scrolling; each
+   extra line costs 18 px of list height. The strip disappears entirely when
+   the whole list fits.
+1b. **Phase 5d**, the Claude usage cache reader (high value: quota for VS Code
+   panel users). Runs after 1a; its prompt is written.
+1c. **Admin page reorganization (added 2026-10-20; before M12, which adds
+   alert settings that need a home).** The page mixes per-service status,
+   per-service actions, global settings and documentation text on one long
+   page, so it is hard to tell what applies to everything and what applies to
+   one service. Decisions so far (author, 2026-10-20): collapsed account cards
+   that still show at a glance that an account is working; a Status tab; no
+   single huge scrolling page; global settings grouped in sections. **Three
+   tabs, not four** (the author asked for a Status tab; Help is merged into
+   Settings to avoid tab overkill; confirm before an agent prompt is written):
+   - **Services** (configure and arrange). The account list with order
+     arrows, Enabled, Edit and Add source. Each account is a card that is
+     collapsed by default and shows, on one line: a status dot, the name, its
+     key numbers (for example `5h 6% / Wk 59%`, `in use 3m`, `12 req`), and
+     small chips for freshness (`fresh 3m`, `stale 2d`, `no data`) and for
+     where the numbers come from (`terminal export`, `usage cache`, `local
+     logs`). Expanding a card shows everything the page shows today (window
+     bars, the labelled Quota / Activity / Usage cache / Status note lines)
+     and that account's own actions (Claude export setup and removal, remote
+     token create, rotate and revoke, Codex sign-in and sign-out). Per-account
+     settings stay in that account's Edit form. A scope badge ties anything on
+     this tab to one account.
+   - **Status** (is everything working; read-only). Clients: every device that
+     fetches `/api/v1/status` (one or several Prestos, and the PSL preview),
+     each with its name, its address, when it last fetched, how often, and the
+     app revision it reports; a client not seen for three poll intervals is
+     shown as not connected. See "Clients" below. The daemon: version, database schema
+     version, uptime, poll interval. A health row per account: last collection
+     time, status, and the last problem in plain words. The readers and
+     collectors: the local activity reader (ok, scanning or the reason it is
+     unavailable), the usage cache reader (fetched time or the reason), and
+     remote collectors (last seen per account and host). A **Problems** list
+     of recent WARNING and ERROR messages from the daemon (an in-memory ring
+     buffer of the last 50, de-duplicated, never containing file contents or
+     secrets), which is where the clear "format changed" and "access denied"
+     messages become visible without reading a log file.
+   - **Settings** (global, in collapsible sections; the first open, the rest
+     collapsed; each heading says "Applies to all services"). Home display
+     (the overflow strip maximum). Remote reports (the toggle, the collector
+     download, the plain-HTTP warning). Alerts (added by M12: thresholds,
+     sounds, quiet hours, mute). Effective daemon configuration, read-only,
+     showing each value and where it came from (environment, `dash.toml`,
+     database), for poll interval, retention, ports and the timezone the
+     process uses; editing these stays in `dash.toml` or the environment
+     because they need a restart. About and help: the explanatory text now at
+     the bottom of the page (cloud and subscription sources, the Fake demo
+     source, the order note), where the logs and the diagnostics commands are.
+   - Rules: nothing is removed (the "no loss of detail" rule); no change to the
+     existing admin API behaviour, CSRF or sessions (new read-only endpoints are
+     added for Status: the last-poll time, the reader states and the problems
+     buffer); the active tab is in the URL hash (`#services`, `#status`,
+     `#settings`) and remembered in `localStorage` with a try/catch fallback;
+     the ARIA tab pattern, keyboard operable; plain HTML and JS with no
+     dependencies; all report-derived text uses `textContent`; the page works at
+     phone width; verified in a real browser against a throwaway admin server on
+     a temporary database.
+   - Decided (author, 2026-10-20): the Problems buffer is memory only and is
+     lost on restart; the Status tab refreshes itself every 10 seconds while
+     it is visible and the browser tab is in the foreground. Still to
+     confirm: three tabs rather than four.
+   - **Clients (several Prestos and the PSL).** The daemon has one shared
+     token, so it cannot tell clients apart by authentication, and the
+     admin page must not pretend it can. Design: each client declares a
+     display name in a request header, `X-Presto-Client` (device setting
+     `DEVICE_NAME` in `presto/config.py`, default `presto`; the PSL preview
+     sends `psl`), plus an optional `X-Presto-Revision` (its app revision).
+     The daemon keeps, in memory only, one record per (name, address) with
+     first seen, last seen, a fetch count and the reported revision, at most
+     16 records (the least recently seen is dropped). Header values are
+     untrusted: ASCII printable, at most 32 characters, anything else is
+     replaced with `unknown`, and the page uses `textContent`. The address is
+     best effort: behind Docker Desktop, a reverse proxy or NAT every client
+     may share one address, so the name is the primary key and two clients
+     that use the same name and address are indistinguishable (the page says
+     so). Nothing about clients is stored or sent anywhere else.
+   - **Not now: per-device tokens and IDs.** A token per device (created and
+     revoked in the admin page, like the ingest tokens) would give real
+     identity, revocation of one lost device, and per-device settings (which
+     accounts to show, its own order and strip size). That is the unscheduled
+     "Multiple Presto devices" item in `docs/future.md`; it costs a setup
+     step per device and a token in each device's `secrets.py`. Build it when
+     per-device settings are wanted, reusing the ingest-token storage and
+     admin patterns. The client header above is forward compatible with it.
 2. **Small changes (all):**
    - **Home follows the saved account order.** The swipe cards already do.
      Home currently groups cloud rows first and puts local services in a

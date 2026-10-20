@@ -47,7 +47,7 @@
       type?.id === "opencode_go" ? "Read-only subscription meters for your OpenCode Go account. This does not make model requests or sum tokens into quotas." :
       type?.id === "ollama_cloud" ? "Reads dated cloud activity. Monthly allowance and remaining credits are not returned by the current API; local Ollama is a separate source." :
       type?.id === "codex" ? "Reads Codex subscription quotas using your ChatGPT login in Codex. Leave both paths blank for automatic discovery and the default profile. Separate accounts need separate Codex profile directories. OAuth stays with Codex; no pay-per-use API key is needed. Browser and device-code sign-in, cancellation, and logout are available through the Codex login controls." :
-      type?.id === "claude" ? "Claude Code exports 5h/weekly subscription quotas after normal terminal responses. Save this source, then set up its exporter below. Readings go straight to the database; existing status-line output is preserved. No API key is needed. Idle readings become stale; VS Code graphical-panel coverage is unverified." :
+      type?.id === "claude" ? "Claude Code exports 5h/weekly subscription quotas after normal terminal responses. Save this source, then set up its exporter below. Readings go straight to the database; existing status-line output is preserved. No API key is needed. Idle readings become stale; the VS Code panel does not run the status line, but the optional usage cache reader reads the numbers Claude Code caches on disk for its /usage dialog." :
       type?.id === "fake" ? "Synthetic demo/test data. Disable it before enabling a live source." : "";
     if (!type) return;
     for (const field of type.fields) {
@@ -377,6 +377,10 @@
             quota.state === "stale" ? percentage + (passed ? " (stale, last known)" : " (stale)") :
             quota.state;
           text.textContent = quota.label + " · " + state;
+          if (quota.source) {
+            // Every number says where it came from.
+            text.textContent += " · " + quota.source;
+          }
           if (quota.currency && typeof quota.used_amount === "number") {
             text.textContent += " · $" + quota.used_amount.toFixed(2);
             if (typeof quota.limit_amount === "number") text.textContent += " / $" + quota.limit_amount.toFixed(2);
@@ -414,7 +418,7 @@
       }
       if (source.provenance) {
         // Labelled lines: each one says where its number comes from.
-        for (const key of ["quota", "activity", "status_note"]) {
+        for (const key of ["quota", "activity", "usage_cache", "credit", "status_note"]) {
           const line = source.provenance[key];
           if (!line) continue;
           const paragraph = document.createElement("p"); paragraph.className = "note";

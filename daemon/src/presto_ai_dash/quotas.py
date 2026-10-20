@@ -14,6 +14,11 @@ MAX_HINT_CHARS = 28
 # Claude's weekly window has a fixed cycle (Phase 5); its 5h window does not.
 WEEKLY_WINDOW_ID = "seven_day"
 
+# Where a Claude reading came from. Every window carries one of these labels,
+# so a number is never presented as if another source had produced it.
+SOURCE_EXPORT = "terminal export"
+SOURCE_CACHE = "usage cache"
+
 
 def compact_age(seconds):
     """A compact ASCII age: 59m, 1h, 47h, 2d. A future moment counts as 0m."""
@@ -188,18 +193,21 @@ def mark_passed_resets(quota, now=None):
 def claude_provenance(report, config=None, now=None):
     """Labelled lines that say where each Claude number came from.
 
-    The quota line names the terminal export, the time of the reading, the
-    host that reported it and how old it is. The activity line names the
-    local session logs and what they say, or why they say nothing. The status
-    note repeats the freshness hint. Nothing here is stored: the lines are
-    derived from the report the daemon already holds.
+    The quota line names the source of the reading, its time, the host that
+    reported it and how old it is. The activity line names the local session
+    logs and what they say, or why they say nothing. The usage cache lines
+    say whether that reader works and what it found. The status note repeats
+    the freshness hint. Nothing here is stored: the lines are derived from
+    the report the daemon already holds.
     """
     now = timestamp(now or now_utc())
     report = report if isinstance(report, dict) else {}
     config = config if isinstance(config, dict) else {}
     return {"quota": _quota_source_line(report, now),
             "activity": _activity_source_line(report, config, now),
-            "status_note": _status_note_line(report)}
+            "usage_cache": _usage_cache_line(report, config, now),
+            "credit": _credit_line(report),
+            "status_note": _status_note_line(report, config)}
 
 
 def _quota_source_line(report, now):
@@ -209,12 +217,19 @@ def _quota_source_line(report, now):
                 and window.get("observed_at")]
     if not measured:
         return "Quota: no reading yet (use claude in a terminal)"
-    observed = max(timestamp(window["observed_at"]) for window in measured)
+    newest = max(measured, key=lambda window: timestamp(window["observed_at"]))
+    observed = timestamp(newest["observed_at"])
     when = observed.astimezone().strftime("%Y-%m-%d %H:%M")
+    source = _source_label(newest.get("source"))
     host = report.get("collector_host")
-    origin = " from %s" % ascii_label(host) if host else ""
-    return "Quota: terminal export - last reading %s%s (%s old)" % (
-        when, origin, age_label((now - observed).total_seconds()))
+    origin = " from %s" % ascii_label(host) if host and source == SOURCE_EXPORT else ""
+    return "Quota: %s - last reading %s%s (%s old)" % (
+        source, when, origin, age_label((now - observed).total_seconds()))
+
+
+def _source_label(source):
+    """The short label of where a reading came from."""
+    return SOURCE_CACHE if source == SOURCE_CACHE else SOURCE_EXPORT
 
 
 def _activity_source_line(report, config, now):
@@ -243,16 +258,69 @@ def _activity_source_line(report, config, now):
     return "%s - tokens 5h/7d %s/%s" % (head, five, seven)
 
 
-def _status_note_line(report):
+def _usage_cache_line(report, config, now):
+    """Whether the usage cache reader works, and what it found."""
+    if not config.get("usage_cache"):
+        return "Usage cache: off (tick 'Read Claude Code's local usage cache' in Edit)"
+    cache = report.get("usage_cache")
+    if not isinstance(cache, dict):
+        return "Usage cache: UNAVAILABLE - no reading yet"
+    if not cache.get("available"):
+        return "Usage cache: UNAVAILABLE - %s" % ascii_label(
+            cache.get("message") or cache.get("reason") or "unknown reason", 160)
+    fetched = cache.get("fetched_at")
+    if not fetched:
+        return "Usage cache: UNAVAILABLE - no reading yet"
+    when = timestamp(fetched).astimezone().strftime("%Y-%m-%d %H:%M")
+    age = age_label((now - timestamp(fetched)).total_seconds())
+    path = ascii_label(cache.get("path") or "unknown path", 160)
+    return "Usage cache: ok - fetched %s (%s old), %s" % (when, age, path)
+
+
+def _credit_line(report):
+    """The included credit the usage cache reports, when it reports one."""
+    cache = report.get("usage_cache")
+    if not isinstance(cache, dict):
+        return None
+    credit = cache.get("credit")
+    if not isinstance(credit, dict):
+        return None
+    limit = credit.get("limit")
+    used = credit.get("used")
+    if type(limit) not in (int, float) or type(used) not in (int, float):
+        return None
+    expires = ""
+    resets_at = credit.get("resets_at")
+    if resets_at:
+        try:
+            expires = ", expires %s" % timestamp(resets_at).strftime("%Y-%m-%d")
+        except (TypeError, ValueError):
+            expires = ""
+    return "Credit: $%s of $%s left%s" % (_money(limit - used), _money(limit), expires)
+
+
+def _money(value):
+    """A dollar amount without noise: 100, 12.50."""
+    if float(value) == int(value):
+        return "%d" % int(value)
+    return "%.2f" % value
+
+
+def _status_note_line(report, config):
     """The freshness hint, labelled so it never reads as a measurement."""
     hint = report.get("hint")
     if not isinstance(hint, str) or not hint.strip():
         return None
-    return "Status note: %s" % hint
+    line = "Status note: %s" % hint
+    if config.get("usage_cache"):
+        # The cache refreshes when /usage is opened: that is the way to fix it.
+        line += " (opening /usage in Claude Code refreshes the cache)"
+    return line
 
 
 def quota_window(window_id, label, percent, reset, observed, period_minutes=None,
-                 state="available", used_amount=None, limit_amount=None, currency=None):
+                 state="available", used_amount=None, limit_amount=None, currency=None,
+                 source=None):
     if state not in ("available", "unavailable", "unlimited"):
         raise ValueError("invalid quota availability")
     if not isinstance(window_id, str) or not window_id or not isinstance(label, str) or not label:
@@ -278,6 +346,12 @@ def quota_window(window_id, label, percent, reset, observed, period_minutes=None
         if currency != "USD":
             raise ValueError("unsupported quota currency")
         result["currency"] = currency
+    if source is not None:
+        # The label says where the reading came from; it is never a value.
+        if (not isinstance(source, str) or not source or len(source) > 32 or
+                not source.isascii()):
+            raise ValueError("quota source must be a short ASCII label")
+        result["source"] = source
     return result
 
 

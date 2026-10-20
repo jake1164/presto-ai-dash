@@ -25,17 +25,53 @@ def _short_label(value, limit=10):
     return value[:limit - 3] + "..."
 
 
+def _source_short(source):
+    """A short label for where a reading came from, for the narrow card."""
+    return "cache" if source == "usage cache" else "export"
+
+
+def _money(value):
+    """A dollar amount without noise: 100, 12.50."""
+    if float(value) == int(value):
+        return "%d" % int(value)
+    return "%.2f" % value
+
+
+def _credit_line(report):
+    """The included credit the usage cache reports, when it reports one."""
+    cache = report.get("usage_cache")
+    if not isinstance(cache, dict):
+        return None
+    credit = cache.get("credit")
+    if not isinstance(credit, dict):
+        return None
+    limit = credit.get("limit")
+    used = credit.get("used")
+    if type(limit) not in (int, float) or type(used) not in (int, float):
+        return None
+    expires = ""
+    resets_at = credit.get("resets_at")
+    if resets_at:
+        try:
+            expires = " (exp %s)" % timestamp(resets_at).strftime("%m-%d")
+        except (TypeError, ValueError):
+            expires = ""
+    return "Credit: $%s of $%s%s" % (_money(limit - used), _money(limit), expires)
+
+
 def _trail_lines(report, now):
     """Detail lines about the observation trail: estimates, use, quota age, collector.
 
     They follow the per-window reset lines and the six-line cap drops them
-    bottom-first, so a full reset list always keeps every reset line. With
-    the Phase 5 local activity reader working, its estimated weekly reset,
-    last-used line and token totals come first and "Last used" replaces
-    "Last reply"; while the reader's cold scan is unfinished the totals are
-    lower bounds, so the line says "scanning" instead of numbers. "Quota age"
-    needs a measured window: a placeholder window has no age to show. Every
-    line says where its number comes from.
+    bottom-first, so a full reset list always keeps every reset line. The
+    quota line comes first among them and names the source of the reading, so
+    a number is never shown as if another source had produced it. With the
+    Phase 5 local activity reader working, its estimated weekly reset,
+    last-used line and token totals follow; while the reader's cold scan is
+    unfinished the totals are lower bounds, so the line says "scanning"
+    instead of numbers. "Quota via ..." needs a measured window: a
+    placeholder window has no age to show. Every line says where its number
+    comes from.
     """
     def ago(moment):
         return "%s ago" % age_label((now - timestamp(moment)).total_seconds())
@@ -43,6 +79,15 @@ def _trail_lines(report, now):
     lines = []
     activity = report.get("local_activity")
     reading = isinstance(activity, dict) and activity.get("available")
+    measured = [window for window in report["windows"]
+                if window.get("used_percent") is not None]
+    if measured:
+        # The age of the quota reading, not of the account, and the source of
+        # the newest reading: the two belong together.
+        newest = max(measured, key=lambda window: timestamp(window["observed_at"]))
+        lines.append("Quota via %s, %s old" % (
+            _source_short(newest.get("source")),
+            age_label((now - timestamp(newest["observed_at"])).total_seconds())))
     if reading:
         estimate = estimated_weekly_reset(report["windows"], now)
         if estimate:
@@ -67,14 +112,12 @@ def _trail_lines(report, now):
             # The cold scan is still reading the week: the totals are lower
             # bounds, and lower bounds are not shown as measurements.
             lines.append("Log tokens 5h/7d: scanning")
-    ages = [timestamp(window["observed_at"]) for window in report["windows"]
-            if window.get("used_percent") is not None]
-    if ages:
-        # The age of the quota reading, not of the account.
-        lines.append("Quota age: %s" % age_label((now - max(ages)).total_seconds()))
     if not reading:
         replied = report.get("last_progress_at")
         lines.append("Last reply: %s" % ("unavailable" if replied is None else ago(replied)))
+    credit = _credit_line(report)
+    if credit:
+        lines.append(credit)
     seen = report.get("collector_seen_at")
     if seen is None:
         lines.append("Reports: never")

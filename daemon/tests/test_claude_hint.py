@@ -282,14 +282,14 @@ class ClaudeDetailCardTests(unittest.TestCase):
     def test_reset_lines_stay_first_then_data_age_reply_and_reports(self):
         card = self.card(self.fresh_windows(), seen=NOW - timedelta(minutes=10))
         self.assertEqual(len(card.detail), 5)
-        self.assertEqual(card.detail[2], "Quota age: 5 min")
+        self.assertEqual(card.detail[2], "Quota via export, 5 min old")
         self.assertEqual(card.detail[3], "Last reply: 1 h ago")
         self.assertEqual(card.detail[4], "Reports: laptop 10 min ago")
         self.assertEqual(card.primary, "5h: 12%")
 
     def test_missing_progress_and_collector_are_honest_not_zero(self):
         card = self.card(self.fresh_windows(), seen=None, progress=None)
-        self.assertEqual(card.detail[2], "Quota age: 5 min")
+        self.assertEqual(card.detail[2], "Quota via export, 5 min old")
         self.assertEqual(card.detail[3], "Last reply: unavailable")
         self.assertEqual(card.detail[4], "Reports: never")
 
@@ -300,7 +300,7 @@ class ClaudeDetailCardTests(unittest.TestCase):
         card = self.card(windows)
         self.assertEqual(len(card.detail), 6)
         self.assertTrue(all(line.startswith("W") for line in card.detail[:5]))
-        self.assertEqual(card.detail[5], "Quota age: 5 min")
+        self.assertEqual(card.detail[5], "Quota via export, 5 min old")
         self.assertNotIn("Last reply: unavailable", card.detail)
         self.assertNotIn("Reports: never", card.detail)
 
@@ -555,10 +555,10 @@ class ActivityDetailCardTests(unittest.TestCase):
         self.assertEqual(len(detail), 6)
         self.assertTrue(detail[0].startswith("5h reset:"))
         self.assertTrue(detail[1].startswith("Weekly passed"))
-        self.assertEqual(detail[2], "Wk reset ~6 days (est)")
-        self.assertEqual(detail[3], "Last used: 3h ago (VS Code)")
-        self.assertEqual(detail[4], "Log tokens 5h/7d: 120k/2.1M")
-        self.assertEqual(detail[5], "Quota age: 5 min")  # Reports dropped: bottom first
+        self.assertEqual(detail[2], "Quota via export, 5 min old")
+        self.assertEqual(detail[3], "Wk reset ~6 days (est)")
+        self.assertEqual(detail[4], "Last used: 3h ago (VS Code)")
+        self.assertEqual(detail[5], "Log tokens 5h/7d: 120k/2.1M")
         self.assertNotIn("Last reply: 10 min ago", detail)
 
     def test_a_future_real_reset_is_shown_as_today_not_estimated(self):
@@ -570,9 +570,9 @@ class ActivityDetailCardTests(unittest.TestCase):
                                activity(last_request_at=NOW - timedelta(hours=3)))
         detail = self.card(report).detail
         self.assertFalse(any("(est)" in line for line in detail), detail)
-        self.assertEqual(detail[2:6], ["Last used: 3h ago (VS Code)",
+        self.assertEqual(detail[2:6], ["Quota via export, 5 min old",
+                                       "Last used: 3h ago (VS Code)",
                                        "Log tokens 5h/7d: 120k/2.1M",
-                                       "Quota age: 5 min",
                                        "Reports: laptop 10 min ago"])
 
     def test_last_used_replaces_last_reply_only_when_the_reader_works(self):
@@ -599,8 +599,10 @@ class ActivityDetailCardTests(unittest.TestCase):
         detail = self.card(with_activity(trail_report(windows))).detail
         self.assertEqual(len(detail), 6)
         self.assertTrue(all(line.startswith("W") for line in detail[:5]))
-        self.assertEqual(detail[5], "Last used: 0m ago (VS Code)")  # activity NOW anchor
-        for dropped in ("Log tokens", "Quota age", "Reports"):
+        # The quota line now leads the trail lines, so "Last used" is the one
+        # that the six-line cap drops.
+        self.assertEqual(detail[5], "Quota via export, 5 min old")
+        for dropped in ("Log tokens", "Last used", "Reports"):
             self.assertFalse(any(line.startswith(dropped) for line in detail), detail)
 
     def test_the_worst_token_totals_still_fit_the_labelled_line(self):
@@ -652,7 +654,7 @@ class ScanningTokensTests(unittest.TestCase):
 
 
 class QuotaAgeLineTests(unittest.TestCase):
-    """"Quota age" needs a measured reading; a placeholder window has no age."""
+    """"Quota via ..." needs a measured reading; a placeholder has no age."""
 
     def card(self, report):
         snapshot = SourceSnapshot("c", "ok", NOW, {"quota": report})
@@ -660,25 +662,25 @@ class QuotaAgeLineTests(unittest.TestCase):
 
     def test_no_measured_window_omits_the_data_age_line(self):
         detail = self.card(trail_report(unmeasured(), seen=None)).detail
-        self.assertFalse(any(line.startswith("Quota age") for line in detail), detail)
+        self.assertFalse(any(line.startswith("Quota via") for line in detail), detail)
         self.assertTrue(any(line.startswith("Last reply") for line in detail), detail)
 
     def test_one_measured_window_shows_the_real_age(self):
         detail = self.card(trail_report(measured(6 * 24), seen=NOW - 6 * DAY)).detail
-        self.assertIn("Quota age: 6 days", detail)
+        self.assertIn("Quota via export, 6 days old", detail)
 
     def test_the_reader_on_variant_also_omits_the_fabricated_age(self):
         report = with_activity(trail_report(unmeasured(), seen=None),
                                activity(last_request_at=NOW - timedelta(hours=3)))
         detail = self.card(report).detail
-        self.assertFalse(any(line.startswith("Quota age") for line in detail), detail)
+        self.assertFalse(any(line.startswith("Quota via") for line in detail), detail)
         self.assertIn("Last used: 3h ago (VS Code)", detail)
 
     def test_the_reader_on_variant_shows_the_age_of_a_measured_window(self):
         report = with_activity(trail_report(measured(6 * 24), seen=NOW - 6 * DAY),
                                activity(last_request_at=NOW - timedelta(hours=3)))
         detail = self.card(report).detail
-        self.assertIn("Quota age: 6 days", detail)
+        self.assertIn("Quota via export, 6 days old", detail)
 
 
 if __name__ == "__main__":

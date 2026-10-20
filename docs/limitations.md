@@ -7,7 +7,8 @@ mode. On-device Wi-Fi, authenticated polling, and recovery are verified in
 bars (Codex, Claude, OpenCode Go) and Ollama Cloud activity; only the static
 preview mode uses fixed values, labelled DEMO. Known gaps: Codex dashboard
 sign-in, Claude quota from the VS Code panel (it does not run the status line,
-so only terminal sessions report quota), and Ollama Cloud credit balance.
+so only terminal sessions report quota; the optional usage cache reader adds
+an unofficial route for panel users), and Ollama Cloud credit balance.
 
 Things this project honestly cannot do, and why. If a number on the Presto
 looks wrong or missing, it is probably here.
@@ -82,6 +83,28 @@ missing field, or a 404 degrades that one metric to "unavailable". It never
 raises, and it never takes the card down with it.
 
 If LiteLLM upgrades and a metric goes blank, this is the first place to look.
+
+## Claude's usage cache is an unofficial file
+
+The VS Code panel does not run Claude Code's status line, so a panel user
+gets no quota from it. The optional usage cache reader reads the JSON file
+Claude Code writes for its own `/usage` dialog (`~/.claude.json` in the
+default layout) and turns it into quota numbers. Three limits follow from
+that:
+
+- **The format is not an official interface.** It can change without notice.
+  The reader then reports the usage cache as unavailable and says which
+  field changed; the terminal export and every other source are unaffected.
+- **The cache refreshes at irregular moments**, not on every response, and
+  the file can be hours old. Opening `/usage` in Claude Code forces a
+  refresh. The numbers are always labelled with their age and their source.
+- **The file is sensitive.** It also holds the account id, the email, the
+  organisation, the project history and the MCP server list. The reader
+  opens it read-only, extracts only the quota fields and never writes,
+  renames, locks or forwards anything else.
+
+The banked "Full reset" of Claude's usage page is not in this file, and the
+reader never guesses at a window it does not have.
 
 ## Trends need history
 

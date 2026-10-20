@@ -1,6 +1,7 @@
 """The HTTP ingest route: auth order, limits, throttle (plan Phase 3)."""
 
 import json
+import threading
 import time
 from pathlib import Path
 import sys
@@ -198,6 +199,24 @@ class ClockTests(IngestApiBase):
         self.assertEqual(self.post(envelope(), token=token)[0], 204)
 
 
+class ApiServerSignatureTests(unittest.TestCase):
+    """Arguments added after status_provider must be keyword-only."""
+
+    def test_a_positional_handler_class_is_refused(self):
+        from presto_ai_dash.api import make_handler
+        with self.assertRaises(TypeError):
+            ApiServer("127.0.0.1", 0, None, "token", None, None, None, None, object)
+
+    def test_the_keyword_form_still_works(self):
+        from presto_ai_dash.api import make_handler
+        handler = make_handler(None, "token", status_provider=lambda: {})
+        with self.assertRaises(TypeError):
+            make_handler(None, "token", None, None, None, None)
+        server = ApiServer("127.0.0.1", 0, None, "token", handler_class=handler)
+        self.addCleanup(server.stop)
+        self.assertIs(server._server.RequestHandlerClass, handler)
+
+
 class LimiterUnitTests(unittest.TestCase):
     def test_second_call_within_the_interval_is_limited(self):
         limiter = _IngestRateLimiter()
@@ -211,6 +230,105 @@ class LimiterUnitTests(unittest.TestCase):
         for index in range(limiter.MAX_ENTRIES + 50):
             self.assertTrue(limiter.check("hash-%d" % index, 500.0 + index))
         self.assertLessEqual(len(limiter._seen), limiter.MAX_ENTRIES)
+
+
+class _BlockingItems(dict):
+    """A throttle map whose first read parks, to expose a missing lock.
+
+    The first caller waits inside the map read, so a second caller that gets
+    there at the same time proves the check is not serialised.
+    """
+
+    def __init__(self):
+        dict.__init__(self)
+        self.entered = threading.Event()
+        self.release = threading.Event()
+        self.concurrent = threading.Event()
+        self._state = threading.Lock()
+        self._busy = False
+
+    def items(self):
+        with self._state:
+            if self._busy:
+                self.concurrent.set()
+            self._busy = True
+            first = not self.entered.is_set()
+        try:
+            if first:
+                self.entered.set()
+                self.release.wait(5)
+            else:
+                time.sleep(0.05)
+        finally:
+            with self._state:
+                self._busy = False
+        return dict.items(self)
+
+
+class RateLimiterStressTests(unittest.TestCase):
+    """The ingest route is served by several threads: check() must be safe.
+
+    The stress test asserts the invariants the lock protects. It cannot show
+    that a lock-free implementation fails: the window is small and the
+    interpreter switches threads rarely, so the invariants are checked, not
+    the absence of the lock. The separate test below does check that.
+    """
+
+    def test_many_threads_hammering_the_limiter_keep_the_invariants(self):
+        repeated = _IngestRateLimiter()
+        flood = _IngestRateLimiter()
+        clock = {"now": 1000.0}
+        errors = []
+        accepted = {}
+        barrier = threading.Barrier(8)
+
+        def worker(index):
+            try:
+                barrier.wait(5)
+                for step in range(200):
+                    # The same few keys again and again: one accept per key.
+                    key = "account-%d" % (index % 7)
+                    if repeated.check(key, clock["now"]):
+                        accepted[key] = accepted.get(key, 0) + 1
+                    # A flood of new keys on a second limiter: the map is
+                    # cleared when it is full, so it cannot grow without end.
+                    flood.check("new-%d-%d" % (index, step), clock["now"])
+            except Exception as exc:  # reported by the assertions below
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker, args=(index,)) for index in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(60)
+        self.assertEqual(errors, [])
+        self.assertEqual(accepted, {"account-%d" % index: 1 for index in range(7)})
+        self.assertLessEqual(len(flood._seen), flood.MAX_ENTRIES)
+
+    def test_two_threads_do_not_enter_the_check_together(self):
+        limiter = _IngestRateLimiter()
+        watched = _BlockingItems()
+        limiter._seen = watched
+        results = []
+
+        def run():
+            results.append(limiter.check("same-key", 100.0))
+
+        first = threading.Thread(target=run)
+        first.start()
+        self.assertTrue(watched.entered.wait(5))
+        second = threading.Thread(target=run)
+        second.start()
+        time.sleep(0.3)
+        try:
+            self.assertFalse(watched.concurrent.is_set(),
+                             "check() ran in two threads at once: the lock is missing")
+        finally:
+            watched.release.set()
+            first.join(10)
+            second.join(10)
+        # The key is accepted once, and the second caller is limited.
+        self.assertEqual(sorted(results), [False, True])
 
 
 if __name__ == "__main__":

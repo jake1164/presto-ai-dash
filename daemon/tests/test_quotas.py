@@ -19,7 +19,7 @@ from presto_ai_dash.sources.opencode_go import OpenCodeGoSource, USAGE_URL
 from presto_ai_dash.sources.ollama_cloud import OllamaCloudSource
 from test_management import ManagementBase
 import presto_path
-from home import source_rows, HomeScroll, source_row_height, SOURCE_TOP, SOURCE_HEIGHT
+from home import source_rows, HomeScroll, home_total_height, SOURCE_TOP, SOURCE_HEIGHT
 from ui import Palette, draw_sources, PANEL
 from test_ui import Display
 import test_home
@@ -256,7 +256,7 @@ class QuotaDeviceTests(unittest.TestCase):
         self.assertEqual(len(rows), 8)
         self.assertEqual([w["label"] for w in rows[0]["windows"]], ["5h", "Weekly", "Monthly"])
         scroll = HomeScroll(0)
-        scroll.set_count(len(rows), source_row_height(rows), SOURCE_TOP, SOURCE_HEIGHT)
+        scroll.set_height(home_total_height(rows), SOURCE_TOP, SOURCE_HEIGHT)
         self.assertEqual(scroll.limit, 8 * 46 - 184)
         for offset in (0, 25, scroll.limit):
             with self.subTest(offset=offset):

@@ -165,6 +165,62 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
             'status': 'ok', 'metrics': {'requests_today': 12 + i, 'tokens_today': 340}} for i in range(count)]
         return payload
 
+    def mixed_payload(self):
+        """Four quota accounts and two local services, in the saved order."""
+        payload = embedded_payload()
+        payload['card_order'] = 'accounts'
+        payload['updated_at'] = '2026-10-20T12:00:00+00:00'
+        payload['sources'] = []
+        for index in range(4):
+            payload['sources'].append({
+                'id': 'cloud-%d' % index, 'type': 'claude', 'name': 'Cloud %d' % index,
+                'status': 'ok',
+                'quota': {'windows': [{'label': 'Weekly', 'period_minutes': 10080,
+                                       'used_percent': 14, 'state': 'available',
+                                       'resets_at': '2026-10-25T12:00:00+00:00',
+                                       'observed_at': '2026-10-20T11:55:00+00:00'}]}})
+        for index in range(2):
+            payload['sources'].append({
+                'id': 'local-%d' % index, 'type': 'litellm', 'name': 'Gateway %d' % index,
+                'status': 'ok', 'metrics': {'requests_today': 12}})
+        return payload
+
+    async def test_the_home_scroll_uses_the_total_height_of_mixed_rows(self):
+        self.app.client.fetch_async.return_value = self.mixed_payload()
+        await self.app.poll_once()
+        total = 4 * 46 + 2 * 18
+        self.assertEqual(self.app.home_scroll.limit, total - 184)
+        self.app._render()
+        texts = [row[0] for row in self.device.display.rows]
+        self.assertIn('Cloud 0', texts)
+        self.assertNotIn('Gateway 0', texts)  # the local rows are below the fold
+        # At the end of the scroll the local rows are on the list, in place.
+        self.app.home_scroll.offset = self.app.home_scroll.limit
+        self.app._render()
+        texts = [row[0] for row in self.device.display.rows]
+        self.assertIn('Gateway 0', texts)
+        self.assertIn('12 req', texts)
+
+    async def test_a_vertical_drag_scrolls_the_live_list_and_a_horizontal_one_does_not(self):
+        self.app.client.fetch_async.return_value = self.mixed_payload()
+        await self.app.poll_once()
+        self.assertGreater(self.app.home_scroll.limit, 0)
+        self.device.touch.state = True
+        self.device.touch.x, self.device.touch.y = 120, 150
+        self.app._poll_touch()
+        self.device.touch.x, self.device.touch.y = 120, 130
+        self.app._poll_touch()
+        self.assertEqual(self.app.home_scroll.offset, 20)
+        # A horizontal drag belongs to the cards, not to the list.
+        self.device.touch.state = False
+        self.app._poll_touch()
+        self.device.touch.state = True
+        self.device.touch.x, self.device.touch.y = 60, 150
+        self.app._poll_touch()
+        self.device.touch.x, self.device.touch.y = 180, 150
+        self.app._poll_touch()
+        self.assertEqual(self.app.home_scroll.offset, 20)
+
     async def test_success_renders_configured_instances_not_demo_cloud_values(self):
         self.assertTrue(await self.app.poll_once())
         self.app._render()

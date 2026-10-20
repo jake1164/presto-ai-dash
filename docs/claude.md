@@ -164,6 +164,15 @@ cycle is fixed, so the next reset is the newest real one plus whole weeks —
 an estimate, never presented as a provider reading. The 5h window is not
 estimated (its start rule is undocumented).
 
+**About the weekly estimate.** It assumes a fixed 7-day cycle, so it is only
+as good as that assumption: the provider may anchor the reset to local
+midnight instead of a fixed UTC instant, which would move it by an hour
+across a daylight-saving change. The estimate is replaced by the next real
+reading, it is always labelled `(est)`, and it may be an hour off across a
+clock change until it is checked against a real reading. The clocks change on
+2026-11-01; the next real weekly reset after that is the first one to check
+against. The estimate is not changed by this note.
+
 **Limits.** The session file format is **not an official interface**; it can
 change without notice, and the reader then degrades to "activity
 unavailable" rather than breaking quota display. Activity is a **lower

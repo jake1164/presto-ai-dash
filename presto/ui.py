@@ -107,7 +107,7 @@ def draw_home(display, palette, quotas, index, total, muted=False,
     _text(display, palette, "Weekly", 142, 32, WEEKLY, scale=1)
 
     bar_width = width - 14 - MARGIN
-    limit = scroll_limit(len(quotas))
+    limit = scroll_limit(len(quotas) * ROW_HEIGHT, LIST_HEIGHT)
     scroll = max(0, min(limit, int(scroll)))
     display.set_clip(14, LIST_TOP, bar_width, LIST_HEIGHT)
     for index_in_list, quota in enumerate(quotas):
@@ -283,70 +283,71 @@ def _draw_local_row(display, palette, row, y, row_width, stale):
     _text(display, palette, row["usage"], 14, y + 13, INK_DIM, scale=1)
 
 
-def _draw_local_strip(display, palette, rows, y, row_width, stale):
-    """Local services on one line: they are health, not cloud allowance."""
-    from cards import accent_for
+def _draw_compact_local_row(display, palette, row, y, row_width, stale):
+    """A local service among quota rows: marker, name, and what it is doing.
+
+    The same text the old bottom strip showed, so nothing is lost when the
+    strip is gone.
+    """
     from alerts import rgb_for_accent
-    display.set_pen(palette.pen(PANEL))
-    display.rectangle(14, y - 5, row_width, 1)
+    from cards import accent_for
+    from home import LOCAL_ROW
     display.set_font("bitmap8")
-    x, right = 14, 14 + row_width
-    for position, row in enumerate(rows):
-        # A healthy service shows what it is doing; otherwise its status.
-        detail = (row["usage"].split(" / ")[0] if row["status"] in ("ok", "active")
-                  and row["usage"] != "Usage unavailable" else row["status"].upper())
-        width = (6 + 3 + display.measure_text(row["name"], 1) + 4 +
-                 display.measure_text(detail, 1))
-        more = "+%d" % (len(rows) - position)
-        if x + width > right - (0 if position == len(rows) - 1 else
-                                display.measure_text(more, 1) + 8):
-            _text(display, palette, more, x, y, INK_DIM, scale=1)
-            return
-        _marker(display, palette, row, x, y + 1, 6, stale)
-        x += 9
-        _text(display, palette, row["name"], x, y, INK, scale=1)
-        x += display.measure_text(row["name"], 1) + 4
-        rgb = INK_DIM if stale or row["status"] == "ok" else rgb_for_accent(accent_for(row["status"]))
-        _text(display, palette, detail, x, y, rgb, scale=1)
-        x += display.measure_text(detail, 1) + 10
+    # A healthy service shows what it is doing; otherwise its status.
+    detail = (row["usage"].split(" / ")[0] if row["status"] in ("ok", "active")
+              and row["usage"] != "Usage unavailable" else row["status"].upper())
+    # Two spare pixels: the firmware wraps a line whose last word does not
+    # fit, and the text is measured one pixel narrower than it is drawn.
+    detail_w = display.measure_text(detail, 1) + 2
+    text_y = y + (LOCAL_ROW - 8) // 2
+    _marker(display, palette, row, 14, y + (LOCAL_ROW - 6) // 2, 6, stale)
+    _text(display, palette, row["name"], 14 + 6 + 4, text_y, INK, scale=1,
+          max_width=max(0, row_width - 6 - 4 - detail_w - 8))
+    rgb = INK_DIM if stale or row["status"] == "ok" else rgb_for_accent(accent_for(row["status"]))
+    _text(display, palette, detail, 14 + row_width - detail_w, text_y, rgb, scale=1)
 
 
 def draw_sources(display, palette, rows, index, total, status="offline",
                  muted=False, width=240, height=240, scroll=0, stale=False):
-    """Live Home: cloud quota rows, then local services on one line."""
+    """Live Home: the accounts in the saved order, quota rows and local ones."""
     from alerts import rgb_for_accent
     from cards import accent_for
-    from home import SOURCE_TOP, SOURCE_HEIGHT, SOURCE_ROW, LOCAL_Y, home_split, scroll_limit
+    from home import SOURCE_TOP, SOURCE_HEIGHT, home_layout, home_total_height, scroll_limit
     display.set_pen(palette.pen(BACKGROUND))
     display.clear()
     accent = rgb_for_accent(accent_for(status), 0.45 if muted else 1.0)
     display.set_pen(palette.pen(accent))
     display.rectangle(0, 0, 5, height)
 
-    listed, local = home_split(rows)
-    limit = scroll_limit(len(listed), SOURCE_ROW, SOURCE_HEIGHT)
+    layout = home_layout(rows)
+    total_height = home_total_height(rows)
+    limit = scroll_limit(total_height, SOURCE_HEIGHT)
     scroll = max(0, min(limit, int(scroll)))
     row_width = width - 14 - MARGIN
     display.set_clip(14, SOURCE_TOP, row_width, SOURCE_HEIGHT)
-    if not listed:
+    if not rows:
         display.set_font("bitmap6")
         _text(display, palette, "No sources enabled", 14, SOURCE_TOP, INK_DIM, scale=1)
-    for position, row in enumerate(listed):
-        y = SOURCE_TOP + position * SOURCE_ROW - scroll
-        if y + SOURCE_ROW <= SOURCE_TOP or y >= SOURCE_TOP + SOURCE_HEIGHT:
-            continue
-        draw = _draw_quota_row if "windows" in row else _draw_local_row
-        draw(display, palette, row, y, row_width, stale)
+    y = SOURCE_TOP - scroll
+    for row, row_height, compact in layout:
+        # The list is clipped at its edges, so a partly scrolled row is cut
+        # there and never drawn over the footer.
+        if y + row_height > SOURCE_TOP and y < SOURCE_TOP + SOURCE_HEIGHT:
+            if compact:
+                _draw_compact_local_row(display, palette, row, y, row_width, stale)
+            elif "windows" in row:
+                _draw_quota_row(display, palette, row, y, row_width, stale)
+            else:
+                _draw_local_row(display, palette, row, y, row_width, stale)
+        y += row_height
     display.remove_clip()
     if limit:
-        thumb = max(12, SOURCE_HEIGHT * SOURCE_HEIGHT // (len(listed) * SOURCE_ROW))
+        thumb = max(12, SOURCE_HEIGHT * SOURCE_HEIGHT // total_height)
         display.set_pen(palette.pen(PANEL))
         display.rectangle(width - 5, SOURCE_TOP, 2, SOURCE_HEIGHT)
         display.set_pen(palette.pen(INK_DIM))
         display.rectangle(width - 5, SOURCE_TOP + (SOURCE_HEIGHT - thumb) * scroll // limit,
                           2, thumb)
-    if local:
-        _draw_local_strip(display, palette, local, LOCAL_Y, row_width, stale)
     display.set_font("bitmap6")
     if stale:
         _text(display, palette, "STALE - retrying", 14, 210, INK_DIM, scale=1)

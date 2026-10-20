@@ -3,15 +3,20 @@
 import importlib.util
 import os
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 import presto_path
 from datetime import datetime, timedelta, timezone
-from home import (DEMO_QUOTAS, HomeScroll, binding_window, quota_label, quota_width,
-                  scroll_limit, source_rows)
+from home import (DEMO_QUOTAS, HomeScroll, LOCAL_ROW, ROW_HEIGHT, SOURCE_HEIGHT, SOURCE_ROW,
+                  SOURCE_TOP, binding_window, home_total_height, quota_label,
+                  quota_width, scroll_limit, source_rows)
 from net import embedded_payload
+from presto_ai_dash.models import SourceSnapshot
+from presto_ai_dash.quotas import quota_report, quota_window
+from test_management import ManagementBase
 from test_ui import Display
 from ui import (AMBER, PANEL, DAILY, WEEKLY, INK_DIM, Palette, draw_home, draw_sources)
 
@@ -434,18 +439,200 @@ class HomeResetBadgeTests(unittest.TestCase):
         self.assertFalse(any(entry[0].startswith("R3") for entry in display.rows))
 
 
+class HomeOrderTests(unittest.TestCase):
+    """Home follows the saved account order, like the swipe cards do."""
+
+    def window(self, percent=14):
+        return {"label": "Weekly", "period_minutes": 10080, "used_percent": percent,
+                "state": "available",
+                "resets_at": (HOME_NOW + timedelta(days=3)).isoformat(),
+                "observed_at": iso_past(minutes=5)}
+
+    def payload(self, order, card_order="accounts"):
+        """A status payload whose sources are quota accounts or local ones."""
+        sources = []
+        for name, kind in order:
+            if kind == "quota":
+                sources.append({"id": name.lower(), "type": "claude", "name": name,
+                                "status": "ok", "quota": {"windows": [self.window()]}})
+            else:
+                sources.append({"id": name.lower(), "type": "litellm", "name": name,
+                                "status": "ok",
+                                "metrics": {"requests_today": 12, "tokens_today": 340}})
+        payload = {"updated_at": HOME_NOW.isoformat(), "sources": sources}
+        if card_order is not None:
+            payload["card_order"] = card_order
+        return payload
+
+    def drawn(self, order, scroll=0, card_order="accounts"):
+        rows = source_rows(self.payload(order, card_order))
+        display = Display()
+        draw_sources(display, Palette(display), rows, 0, 3, scroll=scroll)
+        HomeLayoutTests().assert_layout(display)
+        return rows, display
+
+    def name_positions(self, display, names):
+        """The y of every account name, in the order the names were drawn."""
+        found = []
+        for text, x, y, wrap, scale, font in display.rows:
+            if text in names:
+                found.append((text, y))
+        return found
+
+    def test_the_home_rows_follow_the_saved_order(self):
+        cases = [
+            [("Ollama", "local"), ("Codex", "quota"), ("LiteLLM", "local"), ("Claude", "quota")],
+            [("Ollama", "local"), ("LiteLLM", "local"), ("Claude", "quota")],
+            [("Codex", "quota"), ("Ollama", "local"), ("Claude", "quota"), ("LiteLLM", "local")],
+            [("Codex", "quota"), ("Claude", "quota")],
+            [("Ollama", "local"), ("LiteLLM", "local")],
+            [("Ollama", "local")],
+        ]
+        for order in cases:
+            names = [name for name, _ in order]
+            with self.subTest(order=names):
+                rows, display = self.drawn(order)
+                self.assertEqual([row["name"] for row in rows], names)
+                found = self.name_positions(display, names)
+                self.assertEqual([text for text, _ in found], names)
+                positions = [y for _, y in found]
+                self.assertEqual(positions, sorted(positions))
+
+    def test_a_local_service_among_quota_rows_is_one_compact_line(self):
+        _, display = self.drawn([("Ollama", "local"), ("Codex", "quota")])
+        texts = [text for text, *_ in display.rows]
+        self.assertIn("12 req", texts)                # what the old strip showed
+        self.assertNotIn("12 req / 340 tok", texts)   # one line: the first item only
+        self.assertNotIn("OK", texts)                 # a healthy service shows its usage
+        found = self.name_positions(display, ["Ollama", "Codex"])
+        self.assertEqual([text for text, _ in found], ["Ollama", "Codex"])
+        # The local row keeps its own place, right under the quota row above it.
+        self.assertEqual(found[1][1], SOURCE_TOP + LOCAL_ROW)
+        self.assertLess(found[1][1] - found[0][1], SOURCE_ROW)
+
+    def test_an_all_local_list_keeps_the_two_line_rows(self):
+        _, display = self.drawn([("Ollama", "local"), ("LiteLLM", "local")])
+        texts = [text for text, *_ in display.rows]
+        self.assertIn("OK", texts)                  # the status word
+        self.assertIn("12 req / 340 tok", texts)    # the whole usage line
+        found = self.name_positions(display, ["Ollama", "LiteLLM"])
+        self.assertEqual(found[1][1] - found[0][1], SOURCE_ROW)
+
+    def test_a_legacy_payload_keeps_the_quota_rows_first(self):
+        order = [("Ollama", "local"), ("Codex", "quota")]
+        rows = source_rows(self.payload(order, card_order=None))
+        self.assertEqual([row["name"] for row in rows], ["Codex", "Ollama"])
+
+    def mixed_order(self):
+        """Six accounts: four with quota windows and two local services."""
+        return [("Codex", "quota"), ("Ollama", "local"), ("Claude", "quota"),
+                ("Go", "quota"), ("Ollama Cloud", "quota"), ("LiteLLM", "local")]
+
+    def test_the_scroll_bound_uses_the_total_height_of_the_rows(self):
+        order = self.mixed_order()
+        rows, _ = self.drawn(order)
+        total = 4 * SOURCE_ROW + 2 * LOCAL_ROW
+        self.assertEqual(home_total_height(rows), total)
+        self.assertEqual(scroll_limit(total, SOURCE_HEIGHT), total - SOURCE_HEIGHT)
+        limit = scroll_limit(total, SOURCE_HEIGHT)
+        self.assertGreater(limit, 0)
+        for offset in (0, limit // 2, limit):
+            with self.subTest(offset=offset):
+                self.drawn(order, scroll=offset)
+        names = [name for name, _ in order]
+        _, display = self.drawn(order, scroll=limit)
+        found = self.name_positions(display, names)
+        self.assertEqual(found[-1][0], names[-1])
+        # The last row is fully inside the list at the bottom of the scroll.
+        self.assertGreaterEqual(found[-1][1], SOURCE_TOP)
+        self.assertLessEqual(found[-1][1] + 8, SOURCE_TOP + SOURCE_HEIGHT)
+        # One pixel past the limit does not scroll further.
+        _, beyond = self.drawn(order, scroll=limit + 1)
+        self.assertEqual(self.name_positions(beyond, names)[-1], found[-1])
+
+    def test_the_scrollbar_thumb_follows_the_total_height(self):
+        order = self.mixed_order()
+        rows, _ = self.drawn(order)
+        total = home_total_height(rows)
+        limit = scroll_limit(total, SOURCE_HEIGHT)
+        _, display = self.drawn(order, scroll=limit)
+        thumbs = [args for pen, args in display.rectangles
+                  if pen == INK_DIM and args[0] == 235 and args[2] == 2]
+        self.assertEqual(len(thumbs), 1)
+        x, y, width, height = thumbs[0]
+        self.assertEqual(height, max(12, SOURCE_HEIGHT * SOURCE_HEIGHT // total))
+        self.assertLessEqual(y + height, SOURCE_TOP + SOURCE_HEIGHT)
+
+    def test_the_list_is_clipped_while_its_rows_are_drawn(self):
+        order = self.mixed_order()
+        _, display = self.drawn(order, scroll=10)
+        self.assertTrue(display.rows)
+        for index, entry in enumerate(display.rows):
+            self.assertEqual(display.row_clips[index],
+                             (14, SOURCE_TOP, 218, SOURCE_HEIGHT), entry[0])
+
+
+class HomeOrderEndToEndTests(ManagementBase):
+    """A real account reorder moves the Home rows as it moves the cards."""
+
+    def accounts(self):
+        """Three quota accounts and two local services, saved in this order."""
+        self.disable_fake()
+        rows = []
+        for index, (name, kind) in enumerate((("Ollama", "local"), ("Codex", "quota"),
+                                              ("LiteLLM", "local"), ("Claude", "quota"),
+                                              ("Go", "quota"))):
+            if kind == "quota":
+                row = self.manager.save({
+                    "type": "claude", "name": name, "enabled": True,
+                    "config": {"settings_path": str(Path(self.temp.name) / ("settings-%d.json" % index))}})
+                report = quota_report("claude", name, [
+                    quota_window("a", "Weekly", 14, HOME_NOW + timedelta(days=3), HOME_NOW,
+                                 period_minutes=10080)])
+                self.storage.save_snapshot(
+                    SourceSnapshot(row["id"], "ok", metrics={"quota": report}))
+            else:
+                row = self.manager.save({"type": "litellm", "name": name, "enabled": True})
+                self.storage.save_snapshot(
+                    SourceSnapshot(row["id"], "ok", metrics={"requests_today": 12}))
+            rows.append(row)
+        return rows
+
+    def test_home_follows_a_real_account_reorder(self):
+        rows = self.accounts()
+        original = [row["id"] for row in self.manager.list_sources()["sources"]]
+        wanted = [rows[3]["id"], rows[0]["id"], rows[4]["id"], rows[2]["id"], rows[1]["id"]]
+        order = wanted + [key for key in original if key not in wanted]
+        self.manager.reorder({"order": order, "expected_order": original})
+        payload = self.manager.status_payload()
+        self.assertEqual(payload["card_order"], "accounts")
+        card_names = [card["title"] for card in payload["cards"][1:]]
+        self.assertEqual(card_names, ["Claude", "Ollama", "Go", "LiteLLM", "Codex"])
+        home_rows = source_rows(payload)
+        self.assertEqual([row["name"] for row in home_rows], card_names)
+        display = Display()
+        draw_sources(display, Palette(display), home_rows, 0, len(payload["cards"]))
+        HomeLayoutTests().assert_layout(display)
+        found = [(text, y) for text, x, y, wrap, scale, font in display.rows
+                 if text in card_names]
+        self.assertEqual([text for text, _ in found], card_names)
+        positions = [y for _, y in found]
+        self.assertEqual(positions, sorted(positions))
+
+
 class HomeScrollTests(unittest.TestCase):
     def test_list_size_controls_scroll_bounds(self):
-        self.assertEqual([scroll_limit(n) for n in (0, 2, 3, 4, 8)], [0, 0, 0, 50, 250])
+        self.assertEqual([scroll_limit(n * ROW_HEIGHT) for n in (0, 2, 3, 4, 8)],
+                         [0, 0, 0, 50, 250])
 
     def test_short_list_cannot_scroll(self):
-        scroll = HomeScroll(2)
+        scroll = HomeScroll(2 * ROW_HEIGHT)
         scroll.update(True, 100, 180)
         scroll.update(True, 100, 80)
         self.assertEqual(scroll.offset, 0)
 
     def test_drag_clamps_at_both_ends(self):
-        scroll = HomeScroll(4)
+        scroll = HomeScroll(4 * ROW_HEIGHT)
         scroll.update(True, 100, 180)
         scroll.update(True, 100, -100)
         self.assertEqual(scroll.offset, 50)
@@ -456,13 +643,13 @@ class HomeScrollTests(unittest.TestCase):
 
     def test_header_drag_and_disabled_card_do_not_scroll(self):
         for y, enabled in ((20, True), (120, False)):
-            scroll = HomeScroll(4)
+            scroll = HomeScroll(4 * ROW_HEIGHT)
             scroll.update(True, 100, y, enabled)
             scroll.update(True, 100, y - 100, enabled)
             self.assertEqual(scroll.offset, 0)
 
     def test_horizontal_axis_stays_locked_despite_later_vertical_movement(self):
-        scroll = HomeScroll(4)
+        scroll = HomeScroll(4 * ROW_HEIGHT)
         scroll.update(True, 100, 180)
         scroll.update(True, 120, 180)
         scroll.update(True, 120, 80)

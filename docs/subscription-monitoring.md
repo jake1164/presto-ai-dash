@@ -93,6 +93,14 @@ M11 connects the reusable windows to Home:
   percentage (`5h 72%  Wk 96%  Mo 41%`), coloured by period (cyan up to a day,
   purple longer, orange monthly, red at limit), then one stacked bar per
   window. Countdowns use the payload's `updated_at`, not the device clock.
+- Home follows the saved account order, the same order as the swipe cards:
+  the admin page can re-order the accounts and Home shows them in that order,
+  quota accounts and local services alike. A local service among quota
+  accounts is a compact one-line row at its own place (status marker, name,
+  and on the right the same status or usage the old bottom strip showed).
+  When no quota account exists the local services are the list and keep their
+  two-line rows. The list scrolls by its total height, so the mixed row
+  heights scroll correctly and the last row stays fully reachable.
 - Honest states: a stale window reads `last known 6d ago` (no age while the
   device itself is cut off), a passed reset reads `awaiting refresh`, an
   unknown window shows `--` (distinct from a measured `0%`), and an
@@ -127,8 +135,10 @@ M11 connects the reusable windows to Home:
   `Credits: 0` on its detail card, and a small `R3` badge on Home that turns
   amber with the time left (`R3 2d`) when the earliest expiry is 72 hours
   away or less; the project never redeems a reset.
-- Local services (Ollama, LiteLLM) are health, not allowance: they share one
-  line under the cloud rows, or become the list when no quota account exists.
+- Local services (Ollama, LiteLLM) are health, not allowance: among quota
+  accounts each one is a compact one-line row at its own place in the saved
+  order, and they become the list, with two lines each, when no quota
+  account exists.
 - Show additional windows, such as Go's monthly allowance, in the same reusable
   grouped Home row. Do not drop them or label them as weekly to fit two bars.
 - Generate one swipe card per enabled account, including new source types and

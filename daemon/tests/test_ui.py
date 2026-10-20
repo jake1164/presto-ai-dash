@@ -1,11 +1,20 @@
 """Regression checks for single-row text on the 240px Presto framebuffer."""
 
+import os
+import sys
 import unittest
 
 import presto_path  # noqa: F401
 from cards import Card, parse_cards
+from home import source_rows
 from net import embedded_payload
-from ui import Palette, _text, draw_card, INK
+from ui import Palette, _text, draw_card, draw_sources, INK
+
+PREVIEW_DIR = os.path.join(presto_path.REPO_ROOT, "tools", "presto_preview")
+if PREVIEW_DIR not in sys.path:
+    sys.path.append(PREVIEW_DIR)
+
+from framebuffer import Framebuffer  # noqa: E402
 
 
 class Display:
@@ -101,6 +110,96 @@ class TextLayoutTests(unittest.TestCase):
         text, _, _, wrap, scale, _ = display.rows[0]
         self.assertEqual(wrap, 138)
         self.assertLessEqual(display.measure_text(text, scale), wrap)
+
+
+class HomeRowTextTests(unittest.TestCase):
+    """The compact local row keeps its name and its right-hand detail apart."""
+
+    def rows(self, name="Local service", status="ok"):
+        payload = {"updated_at": "2026-10-20T12:00:00+00:00", "card_order": "accounts",
+                   "sources": [
+                       {"id": "cloud", "type": "claude", "name": "Cloud", "status": "ok",
+                        "quota": {"windows": [{"label": "Weekly", "period_minutes": 10080,
+                                               "used_percent": 14, "state": "available",
+                                               "resets_at": "2026-10-25T12:00:00+00:00",
+                                               "observed_at": "2026-10-20T11:55:00+00:00"}]}},
+                       {"id": "local", "type": "litellm", "name": name, "status": status,
+                        "metrics": {"requests_today": 12, "tokens_today": 340}}]}
+        return source_rows(payload)
+
+    def test_the_name_makes_room_for_the_detail(self):
+        display = Display()
+        draw_sources(display, Palette(display), self.rows(), 0, 3)
+        drawn = {text: (x, y) for text, x, y, wrap, scale, font in display.rows}
+        self.assertIn("Local service", drawn)
+        self.assertIn("12 req", drawn)
+        name_x, name_y = drawn["Local service"]
+        detail_x, detail_y = drawn["12 req"]
+        self.assertEqual(name_y, detail_y)
+        display.set_font("bitmap8")
+        self.assertLessEqual(name_x + display.measure_text("Local service", 1), detail_x)
+
+    def test_a_long_name_is_shortened_instead_of_overlapping(self):
+        display = Display()
+        draw_sources(display, Palette(display),
+                     self.rows(name="A very long local service name indeed"), 0, 3)
+        texts = [text for text, *_ in display.rows]
+        self.assertTrue(any(text.endswith("~") for text in texts), texts)
+        drawn = {text: (x, y) for text, x, y, wrap, scale, font in display.rows}
+        name = [text for text in texts if text.endswith("~")][0]
+        name_x, name_y = drawn[name]
+        detail_x, detail_y = drawn["12 req"]
+        self.assertEqual(name_y, detail_y)
+        display.set_font("bitmap8")
+        self.assertLessEqual(name_x + display.measure_text(name, 1), detail_x)
+
+    def test_an_unhealthy_service_shows_its_status_instead_of_its_usage(self):
+        display = Display()
+        draw_sources(display, Palette(display), self.rows(status="offline"), 0, 3)
+        texts = [text for text, *_ in display.rows]
+        self.assertIn("OFFLINE", texts)
+        self.assertNotIn("12 req", texts)
+
+
+class FirmwareTextFitTests(unittest.TestCase):
+    """The firmware wraps a line whose last word does not fit.
+
+    The real framebuffer uses the device's own font metrics, so this is the
+    only check that sees the text the way the Presto draws it.
+    """
+
+    def rows(self):
+        payload = {"updated_at": "2026-10-20T12:00:00+00:00", "card_order": "accounts",
+                   "sources": [
+                       {"id": "cloud", "type": "claude", "name": "Cloud account", "status": "ok",
+                        "quota": {"windows": [{"label": "Weekly", "period_minutes": 10080,
+                                               "used_percent": 14, "state": "available",
+                                               "resets_at": "2026-10-25T12:00:00+00:00",
+                                               "observed_at": "2026-10-20T11:55:00+00:00"}]}},
+                       {"id": "local", "type": "litellm", "name": "Local service", "status": "ok",
+                        "metrics": {"requests_today": 12, "tokens_today": 340}}]}
+        return source_rows(payload)
+
+    def test_no_home_line_wraps_onto_a_second_line(self):
+        display = Framebuffer()
+        calls = []
+        original_text = display.text
+
+        def record(text, x, y, wrap=-1, scale=2, angle=0, spacing=1, fixed_width=False):
+            calls.append((text, x, y, wrap, scale, display.font))
+            return original_text(text, x, y, wrap, scale, angle, spacing, fixed_width)
+
+        display.text = record
+        draw_sources(display, Palette(display), self.rows(), 0, 3)
+        self.assertTrue(calls)
+        for text, x, y, wrap, scale, font in calls:
+            if " " not in text:
+                continue  # one word is never wrapped
+            display.font = font
+            # The firmware draws a word when it fits; the measured width is
+            # one pixel narrower than the drawn one.
+            self.assertLessEqual(display.measure_text(text, scale) + 1, wrap,
+                                 "%r at %d,%d" % (text, x, y))
 
 
 if __name__ == "__main__":

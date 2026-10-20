@@ -24,7 +24,8 @@ class _IngestRateLimiter:
     """Two-second per-token throttle for the ingest route.
 
     Only tokens that passed authentication become entries, and the map drops
-    or clears old entries instead of growing without bound.
+    or clears old entries instead of growing without bound. The server is
+    multi-threaded, so the map is only read and written under the lock.
     """
 
     INTERVAL_SECONDS = 2.0
@@ -32,22 +33,24 @@ class _IngestRateLimiter:
 
     def __init__(self):
         self._seen = {}
+        self._lock = threading.Lock()
 
     def check(self, key, now):
         """Whether a request with this key may proceed; it is registered when so."""
-        seen = {past_key: past for past_key, past in self._seen.items()
-                if now - past < self.INTERVAL_SECONDS}
-        self._seen = seen
-        if key in seen:
-            return False
-        if len(seen) >= self.MAX_ENTRIES:
-            seen.clear()
-        seen[key] = now
-        return True
+        with self._lock:
+            seen = {past_key: past for past_key, past in self._seen.items()
+                    if now - past < self.INTERVAL_SECONDS}
+            self._seen = seen
+            if key in seen:
+                return False
+            if len(seen) >= self.MAX_ENTRIES:
+                seen.clear()
+            seen[key] = now
+            return True
 
 
 def make_handler(storage, shared_token, source_ids=None, status_provider=None,
-                 ingest_enabled=None, ingest_rate_limiter=None):
+                 *, ingest_enabled=None, ingest_rate_limiter=None):
     if not shared_token:
         raise ValueError("API requires a nonempty shared token")
     limiter = ingest_rate_limiter if ingest_rate_limiter is not None else _IngestRateLimiter()
@@ -176,13 +179,14 @@ class _ExclusiveHTTPServer(ThreadingHTTPServer):
 
 class ApiServer:
     def __init__(self, host, port, storage, shared_token, source_ids=None,
-                 status_provider=None, ingest_enabled=None, ingest_rate_limiter=None,
+                 status_provider=None, *, ingest_enabled=None, ingest_rate_limiter=None,
                  handler_class=None):
         self.host = host
         self._server = _ExclusiveHTTPServer(
             (host, port), handler_class or make_handler(
                 storage, shared_token, source_ids, status_provider,
-                ingest_enabled, ingest_rate_limiter))
+                ingest_enabled=ingest_enabled,
+                ingest_rate_limiter=ingest_rate_limiter))
         self._server.daemon_threads = False
         self._server.block_on_close = True
         self._server._active_condition = threading.Condition()

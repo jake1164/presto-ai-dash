@@ -6,11 +6,12 @@ LIST_TOP = 56
 LIST_HEIGHT = 150
 ROW_HEIGHT = 50
 
-# Live Home: cloud quota rows from the top edge, local services on one line.
+# Live Home: the accounts in the order they are saved. A quota account is two
+# lines; a local service among quota rows is one compact line.
 SOURCE_TOP = 4
 SOURCE_HEIGHT = 184
 SOURCE_ROW = 46
-LOCAL_Y = 194
+LOCAL_ROW = 18
 
 DEMO_QUOTAS = (
     {"name": "OpenAI", "daily": 62, "weekly": 38},
@@ -20,13 +21,40 @@ DEMO_QUOTAS = (
 )
 
 
-def scroll_limit(count, row_height=ROW_HEIGHT, height=LIST_HEIGHT):
-    return max(0, count * row_height - height)
+def scroll_limit(total_height, height=LIST_HEIGHT):
+    """How far a list of this total height scrolls inside the region."""
+    return max(0, total_height - height)
 
 
-def source_row_height(rows):
-    """Every live row is two lines, however many windows it stacks."""
-    return SOURCE_ROW
+def home_layout(rows):
+    """The Home list as (row, height, compact) triples, in drawing order.
+
+    A quota account keeps its two lines. A local service is a compact
+    one-line row at its own position, unless no quota account is on the
+    list: then the local services are the list and keep their two lines.
+    """
+    compact = False
+    for row in rows:
+        if "windows" in row:
+            compact = True
+            break
+    layout = []
+    for row in rows:
+        if "windows" in row:
+            layout.append((row, SOURCE_ROW, False))
+        elif compact:
+            layout.append((row, LOCAL_ROW, True))
+        else:
+            layout.append((row, SOURCE_ROW, False))
+    return layout
+
+
+def home_total_height(rows):
+    """The height of the whole list: scrolling uses this, not a row count."""
+    total = 0
+    for entry in home_layout(rows):
+        total += entry[1]
+    return total
 
 
 def iso_seconds(text):
@@ -156,17 +184,6 @@ def home_windows(row):
     return shown or windows[:1]
 
 
-def home_split(rows):
-    """Cloud quota rows fill Home; local services share one line beneath.
-
-    With no quota accounts at all, local services are the list instead.
-    """
-    cloud = [row for row in rows if "windows" in row]
-    local = [row for row in rows if "windows" not in row]
-    return (cloud, local) if cloud else (local, [])
-
-
-
 def source_rows(payload):
     """Reusable per-instance summaries; absent usage is never a zero or quota."""
     from cards import normalise_status
@@ -243,17 +260,17 @@ def source_rows(payload):
 class HomeScroll(object):
     """Finger-following vertical scroll; horizontal drags belong to cards."""
 
-    def __init__(self, count, row_height=ROW_HEIGHT, top=LIST_TOP, height=LIST_HEIGHT):
+    def __init__(self, total_height=0, top=LIST_TOP, height=LIST_HEIGHT):
         self.top, self.height = top, height
-        self.limit = scroll_limit(count, row_height, height)
+        self.limit = scroll_limit(total_height, height)
         self.offset = 0
         self._down = False
         self._axis = None
 
-    def set_count(self, count, row_height=ROW_HEIGHT, top=None, height=None):
+    def set_height(self, total_height, top=None, height=None):
         if top is not None:
             self.top, self.height = top, height
-        self.limit = scroll_limit(count, row_height, self.height)
+        self.limit = scroll_limit(total_height, self.height)
         self.offset = min(self.offset, self.limit)
 
     def update(self, touched, x, y, enabled=True):

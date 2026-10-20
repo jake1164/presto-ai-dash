@@ -34,8 +34,8 @@ from gestures import (
     TAP,
     GestureRecogniser,
 )
-from home import (DEMO_QUOTAS, HomeScroll, SOURCE_HEIGHT, SOURCE_TOP, home_split,
-                  source_rows, source_row_height)
+from home import (DEMO_QUOTAS, HomeScroll, ROW_HEIGHT, SOURCE_HEIGHT, SOURCE_TOP,
+                  home_total_height, source_rows)
 from net import (
     StatusClient,
     StatusError,
@@ -113,7 +113,7 @@ class App(object):
 
         self.cards = []
         self.index = 0
-        self.home_scroll = HomeScroll(len(DEMO_QUOTAS))
+        self.home_scroll = HomeScroll(len(DEMO_QUOTAS) * ROW_HEIGHT)
         self._touch_x = 0
         self._touch_y = 0
         self.detail_open = False
@@ -186,9 +186,10 @@ class App(object):
             self.last_good_at = _now_ms()
             if not self.static_demo:
                 self.live_rows = source_rows(payload)
-                self.home_scroll.set_count(len(home_split(self.live_rows or [])[0]),
-                                           source_row_height(self.live_rows or []),
-                                           SOURCE_TOP, SOURCE_HEIGHT)
+                # The list scrolls by its total height: quota rows and the
+                # compact local rows are not the same height.
+                self.home_scroll.set_height(home_total_height(self.live_rows or []),
+                                            SOURCE_TOP, SOURCE_HEIGHT)
         self.index = next((i for i, card in enumerate(cards) if card.id == selected), 0)
         if selected is not None and self._current_card().id != selected:
             self.detail_open = False

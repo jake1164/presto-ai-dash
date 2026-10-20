@@ -13,6 +13,7 @@ not start a phase until the previous one passes its tests.
 | 3 | `POST /api/v1/ingest`, tokens (schema v7), admin controls | Done |
 | 4 | Freshness hints and the Presto display | Done (2026-10-18) |
 | 5 | Claude activity from local session logs (VS Code panel and CLI); 5b Stop hook and 5c remote push optional | Done (2026-10-19) |
+| 5d | Claude usage cache reader: quota for VS Code panel users from `~/.claude.json` | **Proposed, high value** |
 | 6 | Codex over push | Optional |
 | 7 | "Adding a source" guide and template | Not started (an earlier attempt was discarded) |
 | 8 | OpenTelemetry activity detail | Optional, only if asked |
@@ -492,6 +493,59 @@ than Phase 5.
 unknown keys still rejected) and a collector mode that runs the reader on the
 Claude machine and pushes it, so a containerised daemon gets activity too.
 
+### Phase 5d (proposed 2026-10-20): Claude usage cache reader (panel quota)
+
+**Finding (verified read-only on the author's machine, numbers and key names
+only).** Claude Code writes the data behind its `/usage` dialog to
+`~/.claude.json` under `cachedUsageUtilization`: `fetchedAtMs`,
+`utilization.five_hour` and `.seven_day` (`utilization` percent and
+`resets_at`), a `limits[]` list (`kind` session / weekly_all, `percent`,
+`resets_at`, `severity`), and extras (an included credit with `limit_dollars`,
+`used_dollars` and `resets_at`; a weekly breakdown by surface; spend and extra
+usage state). The numbers equalled the author's VS Code `/usage` popup
+exactly (12% / 66%, same resets). The cache refreshes at irregular moments,
+not on every response: observed fetches on 10-18 20:23 (a terminal session),
+10-19 20:10, 10-20 05:29 and 05:40 (the moment `/usage` was opened, which
+forces a refresh). Claude Code's own backups of the file
+(`~/.claude/backups/.claude.json.backup.*`) preserve the history. The banked
+"Full reset" is NOT in the file. This corrects the earlier conclusion that the
+VS Code panel cannot supply quota: it cannot via the status line, but its data
+is on disk.
+
+**Proposed design (a third quota observation source).**
+- A pull reader inside the daemon, opt-in (its own checkbox, off by default,
+  separate from the activity reader because it opens a more sensitive file).
+  It reads `<profile>/.claude.json` (default `~/.claude.json`; confirm the
+  per-profile location for `CLAUDE_CONFIG_DIR`), checks mtime first, parses
+  the file in memory, and extracts ONLY `fetchedAtMs`, the `five_hour` and
+  `seven_day` utilization and `resets_at`, and optionally the `limits[]`
+  kind/percent/resets_at. It never stores, logs or returns any other field
+  (account id, email, organisation, projects, tokens). It must not use the
+  obfuscated codename keys (they will change).
+- Output becomes a normal quota observation (windows five_hour and seven_day)
+  through the existing observation path, with `observed_at` = `fetchedAtMs`
+  (a provider timestamp on the same machine, capped at now) and a provenance
+  label "usage cache" next to the existing "terminal export". The newest
+  reading per window wins, whatever its source; each card and admin line says
+  which source produced the number it shows.
+- Unofficial format (assumption E again): any parse problem degrades to
+  "unavailable" and never raises.
+- Hints: with a fresh cache reading, the hint disappears; with an old one, the
+  hint tells the user that opening `/usage` in the panel refreshes it (the
+  documented trigger).
+- Detail card, within the six-line cap and the provenance rule: the optional
+  included credit line ("Credit: $100 of $100 (exp 11-05)") only if room
+  remains after the existing lines.
+- Docker/remote: the file lives on the Claude machine, so a containerised
+  daemon needs the collector to read and push it (extends Phase 5c).
+- Update the report note and docs: quota arrives from terminal sessions and
+  from Claude Code's usage cache; the panel refreshes the cache when `/usage`
+  is opened or at irregular moments.
+
+Open points for the author: confirm the per-profile path; how often Claude
+Code refreshes the cache passively (watch the backups over a few days);
+whether the included-credit line is wanted.
+
 ### Phase 6 (optional): Codex over push
 
 Write `collectors/codex_appserver.py` that runs on the developer machine,
@@ -638,7 +692,21 @@ In order, after Phase 9 and the provenance fixes land:
 
 1. **M12 alert polish.** Needs decisions first (LED colour for "in use" versus
    a warning, default thresholds, whether a stale reading may ever alert,
-   sounds and quiet hours).
+   sounds and quiet hours). Also in scope (author, 2026-10-20): **an alarm
+   pop-to-top**, where Home scrolls to the alarmed service. It needs
+   debouncing so it never bounces: act only after the alarm has persisted for
+   a set time; at most once per service per cool-down period; never while the
+   user is touching the screen or has scrolled recently; return to the user's
+   previous position after a timeout; and a new alarm must be worse than the
+   one already shown. The Home overflow strip's "worst hidden status" is the
+   building block that tells the device which hidden service is alarmed.
+1a. **Home overflow strip (decided 2026-10-20, runs before Phase 5d).** The
+   Home list shows full rows in the saved order until the space runs out. The
+   rows that are not fully visible appear as names, each with a status marker,
+   in a strip at the bottom; `+N` takes the worst hidden status colour. As the
+   user scrolls, rows move between the strip and the list. The strip is
+   configurable in the admin page, 0 to 3 lines, default 1 (0 turns it off),
+   and it disappears entirely when the whole list fits.
 2. **Small changes (all):**
    - **Home follows the saved account order.** The swipe cards already do.
      Home currently groups cloud rows first and puts local services in a
@@ -646,11 +714,27 @@ In order, after Phase 9 and the provenance fixes land:
      a local service is a compact one-line row at its own position (marker,
      name, status or usage), with scrolling that handles mixed row heights.
      Runs after Phase 9 because both change `presto/home.py` and `ui.py`.
+     **Done 2026-10-20**: Home rows follow the saved order, the bottom strip
+     is gone, a local service among quota accounts is a compact one-line row,
+     an all-local list keeps its two-line rows, and the list scrolls by its
+     total height.
    - Lock the ingest rate limiter (two lines).
+     **Done 2026-10-20**: `check()` runs under a lock, with a stress test.
    - Make `handler_class` keyword-only in `ApiServer`.
+     **Done 2026-10-20**: every argument after `status_provider` is
+     keyword-only, in `ApiServer.__init__` and in `make_handler`.
    - Decide the weekly-reset estimate across the Nov 1 clock change (ignore
      it, or add a timezone setting; a container defaults to UTC).
+     **Done 2026-10-20**: the estimate is not changed; `docs/claude.md` now
+     says what it assumes and when it must be checked against a real reading.
    - Re-check the one intermittent `test_management` failure seen once.
+     **Done 2026-10-20, not reproduced**: 30 runs of `test_management` and 5
+     full-suite runs (612 tests each) all passed with no ERROR or FAIL, so
+     nothing was changed. The suspects stay open: the admin handler answers a
+     rejected CSRF/Origin request before reading its body, and closing a
+     socket with an unread body is what makes Windows reset the connection
+     (the same quirk the 413 path already works around). That is a
+     hypothesis, not a confirmed cause.
 3. **Phase 7**, the source guide and template (pull sources now; add a
    "Running in Docker" section after the Docker work).
 4. **Phase 8**, OpenTelemetry, as extra detail (cost, duration, errors). First
@@ -667,11 +751,14 @@ In order, after Phase 9 and the provenance fixes land:
 
 ## Known leftovers (from reviews of Phases 1-3)
 
-- The ingest rate limiter (`api.py`) has no lock while the server is
-  multi-threaded. A stress test found no failures and real traffic is a few
-  posts a minute, so the risk is theoretical; a lock is a two-line fix.
-- `ApiServer.__init__` gained arguments before `handler_class`; a caller that
-  passes `handler_class` positionally would break. Only keyword callers exist.
+- The ingest rate limiter (`api.py`) had no lock while the server is
+  multi-threaded. **Fixed 2026-10-20**: `check()` now runs under a lock,
+  and a stress test covers the map bound and the one-accept-per-interval
+  rule.
+- `ApiServer.__init__` had gained arguments before `handler_class`, so a
+  caller that passed `handler_class` positionally would have broken.
+  **Fixed 2026-10-20**: every argument after `status_provider` is
+  keyword-only, in `ApiServer.__init__` and in `make_handler`.
 - Never exercised: a real collector on a second computer, the Windows
   PowerShell snippet from a real remote Claude session, and the POSIX
   collector paths (state directory permissions, `O_NOFOLLOW`); the tests for

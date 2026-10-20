@@ -11,8 +11,8 @@ from unittest.mock import patch
 import presto_path
 from datetime import datetime, timedelta, timezone
 from home import (DEMO_QUOTAS, HomeScroll, LOCAL_ROW, ROW_HEIGHT, SOURCE_HEIGHT, SOURCE_ROW,
-                  SOURCE_TOP, STRIP_LINE_HEIGHT, binding_window, home_total_height, quota_label,
-                  quota_width, scroll_limit, source_rows)
+                  SOURCE_TOP, STRIP_LINE_HEIGHT, alert_settings, binding_window,
+                  home_total_height, quota_label, quota_width, scroll_limit, source_rows)
 from net import embedded_payload
 from presto_ai_dash.models import SourceSnapshot
 from presto_ai_dash.quotas import quota_report, quota_window
@@ -745,3 +745,24 @@ class RowAtTests(unittest.TestCase):
         self.assertIsNone(row_at(layout, 0, 2))                        # above the list
         self.assertIsNone(row_at(layout, 0, 4 + layout.region))        # the strip band
         self.assertIsNone(row_at(layout, 0, 235))                      # the footer
+
+
+class AlertSettingsTests(unittest.TestCase):
+    """The alert settings the daemon sends, and what the device does with them."""
+
+    def test_the_defaults_are_used_when_the_key_is_missing(self):
+        self.assertEqual(alert_settings({}),
+                         {"quiet": False, "sound": True, "pop_to_top": True})
+
+    def test_the_settings_are_read(self):
+        payload = {"alerts": {"quiet": True, "sound": False, "pop_to_top": False}}
+        self.assertEqual(alert_settings(payload),
+                         {"quiet": True, "sound": False, "pop_to_top": False})
+
+    def test_junk_is_ignored(self):
+        for payload in ({"alerts": "nonsense"}, {"alerts": None}, {"alerts": []},
+                        {"alerts": {"quiet": "yes", "sound": 1, "pop_to_top": None}},
+                        {"alerts": {"quiet": 1}}, "nonsense", None, 5):
+            with self.subTest(payload=payload):
+                self.assertEqual(alert_settings(payload),
+                                 {"quiet": False, "sound": True, "pop_to_top": True})

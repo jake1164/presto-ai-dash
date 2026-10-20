@@ -14,7 +14,7 @@ touchscreen. Start with `README.md`; `docs/milestones.md` says what is built.
   Bitmap fonts only. Keep on-screen text ASCII.
 - Never read, print, commit or paste the contents of `dash.toml`, `dash.db`,
   `dash.db.key`, `presto/config.py` or `presto/secrets.py`. They hold tokens and keys.
-- The app only observes. It must never take an action on a provider account:
+- The app only observes provider accounts. It must never take an action on a provider account:
   no spending or redeeming credits or resets, no changing plans or limits, no
   sending prompts or model requests to generate data, no provider-side writes of
   any kind. Provider calls are reads of documented usage/limit data. The only
@@ -23,6 +23,9 @@ touchscreen. Start with `README.md`; `docs/milestones.md` says what is built.
   removing the Claude status-line export. These never run from polling or from
   a remote request. If a provider's API offers an action (for example Codex's
   reset-credit redeem method), do not wire it up.
+  Settings of this app's own daemon are not provider accounts: the user may change
+  them in the admin page, and the Presto may change the ones documented for it
+  (for example a service's alerts on/off) through the daemon's API.
 - Do not claim a UI change works because tests pass. Look at it (below).
 - `presto/` is the single app source. Do not make simulator-specific copies of
   app logic. `tools/presto_bundle.py` defines its shared inventory. After edits,

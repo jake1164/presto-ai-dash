@@ -9,6 +9,7 @@
   let busy = false;
   let dragging = null;
   let ingestState = null, tokenReveal = null, displayState = null;
+  let alertsState = null;
   let statusState = null, configState = null;
   let activeTab = "services";
   // Which account cards are open. Kept across the ten-second refresh, so the
@@ -119,7 +120,7 @@
       catch (_) { window.location.hash = TAB_HASHES[tab]; }
     }
     if (tab === "status") refreshStatus();
-    if (tab === "settings") refreshConfig();
+    if (tab === "settings") { refreshConfig(); loadAlerts(); }
   }
   function moveTabFocus(from, step) {
     const index = TABS.indexOf(from);
@@ -160,6 +161,46 @@
     element("overflow-rows").value = String(value ?? 1);
     element("overflow-rows").disabled = !!displayState?.locked_by_environment;
     element("display-lock").hidden = !displayState?.locked_by_environment;
+  }
+  async function loadAlerts() {
+    // The alert settings travel with the status payload, so they are read on
+    // their own, like the display settings.
+    try {
+      alertsState = await request("/api/admin/alerts");
+      renderAlerts();
+    } catch (_) { /* keep the last known settings */ }
+  }
+  function renderAlerts() {
+    const state = alertsState || {};
+    element("alert-warning").value = String(state.warning_percent ?? 80);
+    element("alert-critical").value = String(state.critical_percent ?? 95);
+    element("alert-sound").checked = state.sound !== false;
+    element("alert-quiet").checked = !!state.quiet_hours;
+    element("alert-quiet-start").value = state.quiet_start ?? "22:00";
+    element("alert-quiet-end").value = state.quiet_end ?? "07:00";
+    element("alert-pop").checked = state.pop_to_top !== false;
+    element("alert-quiet-now").hidden = !state.quiet;
+  }
+  function alertValues() {
+    return {
+      warning_percent: Number(element("alert-warning").value),
+      critical_percent: Number(element("alert-critical").value),
+      sound: element("alert-sound").checked,
+      quiet_hours: element("alert-quiet").checked,
+      quiet_start: element("alert-quiet-start").value || "00:00",
+      quiet_end: element("alert-quiet-end").value || "00:00",
+      pop_to_top: element("alert-pop").checked,
+    };
+  }
+  async function saveAlerts() {
+    if (busy) { renderAlerts(); return; }
+    busy = true;
+    try {
+      alertsState = await request("/api/admin/alerts", "PUT", alertValues());
+      message("Alerts saved: warning at " + alertsState.warning_percent + "%, critical at " +
+        alertsState.critical_percent + "%.");
+    } catch (error) { message(error.message, true); }
+    finally { busy = false; renderAlerts(); }
   }
   async function refreshConfig() {
     try {
@@ -771,6 +812,7 @@
   function lock() {
     csrfToken = ""; unlocked = false; sources = []; catalog = []; editing = null;
     ingestState = null; tokenReveal = null; displayState = null;
+    alertsState = null;
     statusState = null; configState = null; expanded.clear();
     element("admin-token").value = ""; element("source-form").reset();
     element("source-list").replaceChildren(); element("source-fields").replaceChildren();
@@ -781,6 +823,7 @@
     await reload();
     await loadIngest();
     await loadDisplay();
+    await loadAlerts();
     element("source-type").replaceChildren(...catalog.map((type) => {
         const option = document.createElement("option"); option.value = type.id;
         option.textContent = type.id === "fake" ? "Fake (demo/test data)" : type.name; return option;
@@ -874,8 +917,11 @@
     } catch (error) { message(error.message, true); }
     finally { busy = false; renderDisplay(); }
   });
-  element("add-source").addEventListener("click", () => { if (!busy) { openEditor(); message(""); } });
-  element("close-editor").addEventListener("click", () => { if (!busy) closeEditor(); });
+  for (const id of ["alert-warning", "alert-critical", "alert-sound", "alert-quiet",
+    "alert-quiet-start", "alert-quiet-end", "alert-pop"]) {
+    element(id).addEventListener("change", saveAlerts);
+  }
+  element("add-source").addEventListener("click", () => { if (!busy) { openEditor(); message(""); } });  element("close-editor").addEventListener("click", () => { if (!busy) closeEditor(); });
   element("source-type").addEventListener("change", () => {
     element("source-name").value = selectedType()?.name ?? "";
     element("api-key").value = ""; element("clear-key").checked = false; renderFields();

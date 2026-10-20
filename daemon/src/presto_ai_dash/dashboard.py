@@ -1,6 +1,9 @@
 """Render Home and per-account cards, preserving the original fake demo."""
 
 from . import __version__
+from . import quotas
+from .alert_policy import (DEFAULT_CRITICAL_PERCENT, DEFAULT_WARNING_PERCENT,
+                           apply_threshold, threshold_status)
 from .models import Card, iso, now_utc, overall_status, severity
 from .quotas import (QUOTA_SCHEMA_VERSION, age_label, compact_age, compact_tokens,
                      estimated_weekly_reset, present_quota, present_snapshot, timestamp)
@@ -373,16 +376,51 @@ def _account_card(row, snapshot, now=None):
                 secondary=row["type"], detail=[snapshot.error] if snapshot.error else [])
 
 
-def build_instance_payload(snapshots, instances):
-    """Home plus one card per enabled account, without overlapping totals."""
+def _with_threshold(card, snapshot, alerts, now):
+    """Raise a card's status when one of its quota windows crosses a limit.
+
+    The daemon decides the user-facing status; the device only draws it.
+    Only a fresh, available window alerts, and a window that resets within
+    the grace period never does, so a reset or a stale reading can never
+    raise a misleading alert.
+    """
+    if snapshot is None:
+        return card
+    settings = alerts if isinstance(alerts, dict) else {}
+    report = snapshot.metrics.get("quota")
+    level = threshold_status(
+        report,
+        settings.get("warning_percent", DEFAULT_WARNING_PERCENT),
+        settings.get("critical_percent", DEFAULT_CRITICAL_PERCENT),
+        now)
+    if level is None:
+        return card
+    status = apply_threshold(card.status, level)
+    if status == card.status:
+        return card
+    return Card(card.id, card.title, status, card.primary, card.secondary,
+                card.detail, None, card.alert)
+
+
+def build_instance_payload(snapshots, instances, alerts=None, now=None):
+    """Home plus one card per enabled account, without overlapping totals.
+
+    ``alerts`` carries the warning and critical percentages; they decide
+    the user-facing status of a source whose quota window is nearly used.
+    ``now`` is the moment every reading is judged against, so a window's
+    freshness and its reset are read against the same clock.
+    """
+    now = now or quotas.now_utc()
     enabled = [row for row in instances if row["enabled"]]
-    reporting = {row["id"]: present_snapshot(snapshots[row["id"]])
+    reporting = {row["id"]: present_snapshot(snapshots[row["id"]], now)
                  for row in enabled if row["id"] in snapshots}
     fake = next((row for row in enabled if row["type"] == "fake"), None)
     if fake:
         payload = _fake_payload(reporting.get(fake["id"]))
     else:
         states = [_account_card(row, reporting.get(row["id"])) for row in enabled]
+        states = [_with_threshold(card, reporting.get(row["id"]), alerts, now)
+                  for card, row in zip(states, enabled)]
         status = overall_status(states)
         all_alerts = [alert for snapshot in reporting.values() for alert in snapshot.alerts]
         worst = max(all_alerts, key=lambda alert: severity(alert.get("severity"))) if all_alerts else None
@@ -430,6 +468,9 @@ DEVICE_ACTIVITY_KEYS = ("request_count", "usage_usd", "from", "until", "state")
 DEVICE_RESET_KEYS = ("available", "expires_at")
 DEVICE_METRICS_KEYS = ("requests_today", "tokens_today", "loaded_model", "spend_today",
                        "errors_today", "last_measured_tokens_per_sec", "available_models")
+# The top-level keys the device reads, and the keys inside "alerts".
+DEVICE_TOP_KEYS = ("sources", "card_order", "updated_at", "display", "alerts")
+DEVICE_ALERT_KEYS = ("quiet", "sound", "pop_to_top")
 
 
 def _pick(value, keys):

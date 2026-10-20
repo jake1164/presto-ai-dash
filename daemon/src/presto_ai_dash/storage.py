@@ -11,6 +11,11 @@ from datetime import datetime, timedelta, timezone
 from .models import STATUS_ORDER, SourceSnapshot, now_utc
 from .sources import source_type
 
+# The alert settings the admin page can store. Each one is stored under
+# its own name in configuration_meta.
+ALERT_SETTING_KEYS = ("warning_percent", "critical_percent", "sound",
+                      "quiet_hours", "quiet_start", "quiet_end", "pop_to_top")
+
 
 def _utc(moment):
     if not isinstance(moment, datetime):
@@ -391,6 +396,68 @@ class Storage:
                 "INSERT INTO configuration_meta (name, value) VALUES ('overflow_rows', ?)"
                 " ON CONFLICT(name) DO UPDATE SET value=excluded.value",
                 (str(value).encode("ascii"),))
+
+    def alerts_settings(self):
+        """The admin-stored alert settings; only the ones that were set.
+
+        Each value is stored under its own name, so one setting can come
+        from the database while another still comes from dash.toml.
+        """
+        values = {}
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT name, value FROM configuration_meta WHERE name LIKE 'alerts.%'"
+            ).fetchall()
+        for row in rows:
+            key = row["name"][len("alerts."):]
+            if key not in ALERT_SETTING_KEYS:
+                continue
+            try:
+                text = bytes(row["value"]).decode("ascii")
+            except UnicodeDecodeError:
+                continue
+            if key in ("warning_percent", "critical_percent"):
+                try:
+                    values[key] = int(text)
+                except ValueError:
+                    continue
+            elif key in ("sound", "quiet_hours", "pop_to_top"):
+                if text not in ("1", "0"):
+                    continue
+                values[key] = text == "1"
+            else:
+                values[key] = text
+        return values
+
+    def save_alerts(self, values):
+        """Store the admin's alert settings, and clear the ones left unset.
+
+        A key that is not in ``values`` is cleared, so a setting the user
+        put back to the file's value stops overriding the file.
+        """
+        if not isinstance(values, dict):
+            raise ValueError("alert settings must be an object")
+        for key in values:
+            if key not in ALERT_SETTING_KEYS:
+                raise ValueError("unknown alert setting: %s" % key)
+        with self._lock, self._conn:
+            for key in ALERT_SETTING_KEYS:
+                name = "alerts." + key
+                if key not in values:
+                    self._conn.execute(
+                        "DELETE FROM configuration_meta WHERE name = ?", (name,))
+                    continue
+                value = values[key]
+                if isinstance(value, bool):
+                    data = b"1" if value else b"0"
+                elif isinstance(value, int):
+                    data = str(value).encode("ascii")
+                else:
+                    data = str(value).encode("ascii")
+                self._conn.execute(
+                    "INSERT INTO configuration_meta (name, value) VALUES (?, ?)"
+                    " ON CONFLICT(name) DO UPDATE SET value=excluded.value",
+                    (name, data))
 
 
     def save_claude_bridge(self, instance_id, settings_path, previous, command):

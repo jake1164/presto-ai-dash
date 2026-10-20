@@ -19,9 +19,10 @@ from unittest.mock import patch
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
 import presto_path  # noqa: F401  (adds presto/ to sys.path)
-from presto_ai_dash.dashboard import (DEVICE_ACTIVITY_KEYS, DEVICE_METRICS_KEYS,
-                                      DEVICE_QUOTA_KEYS, DEVICE_RESET_KEYS,
-                                      DEVICE_SOURCE_KEYS, DEVICE_WINDOW_KEYS,
+from presto_ai_dash.dashboard import (DEVICE_ACTIVITY_KEYS, DEVICE_ALERT_KEYS,
+                                      DEVICE_METRICS_KEYS, DEVICE_QUOTA_KEYS,
+                                      DEVICE_RESET_KEYS, DEVICE_SOURCE_KEYS,
+                                      DEVICE_TOP_KEYS, DEVICE_WINDOW_KEYS,
                                       build_instance_payload, device_view)
 from presto_ai_dash.models import SourceSnapshot
 from presto_ai_dash.quotas import quota_report, quota_window
@@ -167,6 +168,15 @@ class DevicePayloadTests(unittest.TestCase):
         self.assertLessEqual(size(self.slim) / len(self.slim["sources"]), BUDGET_PER_SOURCE)
         self.assertLess(size(self.slim), size(self.full) * 0.6)
 
+    def test_the_payload_with_the_settings_is_inside_the_budget(self):
+        """The display and alert settings travel with the payload."""
+        payload = dict(self.slim)
+        payload["display"] = {"overflow_rows": 1}
+        payload["alerts"] = {"quiet": False, "sound": True, "pop_to_top": True}
+        self.assertLessEqual(size(payload), BUDGET_BYTES,
+                             "device payload %d bytes" % size(payload))
+        self.assertLessEqual(size(payload) / len(payload["sources"]), BUDGET_PER_SOURCE)
+
     def test_a_quota_report_is_sent_once(self):
         for source in self.slim["sources"]:
             self.assertNotIn("quota", source.get("metrics", {}))
@@ -214,35 +224,43 @@ class DevicePayloadTests(unittest.TestCase):
 
 
 class WhitelistMatchesTheDeviceTests(unittest.TestCase):
-    """Every payload key presto/home.py reads must be on the whitelist."""
+    """Every payload key the device reads must be on the whitelist."""
 
     READERS = {"source": DEVICE_SOURCE_KEYS, "quota": DEVICE_QUOTA_KEYS,
                "window": DEVICE_WINDOW_KEYS, "activity": DEVICE_ACTIVITY_KEYS,
-               "metrics": DEVICE_METRICS_KEYS, "reset_credits": DEVICE_RESET_KEYS}
+               "metrics": DEVICE_METRICS_KEYS, "reset_credits": DEVICE_RESET_KEYS,
+               "payload": DEVICE_TOP_KEYS, "alerts": DEVICE_ALERT_KEYS}
 
-    def keys_read(self, function_names):
-        path = os.path.join(presto_path.PRESTO_DIR, "home.py")
-        with open(path, encoding="utf-8") as handle:
-            tree = ast.parse(handle.read())
+    # The device functions that read the payload, and the file they live in.
+    SCANNED = (("home.py", "source_rows"), ("home.py", "reset_badge"),
+               ("home.py", "overflow_rows"), ("home.py", "alert_settings"),
+               ("main.py", "_apply_alerts"))
+
+    def keys_read(self, scanned=None):
         found = []
-        for node in ast.walk(tree):
-            if not (isinstance(node, ast.FunctionDef) and node.name in function_names):
-                continue
-            for child in ast.walk(node):
-                name = key = None
-                if (isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute)
-                        and child.func.attr == "get" and isinstance(child.func.value, ast.Name)
-                        and child.args and isinstance(child.args[0], ast.Constant)):
-                    name, key = child.func.value.id, child.args[0].value
-                elif (isinstance(child, ast.Subscript) and isinstance(child.value, ast.Name)
-                      and isinstance(child.slice, ast.Constant)):
-                    name, key = child.value.id, child.slice.value
-                if name in self.READERS and isinstance(key, str):
-                    found.append((name, key))
+        for filename, function_name in (scanned or self.SCANNED):
+            path = os.path.join(presto_path.PRESTO_DIR, filename)
+            with open(path, encoding="utf-8") as handle:
+                tree = ast.parse(handle.read())
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.FunctionDef)
+                        and node.name == function_name):
+                    continue
+                for child in ast.walk(node):
+                    name = key = None
+                    if (isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute)
+                            and child.func.attr == "get" and isinstance(child.func.value, ast.Name)
+                            and child.args and isinstance(child.args[0], ast.Constant)):
+                        name, key = child.func.value.id, child.args[0].value
+                    elif (isinstance(child, ast.Subscript) and isinstance(child.value, ast.Name)
+                          and isinstance(child.slice, ast.Constant)):
+                        name, key = child.value.id, child.slice.value
+                    if name in self.READERS and isinstance(key, str):
+                        found.append((name, key))
         return found
 
-    def test_every_key_source_rows_and_reset_badge_read_is_whitelisted(self):
-        found = self.keys_read({"source_rows", "reset_badge"})
+    def test_every_key_the_device_reads_is_whitelisted(self):
+        found = self.keys_read()
         self.assertTrue(found, "the scan found nothing: the device code was restructured")
         missing = sorted({(name, key) for name, key in found if key not in self.READERS[name]
                           and not (name == "window" and key in ("expired",))})
@@ -250,11 +268,18 @@ class WhitelistMatchesTheDeviceTests(unittest.TestCase):
                                       "them to the DEVICE_* whitelists in dashboard.py")
 
     def test_the_scan_really_sees_the_known_keys(self):
-        found = set(self.keys_read({"source_rows", "reset_badge"}))
+        found = set(self.keys_read())
         for pair in (("quota", "windows"), ("window", "used_percent"), ("quota", "hint"),
                      ("reset_credits", "available"), ("metrics", "loaded_model"),
-                     ("source", "quota")):
+                     ("source", "quota"), ("payload", "sources"), ("payload", "display"),
+                     ("payload", "alerts"), ("alerts", "quiet"), ("alerts", "sound"),
+                     ("alerts", "pop_to_top")):
             self.assertIn(pair, found)
+
+    def test_the_alert_settings_are_on_the_whitelist(self):
+        for key in ("quiet", "sound", "pop_to_top"):
+            self.assertIn(key, DEVICE_ALERT_KEYS)
+        self.assertIn("alerts", DEVICE_TOP_KEYS)
 
     def test_metrics_read_through_a_loop_are_whitelisted_too(self):
         """source_rows reads requests_today and tokens_today through a loop over a
@@ -296,6 +321,15 @@ class ManagerServesTheDeviceViewTests(unittest.TestCase):
         full = next(s for s in base.manager.full_status_payload()["sources"] if s["id"] == row["id"])
         self.assertIn("usage_cache", full["quota"])
         self.assertIn("note", full["quota"])
+
+    def test_the_managed_payload_carries_the_alert_settings(self):
+        import test_management
+        base = test_management.ManagementBase("setUp")
+        base.setUp()
+        self.addCleanup(base.tearDown)
+        payload = base.manager.status_payload()
+        self.assertEqual(payload["alerts"], {"quiet": False, "sound": True,
+                                              "pop_to_top": True})
 
 
 if __name__ == "__main__":

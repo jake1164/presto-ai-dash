@@ -8,6 +8,10 @@ import secrets
 import tomllib
 from urllib.parse import urlsplit
 
+from .alert_policy import (DEFAULT_CRITICAL_PERCENT, DEFAULT_QUIET_END,
+                           DEFAULT_QUIET_START, DEFAULT_WARNING_PERCENT,
+                           is_quiet, parse_clock, validate_thresholds)
+
 log = logging.getLogger(__name__)
 DEFAULTS = {
     "daemon": {"host": "0.0.0.0", "port": 8787, "shared_token": "",
@@ -17,6 +21,10 @@ DEFAULTS = {
     "logging": {"level": "INFO"},
     "admin": {"enabled": False, "port": 8788, "token": "", "key_file": ""},
     "display": {"overflow_rows": 1},
+    "alerts": {"warning_percent": 80, "critical_percent": 95,
+               "sound": True, "quiet_hours": False,
+               "quiet_start": "22:00", "quiet_end": "07:00",
+               "pop_to_top": True},
     "sources": {
         "fake": {"enabled": True, "scenario_interval": 20},
         "ollama": {"enabled": False, "base_url": "http://localhost:11434",
@@ -121,6 +129,58 @@ def ingest_enabled(config, stored=None, environ=None):
     return config["daemon"].get("ingest_enabled", False)
 
 
+# The alert settings the admin page can change, and the file can set.
+ALERT_KEYS = ("warning_percent", "critical_percent", "sound", "quiet_hours",
+              "quiet_start", "quiet_end", "pop_to_top")
+
+
+def alert_base_settings(config):
+    """The [alerts] values from the file or the defaults, without the admin's.
+
+    This is what the stored value is compared against: a stored value that
+    equals the base is not stored at all, so the effective configuration
+    still says where the value came from.
+    """
+    section = config.get("alerts") if isinstance(config, dict) else None
+    section = section if isinstance(section, dict) else {}
+    values = {}
+    for key in ALERT_KEYS:
+        value = section.get(key, DEFAULTS["alerts"][key])
+        values[key] = value
+    return values
+
+
+def alert_settings(config, stored=None, now=None):
+    """The effective alert settings, resolved afresh on every payload.
+
+    The admin's stored value beats the file, which beats the built-in
+    default. There is no environment variable for these: they are the
+    user's own choices, and the file plus the admin page are enough.
+
+    ``now`` is the moment the quiet flag is judged against; it defaults to
+    the daemon's own local time, so the device needs no clock of its own.
+    """
+    section = alert_base_settings(config)
+    stored = stored if isinstance(stored, dict) else {}
+    values = {}
+    for key in ALERT_KEYS:
+        values[key] = stored[key] if key in stored else section[key]
+    try:
+        validate_thresholds(values["warning_percent"], values["critical_percent"])
+    except ValueError:
+        values["warning_percent"] = DEFAULT_WARNING_PERCENT
+        values["critical_percent"] = DEFAULT_CRITICAL_PERCENT
+    for key in ("sound", "quiet_hours", "pop_to_top"):
+        if type(values[key]) is not bool:
+            values[key] = DEFAULTS["alerts"][key]
+    for key in ("quiet_start", "quiet_end"):
+        if parse_clock(values[key]) is None:
+            values[key] = DEFAULTS["alerts"][key]
+    values["quiet"] = bool(values["quiet_hours"]) and is_quiet(
+        now, values["quiet_start"], values["quiet_end"])
+    return values
+
+
 def read_config_file(path=None):
     """The raw TOML tables of the bootstrap file, or an empty dict.
 
@@ -195,6 +255,21 @@ def load_config(path=None):
     if type(overflow) is not int or overflow < OVERFLOW_MIN or overflow > OVERFLOW_MAX:
         raise ConfigError("display.overflow_rows must be an integer in range %d..%d" %
                           (OVERFLOW_MIN, OVERFLOW_MAX))
+    alerts = config["alerts"]
+    for key in ("warning_percent", "critical_percent"):
+        value = alerts.get(key)
+        if type(value) is not int or value < 1 or value > 100:
+            raise ConfigError("alerts.%s must be an integer in range 1..100" % key)
+    try:
+        validate_thresholds(alerts["warning_percent"], alerts["critical_percent"])
+    except ValueError as exc:
+        raise ConfigError("alerts: %s" % exc) from exc
+    for key in ("sound", "quiet_hours", "pop_to_top"):
+        if type(alerts.get(key)) is not bool:
+            raise ConfigError("alerts.%s must be a boolean" % key)
+    for key in ("quiet_start", "quiet_end"):
+        if parse_clock(alerts.get(key)) is None:
+            raise ConfigError("alerts.%s must be a time of day as HH:MM" % key)
     token = config["daemon"]["shared_token"]
     if token and (not token.isascii() or any(char.isspace() for char in token)):
         raise ConfigError("daemon.shared_token must be ASCII without whitespace")

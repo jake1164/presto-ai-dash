@@ -965,6 +965,31 @@ Adding another supported account requires configuration, not new UI code.
 
 ### Milestone 12: Alert polish
 
+Status: **done (2026-10-20).**
+
+The daemon now maps a quota percentage onto the status vocabulary, so every
+provider behaves the same way: a warning at 80% of a window (yellow), a
+critical state at 95% (red), and rate limited at 100% as before. The
+thresholds are set in the admin page's Alerts section (applies to all
+services) and travel to the device with the payload. Only a fresh,
+available window alerts: a stale, unavailable or already-reset window keeps
+today's stale presentation, and a window that resets within half an hour
+does not alert either.
+
+The device tracks every service on its own, so a second service turning bad
+while another is already critical still speaks: one chirp for a new warning,
+two for a critical, rate-limited or offline service, never repeated while it
+lasts, silent on recovery and silent for the first reading after boot. The
+LED shows the worst service, not only the open card. Quiet hours are judged
+by the daemon's own clock and travel in the payload, so the device needs no
+time zone; in quiet hours the device is silent and its light is dimmed.
+Home can scroll to a service that has just got worse (presto/popup.py): the
+alarm must hold for 30 seconds, a service moves the list at most once in ten
+minutes, the list never moves while the user is touching it or has scrolled
+recently, a new alarm must be worse than the one already shown, and the
+user's own position comes back a minute later unless they have scrolled
+since.
+
 Goal:
 
 Make the device feel like a physical status meter.
@@ -1141,13 +1166,15 @@ Use generic icons and original code only. Do not ship provider logos.
 M0–M5 established the static demo, daemon, storage, and local/gateway sources.
 Keep their completed milestone scope unchanged. M7, M10, and the activity part
 of M10a are implemented. M11 is deployed with automated device checks and user
-visual/touch confirmation complete. The remaining sequence is:
+visual/touch confirmation complete. M12 is implemented: the daemon maps a
+quota percentage onto the status vocabulary, the device tracks every service
+on its own, and the alert settings live in the admin page. The remaining
+sequence is:
 
 ```text
 M8. OpenAI/Codex subscription source
 M9. Claude subscription source
 M10a. Ollama Cloud monthly allowance/balance, if a supported path is verified
-M12. LED/sound and quota alert polish
 M13. Documentation and demo release
 ```
 

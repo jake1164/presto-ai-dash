@@ -9,10 +9,12 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 from . import __version__
+from .alert_policy import apply_threshold, parse_clock, threshold_status, validate_thresholds
 from .clients import ClientRegistry
 from .codex_login import CodexLoginManager
 from .collectors import claude_statusline
-from .config import ingest_enabled, overflow_rows
+from .config import (ALERT_KEYS, alert_base_settings, alert_settings,
+                     ingest_enabled, overflow_rows)
 from .credentials import load_cipher
 from .dashboard import build_instance_payload, device_view
 from .effective import effective_settings, uptime_label, uptime_seconds
@@ -158,6 +160,7 @@ class SourceConfiguration:
     def list_sources(self):
         records = self.storage.source_instances()
         snapshots = self.storage.latest_snapshots()
+        settings = self.alerts_state()
         sources = []
         for record in records:
             public = {key: record[key] for key in ("id", "type", "name", "enabled", "config", "revision")}
@@ -168,7 +171,17 @@ class SourceConfiguration:
             snapshot = snapshots.get(record["id"])
             if snapshot:
                 snapshot = present_snapshot(snapshot)
-            public["status"] = snapshot.status if snapshot else "waiting"
+            status = snapshot.status if snapshot else "waiting"
+            if snapshot:
+                # The daemon decides the user-facing status, so the page
+                # shows the same warning a nearly used window raises on the
+                # device.
+                level = threshold_status(snapshot.metrics.get("quota"),
+                                         settings["warning_percent"],
+                                         settings["critical_percent"])
+                if level:
+                    status = apply_threshold(status, level)
+            public["status"] = status
             public["updated_at"] = snapshot.to_dict()["updated_at"] if snapshot else None
             if snapshot and snapshot.metrics.get("quota"):
                 public["quota"] = mark_passed_resets(present_quota(snapshot.metrics["quota"]))
@@ -229,6 +242,38 @@ class SourceConfiguration:
                 "overflow_rows is set by DASH_OVERFLOW_ROWS; edit the environment to change it")
         self.storage.save_overflow_rows(value)
         return self.display_state()
+
+    def alerts_state(self):
+        """The alert settings, and whether it is quiet right now.
+
+        The quiet flag is judged against the daemon's own local time, so the
+        device needs no clock and no time zone.
+        """
+        return alert_settings(self.config, self.storage.alerts_settings())
+
+    def set_alerts(self, data):
+        """Save the alert settings the admin page changed.
+
+        A setting that is put back to the value in dash.toml stops
+        overriding the file, so the effective configuration still says
+        where each value came from.
+        """
+        if not isinstance(data, dict) or set(data) != set(ALERT_KEYS):
+            raise ValueError("alerts needs every alert setting")
+        validate_thresholds(data["warning_percent"], data["critical_percent"])
+        for key in ("sound", "quiet_hours", "pop_to_top"):
+            if type(data[key]) is not bool:
+                raise ValueError("alerts.%s must be true or false" % key)
+        for key in ("quiet_start", "quiet_end"):
+            if parse_clock(data[key]) is None:
+                raise ValueError("alerts.%s must be a time of day as HH:MM" % key)
+        base = alert_base_settings(self.config)
+        changed = {}
+        for key in ALERT_KEYS:
+            if data[key] != base[key]:
+                changed[key] = data[key]
+        self.storage.save_alerts(changed)
+        return self.alerts_state()
 
     def create_ingest_token(self, instance_id):
         """Mint or rotate one write-only push token, shown exactly once."""
@@ -362,20 +407,27 @@ class SourceConfiguration:
             raise ValueError("Codex logout is only available for Codex sources")
         return self.codex_logins.logout(instance_id)
 
-    def full_status_payload(self):
+    def full_status_payload(self, alerts=None):
         """Every field of every report: the superset the Presto's view is cut from."""
         with self.storage._lock:
             records = self.storage.source_instances()
             snapshots = self.storage.latest_snapshots()
-        return build_instance_payload(snapshots, records)
+        return build_instance_payload(snapshots, records, alerts)
 
     def status_payload(self):
+        settings = self.alerts_state()
+        thresholds = {"warning_percent": settings["warning_percent"],
+                      "critical_percent": settings["critical_percent"]}
         # The Presto parses the whole response in a few hundred KB of RAM, so it
         # gets only the fields it reads (dashboard.device_view).
-        payload = device_view(self.full_status_payload())
+        payload = device_view(self.full_status_payload(thresholds))
         # The Home display settings travel with the payload, so a change
         # applies on the next poll without restarting the daemon.
         payload["display"] = {"overflow_rows": self.display_state()["overflow_rows"]}
+        # The alert settings travel too: the device has no clock of its own,
+        # so the daemon says whether it is quiet right now.
+        payload["alerts"] = {"quiet": settings["quiet"], "sound": settings["sound"],
+                             "pop_to_top": settings["pop_to_top"]}
         return payload
 
     def effective_config(self):

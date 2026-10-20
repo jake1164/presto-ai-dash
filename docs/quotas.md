@@ -73,6 +73,22 @@ health, availability, and quota exhaustion are distinct. Unavailable monthly
 credits alone do not turn otherwise successful Ollama Cloud activity into a
 health warning. Accounts and percentages are never summed.
 
+The daemon also maps a percentage onto the status vocabulary, so a provider
+that reports a percentage needs no code of its own: at the warning percent
+(80 by default) the service is `near_limit`, at the critical percent (95) it
+is `critical`, and at 100% it stays `rate_limited`. A source takes the
+status of its worst window. Only a fresh, available window alerts: a stale,
+unavailable or already-reset window keeps the stale presentation above and
+never raises an alert, and a window that resets within 30 minutes does not
+alert either. The thresholds are the admin page's alert settings and are
+documented in [configuration](configuration.md#alerts).
+
+The device payload carries two more top-level objects: `display`, which holds
+the Home overflow strip setting, and `alerts`, which holds `quiet` (the
+daemon's own quiet-hours flag), `sound` and `pop_to_top`. The device trusts
+only a real boolean and falls back to sound on, quiet off and pop-to-top on
+for anything else.
+
 The Presto Home renderer puts quota accounts first and groups their reported
 windows under one account heading, with separate stacked bars and actual period
 labels. Cyan identifies short windows, purple weekly windows, and orange monthly

@@ -11,12 +11,15 @@ from alerts import (
     ACCENT_RGB,
     AlertTracker,
     accent_for_status,
+    alert_rank,
     chirp_count,
     cue_for_status,
     is_valid_accent,
+    led_brightness,
     led_pattern,
     rgb_for_accent,
     rgb_for_status,
+    worst_accent,
 )
 
 
@@ -96,53 +99,75 @@ class TestCues(unittest.TestCase):
 
 
 class TestAlertTracker(unittest.TestCase):
+    """The tracker decides when a cue plays, per service."""
 
     def test_first_reading_is_silent(self):
         """The device must not chirp at the user the moment it boots."""
         t = AlertTracker()
-        self.assertEqual(t.update("critical"), CUE_NONE)
+        self.assertEqual(t.update_one("a", "critical"), CUE_NONE)
 
     def test_escalation_chirps(self):
         t = AlertTracker()
-        t.update("ok")
-        self.assertEqual(t.update("warning"), CUE_CHIRP)
+        t.update_one("a", "ok")
+        self.assertEqual(t.update_one("a", "warning"), CUE_CHIRP)
 
     def test_escalation_to_critical_double_chirps(self):
         t = AlertTracker()
-        t.update("warning")
-        self.assertEqual(t.update("critical"), CUE_DOUBLE_CHIRP)
+        t.update_one("a", "warning")
+        self.assertEqual(t.update_one("a", "critical"), CUE_DOUBLE_CHIRP)
 
     def test_no_repeat_while_status_holds(self):
         t = AlertTracker()
-        t.update("ok")
-        t.update("warning")
-        self.assertEqual(t.update("warning"), CUE_NONE)
-        self.assertEqual(t.update("warning"), CUE_NONE)
+        t.update_one("a", "ok")
+        t.update_one("a", "warning")
+        self.assertEqual(t.update_one("a", "warning"), CUE_NONE)
+        self.assertEqual(t.update_one("a", "warning"), CUE_NONE)
 
     def test_recovery_is_silent(self):
         t = AlertTracker()
-        t.update("warning")
-        self.assertEqual(t.update("ok"), CUE_NONE)
+        t.update_one("a", "warning")
+        self.assertEqual(t.update_one("a", "ok"), CUE_NONE)
 
     def test_de_escalation_is_silent(self):
         t = AlertTracker()
-        t.update("critical")
-        self.assertEqual(t.update("warning"), CUE_NONE)
+        t.update_one("a", "critical")
+        self.assertEqual(t.update_one("a", "warning"), CUE_NONE)
+
+    def test_a_second_service_turning_bad_still_speaks(self):
+        """One service being critical must not silence another one."""
+        t = AlertTracker()
+        t.update({"a": "ok", "b": "ok"})
+        cues = t.update({"a": "critical", "b": "warning"})
+        self.assertEqual(sorted(cues), [("a", CUE_DOUBLE_CHIRP), ("b", CUE_CHIRP)])
+
+    def test_a_second_service_going_critical_chirps(self):
+        t = AlertTracker()
+        t.update({"a": "ok", "b": "ok"})
+        t.update({"a": "critical", "b": "warning"})
+        cues = t.update({"a": "critical", "b": "critical"})
+        self.assertEqual(cues, [("b", CUE_DOUBLE_CHIRP)])
+
+    def test_each_service_is_tracked_on_its_own(self):
+        t = AlertTracker()
+        t.update_one("a", "warning")
+        # b has no history yet, so its first reading is a baseline.
+        self.assertEqual(t.update_one("b", "critical"), CUE_NONE)
+        self.assertEqual(t.update_one("a", "warning"), CUE_NONE)
 
     def test_mute_suppresses_everything(self):
         t = AlertTracker()
-        t.update("ok")
+        t.update_one("a", "ok")
         t.toggle_mute()
-        self.assertEqual(t.update("critical"), CUE_NONE)
+        self.assertEqual(t.update_one("a", "critical"), CUE_NONE)
 
     def test_unmute_restores_sound(self):
         t = AlertTracker()
-        t.update("ok")
+        t.update_one("a", "ok")
         t.toggle_mute()
-        t.update("critical")
+        t.update_one("a", "critical")
         t.toggle_mute()
-        self.assertEqual(t.update("critical"), CUE_NONE)
-        self.assertEqual(t.update("offline"), CUE_DOUBLE_CHIRP)
+        self.assertEqual(t.update_one("a", "critical"), CUE_NONE)
+        self.assertEqual(t.update_one("a", "offline"), CUE_DOUBLE_CHIRP)
 
     def test_toggle_mute_returns_new_state(self):
         t = AlertTracker()
@@ -151,15 +176,83 @@ class TestAlertTracker(unittest.TestCase):
 
     def test_reset_clears_history(self):
         t = AlertTracker()
-        t.update("ok")
+        t.update_one("a", "ok")
         t.reset()
-        self.assertEqual(t.update("critical"), CUE_NONE)
+        self.assertEqual(t.update_one("a", "critical"), CUE_NONE)
 
     def test_last_status_tracks(self):
         t = AlertTracker()
-        t.update("ok")
-        t.update("warning")
+        t.update_one("a", "ok")
+        t.update_one("a", "warning")
         self.assertEqual(t.last_status, "warning")
+
+    def test_last_status_is_the_worst_of_the_services(self):
+        t = AlertTracker()
+        t.update({"a": "warning", "b": "critical"})
+        self.assertEqual(t.last_status, "critical")
+
+    def test_quiet_hours_silence_the_sound(self):
+        t = AlertTracker()
+        t.update_one("a", "ok")
+        t.quiet = True
+        self.assertTrue(t.silenced)
+        self.assertEqual(t.update_one("a", "critical"), CUE_NONE)
+
+    def test_quiet_hours_do_not_touch_the_users_own_mute(self):
+        t = AlertTracker()
+        t.quiet = True
+        self.assertFalse(t.muted)
+        t.quiet = False
+        self.assertFalse(t.silenced)
+
+    def test_an_update_that_is_not_a_mapping_does_nothing(self):
+        t = AlertTracker()
+        self.assertEqual(t.update("critical"), [])
+        self.assertEqual(t.update(None), [])
+
+
+class TestAlertRank(unittest.TestCase):
+    def test_rate_limited_is_worse_than_critical(self):
+        """At 100% a service is rate limited, which is worse than critical."""
+        self.assertGreater(alert_rank("rate_limited"), alert_rank("critical"))
+
+    def test_offline_is_the_worst(self):
+        self.assertGreater(alert_rank("offline"), alert_rank("rate_limited"))
+
+    def test_in_use_is_below_a_warning(self):
+        self.assertLess(alert_rank("active"), alert_rank("warning"))
+
+    def test_an_unknown_status_is_the_worst(self):
+        self.assertEqual(alert_rank("banana"), alert_rank("offline"))
+
+
+class TestLedPriority(unittest.TestCase):
+    def test_red_wins_over_everything(self):
+        for status in ("critical", "rate_limited", "offline"):
+            self.assertEqual(worst_accent(["ok", status, "warning"]), "red")
+
+    def test_yellow_wins_over_blue_and_green(self):
+        for status in ("warning", "near_limit"):
+            self.assertEqual(worst_accent(["ok", status, "active"]), "yellow")
+
+    def test_in_use_is_never_shown_over_a_warning(self):
+        self.assertEqual(worst_accent(["active", "ok"]), "blue")
+        self.assertEqual(worst_accent(["active", "near_limit"]), "yellow")
+
+    def test_all_good_is_green(self):
+        self.assertEqual(worst_accent(["ok", "ok"]), "green")
+
+    def test_an_unknown_status_is_red(self):
+        self.assertEqual(worst_accent(["ok", "banana"]), "red")
+
+    def test_no_status_at_all_is_green(self):
+        self.assertEqual(worst_accent([]), "green")
+
+    def test_quiet_hours_dim_the_light_but_keep_the_colour(self):
+        bright = led_brightness(1.0)
+        dim = led_brightness(1.0, quiet=True)
+        self.assertLess(dim, bright)
+        self.assertEqual(rgb_for_accent("red", dim)[0], rgb_for_accent("red", 1.0)[0] * 0.4)
 
 
 class TestLedPattern(unittest.TestCase):

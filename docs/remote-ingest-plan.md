@@ -861,6 +861,89 @@ In order (item 0 is an urgent defect and goes first):
    previous position after a timeout; and a new alarm must be worse than the
    one already shown. The Home overflow strip's "worst hidden status" is the
    building block that tells the device which hidden service is alarmed.
+   **M12 follow-ons (added 2026-10-20), in this order, each after the one
+   before it:**
+   - **M12b, per-service settings and a master switch.** One "Alerts on/off"
+     master; per service: alerts on/off and optional warning/critical percent
+     (blank = use the global value). With the master off every per-service
+     control is disabled (not hidden), keeps its stored value, and a banner
+     says so; each affected card shows "alerts off (global)". "Off" for a
+     service means no chirp, no LED escalation, no pop-to-top and no part in
+     the overall accent, but it never hides data: the row, numbers and true
+     status colour are unchanged, and the admin card says "alerts off". The
+     prompt is in the conversation record; it builds on M12.
+   - **M12c, a bell per service on the Presto (author's idea).** The control
+     is on each service's card, not on the Home rows (rows are 18 and 46 px
+     tall: too small to tap reliably, and a tap on a row already opens its
+     card). A large target (about 48 px) with an "ALERTS ON/OFF" pill and a
+     bell drawn from shapes (bitmap fonts and ASCII only); with the master
+     off it reads "ALERTS OFF (ALL)" and a tap shows a short message saying why it
+     cannot be turned on ("Alerts are off for all services; turn them on in the
+     admin page"), never a silent no-op. Home shows only a
+     small non-interactive "alerts off" mark on a row. This is the first write
+     from the device: a new authenticated endpoint
+     (`POST /api/v1/alerts/<source id>` with `{"enabled": true|false}`, the
+     shared token), which sets a state and never toggles (a double tap or a
+     retry is harmless), changes only that one setting of an existing service,
+     is rate-limited and logged at INFO, and is not a provider action. The
+     daemon stays the source of truth: the device shows the new state at once,
+     holds it until the next poll confirms it, and reverts with a short message
+     if the write fails. The shared token travels over plain HTTP on the LAN, so
+     the worst a LAN eavesdropper could do is flip one service's alerts; say so
+     in the docs. The read-only rule in `AGENTS.md` is about provider accounts
+     (author, 2026-10-20: for example resetting a weekly quota); the Presto
+     changing a setting on its own daemon is not a provider action, and
+     `AGENTS.md` now says so.
+   - **Mute that expires.** Long-press mute is a toggle that can be forgotten.
+     Add an expiry (default 4 hours, settable in the Alerts section, 0 = never)
+     and an on-screen indicator while muted, so "I did not realise it was off"
+     cannot last. The expiry is the daemon's or the device's, decided when it
+     is built (the device has no wall clock, so a duration from the moment of
+     muting is simplest).
+   - **Only if needed: per-window-kind thresholds.** One pair per service
+     applies to all of its windows. If a short window (Claude's 5 hours) at 80%
+     is routine and keeps alerting, add a separate pair for short and long
+     windows rather than muting the service.
+   **Done 2026-10-20 (the base M12; the follow-ons above are still open).**
+   The decisions are as taken: warning (status `near_limit`, yellow) at 80%,
+   critical (status `critical`, red) at 95%, `rate_limited` at 100% as
+   before, both thresholds settable in 1..100 with the warning below the
+   critical one, and a source's status is its worst window's. A window that
+   resets within 30 minutes does not alert, and only a fresh, available
+   window alerts at all: a stale, unavailable or already-reset window keeps
+   today's stale presentation and never raises an alert. Claude's usage
+   cache readings keep `warn_on_stale` false.
+
+   The mapping lives in the daemon (`alert_policy.py`, applied in
+   `dashboard.build_instance_payload`), because the daemon decides the
+   user-facing status and the device stays simple. The LED shows the worst
+   service (red > yellow > blue > green), and "in use" is never shown over a
+   warning. The sound is tracked per service: one chirp when a service
+   becomes worse, two for critical, rate limited or offline, never repeated
+   while it lasts, silent on recovery, and a silent baseline for the first
+   reading after boot.
+
+   Quiet hours are off by default. The daemon judges them with its own local
+   time and sends the flag in the payload, so the device needs no clock or
+   time zone; while it is true the device is silent and its light is dimmed.
+   The long-press mute is unchanged.
+
+   The pop-to-top is in `presto/popup.py`, a pure module with an injected
+   clock: the alarm must hold for 30 s, a service moves the list at most
+   once in ten minutes, the list never moves within 20 s of a touch or a
+   scroll, a new alarm only acts when it is worse than the worst one
+   already shown, and the user's own position comes back 60 s later unless
+   they have scrolled since. It runs on Home only, never on a card or a
+   detail view.
+
+   The settings live in the admin page's new **Alerts** section ("Applies to
+   all services"): warning percent, critical percent, sound on/off, quiet
+   hours (on/off, start, end) and pop-to-top on/off. Storage and precedence
+   follow `overflow_rows`: the admin-stored value beats `dash.toml`
+   `[alerts]`, which beats the default; there is no environment variable.
+   The payload gained `"alerts": {"quiet": bool, "sound": bool,
+   "pop_to_top": bool}`, and the device validates every key and falls back
+   to sound on, quiet off and pop-to-top on.
 1a. **Home overflow strip (decided 2026-10-20, runs before Phase 5d).** The
    Home list shows full rows in the saved order until the space runs out. The
    rows that are not fully visible appear as names, each with a status marker,
@@ -979,6 +1062,46 @@ In order (item 0 is an urgent defect and goes first):
      step per device and a token in each device's `secrets.py`. Build it when
      per-device settings are wanted, reusing the ingest-token storage and
      admin patterns. The client header above is forward compatible with it.
+1d. **Cards v2 and Home bar legibility (added 2026-10-20; after M12c, because
+   it edits the same presto/ files and the bell lives on the card).** Review
+   of the cards (author and assistant, 2026-10-20): below the headline number
+   a card is a column of same-size grey capitals with no hierarchy; it does not
+   use Home's window colours or bars; "(stale)" is repeated on every line;
+   resets are absolute UTC times; "unavailable" lines say nothing; one line is
+   clipped (OpenCode Go weekly/monthly); values are raw ("$0.5000",
+   "Database: true"); everything stops about 70% of the way across and the
+   local-service cards are 40% empty. Work, cheapest first, each shippable:
+   - **Home bars (do first; small).** Measured: the bar area is 11 px split
+     over the windows, so Claude's two bars are 5 px and OpenCode Go's three are
+     3 px; the unfilled track (28,31,38) is 1.13:1 against the background, nearly
+     invisible; stale windows all turn the same grey, so the three Go bars cannot
+     be told apart; a 3% value on a 3 px bar is about 6 px. Fix: track about
+     (56,60,72) (about 1.7:1) with an optional end cap; bar area 14 px (four-px
+     bars with one-px gaps for three windows, five or six for two); a stale
+     window keeps its own hue at about 45% brightness instead of grey; any
+     measured value above 0 fills at least 3 px; 0% shows no fill. Check the
+     row spacing in the preview (2 px between rows). Tests: bar heights per
+     window count, track contrast above 1.5:1, stale colour is a dimmed hue,
+     minimum fill, no overlap between rows.
+   - **Tier 1, no data change.** Dim labels and bright values; a larger font for
+     values; "stale" once, as a chip beside the status; hide "unavailable" lines
+     or fold them into one dim "no secondary window"; "$0.50" and "DB ok";
+     relative resets ("resets in 1d12h") with the absolute time dim.
+   - **Tier 2, reuse Home's quota rows** at the top of a quota card: each window
+     with its colour, big numerals, bar, reset countdown, and (after M12) tick
+     marks at the warning and critical thresholds. The top right of the card
+     holds the status chip and, after M12c, the alarm bell.
+   - **Tier 3, tiles.** A short list of `{label, value, tone}` tiles per card, built
+     by the daemon (at most six; label up to 8 characters, value up to 10), drawn
+     as a two-column grid, for example Claude: last used, tokens 5h and 7d,
+     credit; LiteLLM: requests, tokens, spend, errors, top model; Ollama: model,
+     speed, models. Tiles add about 1.5 KB over seven cards, past the 5 KB
+     payload budget, so this tier needs the lazy card detail request (see the
+     accepted decision above): a card's tiles are fetched when the card is opened.
+     The trigger for lazy detail ("a source needs more room") is met here.
+   - Rules: bitmap fonts and ASCII only; no loss of detail (everything now on a
+     card stays reachable); provenance lines stay; draw tests check fit and
+     overlap; PSL look at every card with fixture payloads (not live); device sync.
 2. **Small changes (all):**
    - **Home follows the saved account order.** The swipe cards already do.
      Home currently groups cloud rows first and puts local services in a

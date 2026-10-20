@@ -48,6 +48,46 @@ _STATUS_CUE = {
     "offline": CUE_DOUBLE_CHIRP,
 }
 
+# How a service's condition changes for the worse. This is not the card
+# order: a service at 100% is rate limited, which is worse than the
+# critical state just below it, so the ladder puts rate_limited last.
+ALERT_ORDER = (
+    "ok",
+    "active",
+    "warning",
+    "near_limit",
+    "critical",
+    "rate_limited",
+    "offline",
+)
+
+# Which colour the LED strip shows, worst first. Red beats yellow, yellow
+# beats blue and blue beats green: a service that is merely in use never
+# hides a warning.
+STATUS_PRIORITY = {
+    "ok": 0,
+    "active": 1,
+    "warning": 2,
+    "near_limit": 2,
+    "critical": 3,
+    "rate_limited": 3,
+    "offline": 3,
+}
+PRIORITY_ACCENT = {0: "green", 1: "blue", 2: "yellow", 3: "red"}
+
+# How much of the LED brightness is left during quiet hours. The colour is
+# kept: a warning must still be visible, only less insistently.
+QUIET_LED_FACTOR = 0.4
+
+
+def alert_rank(status):
+    """The alert rank of a status. Higher is worse."""
+    status = normalise_status(status)
+    try:
+        return ALERT_ORDER.index(status)
+    except ValueError:  # pragma: no cover - normalise_status never returns this
+        return ALERT_ORDER.index("offline")
+
 
 def accent_for_status(status):
     """The LED accent for a status."""
@@ -93,26 +133,74 @@ def chirp_count(cue):
     return 0
 
 
+def worst_accent(statuses):
+    """The accent for the worst of several statuses.
+
+    Red wins over yellow, yellow over blue, blue over green. An unknown
+    status counts as red: an unknown state must never look healthy.
+    """
+    accent = "green"
+    best = 0
+    for status in statuses or ():
+        priority = STATUS_PRIORITY.get(normalise_status(status), 3)
+        if priority > best:
+            best = priority
+            accent = PRIORITY_ACCENT[priority]
+    return accent
+
+
+def led_brightness(brightness, quiet=False):
+    """The brightness to show: quiet hours dim the strip but keep the colour."""
+    if not quiet:
+        return brightness
+    return brightness * QUIET_LED_FACTOR
+
+
 class AlertTracker(object):
     """Decides when a sound cue should actually play.
 
-    A cue plays when the status *becomes* worse than it was, not on every poll.
-    Without this the device would chirp every fifteen seconds for as long as a
-    warning persisted, which the plan explicitly rules out.
+    A cue plays when a service's status *becomes* worse than it was, not on
+    every poll. Without this the device would chirp every fifteen seconds
+    for as long as a warning persisted, which the plan explicitly rules
+    out.
 
-    ``muted`` suppresses all cues. Long-press toggles it.
+    Tracking is per service: a second service turning bad while another is
+    already critical still speaks, which a single overall status could
+    never do.
+
+    The first reading of a service is a silent baseline, so the device does
+    not chirp at the user the moment it powers on. A recovery is silent.
+
+    ``muted`` suppresses all cues; long-press toggles it. ``quiet`` is the
+    daemon's quiet-hours flag: it silences the sound and lets the caller
+    dim the LED, without touching the user's own mute.
     """
 
-    __slots__ = ("_last_status", "muted", "_ever_seen")
+    __slots__ = ("_statuses", "muted", "quiet")
 
     def __init__(self):
-        self._last_status = None
+        self._statuses = {}
         self.muted = False
-        self._ever_seen = False
+        self.quiet = False
+
+    @property
+    def statuses(self):
+        """The last status seen for each service."""
+        return dict(self._statuses)
 
     @property
     def last_status(self):
-        return self._last_status
+        """The worst status across the services seen so far."""
+        worst = None
+        for status in self._statuses.values():
+            if worst is None or alert_rank(status) > alert_rank(worst):
+                worst = status
+        return worst
+
+    @property
+    def silenced(self):
+        """True when nothing should sound: muted, or during quiet hours."""
+        return self.muted or self.quiet
 
     def toggle_mute(self):
         """Flip the mute flag and return the new value."""
@@ -121,40 +209,38 @@ class AlertTracker(object):
 
     def reset(self):
         """Forget history, e.g. after a reconnect."""
-        self._last_status = None
-        self._ever_seen = False
+        self._statuses.clear()
 
-    def _rank(self, status):
-        from cards import severity
-        return severity(status)
+    def update(self, statuses):
+        """Record every service's status and return the cues to play.
 
-    def update(self, status):
-        """Record a status and return the cue to play, if any.
+        ``statuses`` maps a service id to its status. The result is a list
+        of ``(service, cue)`` pairs, in the order the services were given.
+        """
+        if not isinstance(statuses, dict):
+            return []
+        cues = []
+        for service, status in statuses.items():
+            cue = self.update_one(service, status)
+            if cue != CUE_NONE:
+                cues.append((service, cue))
+        return cues
+
+    def update_one(self, service, status):
+        """Record one service's status and return the cue to play, if any.
 
         Returns one of ``CUE_NONE``, ``CUE_CHIRP`` or ``CUE_DOUBLE_CHIRP``.
         """
         status = normalise_status(status)
-
-        if self.muted:
-            self._last_status = status
+        previous = self._statuses.get(service)
+        self._statuses[service] = status
+        if self.silenced:
             return CUE_NONE
-
-        if not self._ever_seen:
-            # First reading after boot: establish a baseline silently so the
-            # device does not chirp at the user the moment it powers on.
-            self._ever_seen = True
-            self._last_status = status
-            return CUE_NONE
-
-        previous = self._last_status
-        self._last_status = status
-
         if previous is None:
+            # The first reading of a service is a silent baseline.
             return CUE_NONE
-
-        if self._rank(status) > self._rank(previous):
+        if alert_rank(status) > alert_rank(previous):
             return cue_for_status(status)
-
         return CUE_NONE
 
 

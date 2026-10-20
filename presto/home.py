@@ -92,6 +92,35 @@ def overflow_rows(payload):
     return value
 
 
+# The alert settings the daemon sends, and the device's own defaults for
+# anything the payload does not say.
+DEFAULT_ALERT_SETTINGS = {"quiet": False, "sound": True, "pop_to_top": True}
+
+
+def alert_settings(payload):
+    """The daemon's alert settings, with anything untrusted replaced.
+
+    A missing key, a payload that is not an object, a value that is not a
+    real boolean: the device falls back to its own defaults - sound on,
+    quiet off, pop-to-top on - so a broken payload can never silence the
+    device in a way the user did not ask for.
+    """
+    result = dict(DEFAULT_ALERT_SETTINGS)
+    alerts = payload.get("alerts") if isinstance(payload, dict) else None
+    if not isinstance(alerts, dict):
+        return result
+    quiet = alerts.get("quiet")
+    sound = alerts.get("sound")
+    pop_to_top = alerts.get("pop_to_top")
+    if type(quiet) is bool:
+        result["quiet"] = quiet
+    if type(sound) is bool:
+        result["sound"] = sound
+    if type(pop_to_top) is bool:
+        result["pop_to_top"] = pop_to_top
+    return result
+
+
 def strip_needed(total_height, setting):
     """Does a list this tall need the overflow strip?
 

@@ -213,6 +213,84 @@ poll without restarting the daemon. Three sources, in this order:
 A garbled environment variable found at run time (not at startup) fails closed
 to the default and is logged once.
 
+## Alerts
+
+The alert settings apply to every service. They live in the admin page's
+**Alerts** section (Settings tab), and in the `[alerts]` section of
+`dash.toml`:
+
+| Key | Meaning | Default |
+| --- | --- | --- |
+| `warning_percent` | A window that has used this much of its allowance makes the service *near limit*: yellow. 1..100 | 80 |
+| `critical_percent` | A window that has used this much makes the service *critical*: red. 1..100, and above the warning percent | 95 |
+| `sound` | Sound a short cue when a service gets worse | on |
+| `quiet_hours` | Be silent and dim the light during the quiet window | off |
+| `quiet_start` | When the quiet window starts, `HH:MM` in the daemon's local time | `22:00` |
+| `quiet_end` | When the quiet window ends, `HH:MM` in the daemon's local time | `07:00` |
+| `pop_to_top` | Let Home scroll to a service that has just got worse | on |
+
+```toml
+[alerts]
+warning_percent = 80
+critical_percent = 95
+sound = true
+quiet_hours = false
+quiet_start = "22:00"
+quiet_end = "07:00"
+pop_to_top = true
+```
+
+Where a value comes from, in this order:
+
+1. The value stored in SQLite by the admin page.
+2. `[alerts]` in `dash.toml`.
+3. The built-in default above.
+
+There is no environment variable for these: they are the user's own choices.
+A value the admin page puts back to the value in `dash.toml` stops
+overriding the file, so the effective configuration still says where each
+value came from.
+
+The daemon reads them afresh for every status payload, so a change applies on
+the next poll without restarting the daemon.
+
+**What alerts.** The percentage is mapped onto the status vocabulary: at the
+warning percent a service is *near limit*, at the critical percent it is
+*critical*, and at 100% it is *rate limited*, as it always was. A source
+takes the status of its worst window. Only a fresh, available window alerts:
+
+- a stale window keeps the stale presentation it already has and never
+  raises an alert,
+- an unavailable window never raises an alert,
+- a window whose reset has passed never raises an alert, and
+- a window that resets within the next 30 minutes does not raise an alert
+  either: it is about to clear.
+
+**What the device does with it.** The device tracks every service on its own,
+so a second service that gets worse still speaks while another one is
+already critical: one chirp for a new warning, two for a critical,
+rate-limited or offline service. A warning that persists does not chirp
+again, a recovery is silent, and the first reading after boot is a silent
+baseline. Long-pressing the Presto mutes the sound until you press again.
+
+The LED shows the worst service, not only the account on the open card: red
+for critical, rate limited and offline, yellow for a warning, blue for a
+service in use, green for everything else. A service that is merely in use
+never hides a warning.
+
+**Quiet hours.** The daemon computes the quiet flag from its own local time
+and sends it with the payload, so the device needs no clock and no time
+zone. While the flag is true the device is silent and its light is dimmed
+(the colour is kept, so a warning is still visible).
+
+**Pop to top.** When a service gets worse, Home scrolls so that the service's
+row is on screen. It never moves while the user is touching the screen or has
+scrolled recently, the alarm must hold for 30 seconds before the list moves,
+a service moves the list at most once in ten minutes, a new alarm only acts
+when it is worse than the worst one already shown, and the user's own
+position comes back a minute later unless they have scrolled since. The
+rules live in `presto/popup.py` and never run on a card or a detail view.
+
 ## The Status tab
 
 **Daemon.** The version, the database schema version, the uptime, the poll
@@ -263,6 +341,9 @@ after a restart.
 **Remote reports** holds the ingest switch, the collector download and the
 plain-HTTP warning.
 
+**Alerts** holds the thresholds, the sound switch, quiet hours and the
+pop-to-top switch, all of which apply to every service.
+
 **Effective daemon configuration** is read-only. Every value says where it
 came from: `environment`, `dash.toml`, `database`, or `default` when nothing
 decided it. These values need a daemon restart, so they are edited in
@@ -284,6 +365,8 @@ The admin port serves the page plus:
 | PUT | `/api/admin/source-order` | Save a complete account order, including disabled accounts |
 | GET | `/api/admin/display` | The Home display settings and whether the environment locks them |
 | PUT | `/api/admin/display` | Save the Home display settings (409 when the environment locks them) |
+| GET | `/api/admin/alerts` | The alert settings, the thresholds, the quiet hours and whether it is quiet now |
+| PUT | `/api/admin/alerts` | Save the alert settings; the body must carry every one of them |
 | GET | `/api/admin/status` | The Status tab: the daemon, the clients, the account health, the readers, the collectors and the recent problems. Read-only |
 | GET | `/api/admin/config` | The effective daemon configuration and where each value came from. Read-only |
 | DELETE | `/api/admin/sources/{id}` | Delete the instance and its saved key |

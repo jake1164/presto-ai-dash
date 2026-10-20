@@ -20,7 +20,8 @@ import os
 import time
 from datetime import datetime, timezone
 
-from .config import ingest_enabled, overflow_rows, read_config_file
+from .config import (alert_settings, ingest_enabled, overflow_rows,
+                     read_config_file)
 
 ENVIRONMENT = "environment"
 FILE = "dash.toml"
@@ -122,6 +123,30 @@ def effective_settings(config, storage=None, config_path=None, environ=None, now
     add("Remote reports (ingest)",
         "on" if ingest_enabled(config, stored_ingest, names) else "off",
         origin_for("ingest_enabled", "daemon", stored=stored_ingest))
+
+    # The alert settings have no environment variable: they are the user's
+    # own choices, taken from the admin page or from dash.toml.
+    stored_alerts = storage.alerts_settings() if storage is not None else {}
+    settings = alert_settings(config, stored_alerts)
+
+    def alert_origin(key):
+        if key in stored_alerts:
+            return DATABASE
+        if _file_value(file_values, "alerts", key) is not None:
+            return FILE
+        return DEFAULT
+
+    add("Alert warning percent", settings["warning_percent"],
+        alert_origin("warning_percent"))
+    add("Alert critical percent", settings["critical_percent"],
+        alert_origin("critical_percent"))
+    add("Alert sound", "on" if settings["sound"] else "off", alert_origin("sound"))
+    add("Quiet hours",
+        ("on %s-%s" % (settings["quiet_start"], settings["quiet_end"])
+         if settings["quiet_hours"] else "off"),
+        alert_origin("quiet_hours"))
+    add("Pop to top on alarm", "on" if settings["pop_to_top"] else "off",
+        alert_origin("pop_to_top"))
     return entries
 
 

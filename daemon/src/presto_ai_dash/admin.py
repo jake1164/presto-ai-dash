@@ -165,6 +165,14 @@ def make_admin_handler(manager, token):
                         log.error("admin display state failed")
                         self._send(500, {"error": "display settings could not be read"})
                 return
+            if path == "/api/admin/alerts":
+                if self._authorized():
+                    try:
+                        self._send(200, manager.alerts_state())
+                    except Exception:
+                        log.error("admin alert settings failed")
+                        self._send(500, {"error": "alert settings could not be read"})
+                return
             if path == "/api/admin/status":
                 # Read-only: the Status tab's daemon, client, reader and
                 # problem information. It changes nothing.
@@ -203,9 +211,10 @@ def make_admin_handler(manager, token):
             export = re.fullmatch(r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/claude-export", path)
             ingest_setting = method == "PUT" and path == "/api/admin/ingest"
             display_setting = method == "PUT" and path == "/api/admin/display"
+            alerts_setting = method == "PUT" and path == "/api/admin/alerts"
             if ((method == "POST" and path != "/api/admin/sources" and export is None) or
                     (method != "POST" and match is None and not reorder and
-                     not ingest_setting and not display_setting)):
+                     not ingest_setting and not display_setting and not alerts_setting)):
                 self._send(404, {"error": "not found"})
                 return
             if (self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json"
@@ -232,6 +241,8 @@ def make_admin_handler(manager, token):
                     result = manager.set_ingest_enabled(data)
                 elif display_setting:
                     result = manager.set_display(data)
+                elif alerts_setting:
+                    result = manager.set_alerts(data)
                 elif export:
                     result = manager.configure_claude_export(export[1], data)
                 elif method == "DELETE":

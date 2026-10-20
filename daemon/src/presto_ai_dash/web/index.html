@@ -98,6 +98,35 @@
       </details>
 
       <details class="setting">
+        <summary><span class="setting-title">Alerts</span><span class="scope-badge">Applies to all services</span></summary>
+        <div class="setting-body">
+          <label for="alert-warning">Warning percent</label>
+          <input id="alert-warning" type="number" min="1" max="100" step="1" inputmode="numeric">
+          <p class="note">A service that has used this much of an allowance turns yellow.</p>
+          <label for="alert-critical">Critical percent</label>
+          <input id="alert-critical" type="number" min="1" max="100" step="1" inputmode="numeric">
+          <p class="note">A service that has used this much turns red. It must be above the warning percent.
+            At 100% a service is rate limited, as it always was.</p>
+          <label class="check"><input id="alert-sound" type="checkbox"> Sound on a new warning</label>
+          <p class="note">One chirp for a warning, two for a critical or rate-limited service. A warning
+            that persists does not chirp again, and a recovery is silent. Long-pressing the Presto mutes
+            the sound until you press again.</p>
+          <label class="check"><input id="alert-quiet" type="checkbox"> Quiet hours</label>
+          <label for="alert-quiet-start">Quiet from</label>
+          <input id="alert-quiet-start" type="time" step="60">
+          <label for="alert-quiet-end">Quiet until</label>
+          <input id="alert-quiet-end" type="time" step="60">
+          <p class="note">In quiet hours the Presto stays silent and its light is dimmed. The times are
+            this computer's local time; the daemon decides when it is quiet, so the device needs no clock.</p>
+          <label class="check"><input id="alert-pop" type="checkbox"> Scroll Home to an alarmed service</label>
+          <p class="note">Home scrolls to a service that has just got worse, once the alarm has held for
+            half a minute. It never moves while you are touching the screen, and it brings your own
+            position back a minute later.</p>
+          <p id="alert-quiet-now" class="note" hidden>It is quiet now: the Presto is silent and its light is dimmed.</p>
+        </div>
+      </details>
+
+      <details class="setting">
         <summary><span class="setting-title">Effective daemon configuration</span><span class="scope-badge">Applies to all services</span></summary>
         <div class="setting-body">
           <p class="note">Read-only. These values need a daemon restart, so they are edited in dash.toml or in the environment, not on this page.</p>

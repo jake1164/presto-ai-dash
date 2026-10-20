@@ -25,8 +25,9 @@ except ImportError:
         # starts the static demo, rather than crashing on a dotted filename.
         STATIC_DEMO = True
 
-from alerts import AlertTracker, led_pattern
-from cards import error_card, offline_card, overall_status, parse_cards
+from alerts import AlertTracker, led_brightness, led_pattern, worst_accent
+from cards import (error_card, normalise_status, offline_card, overall_status,
+                   parse_cards)
 from gestures import (
     LONG_PRESS,
     SWIPE_LEFT,
@@ -35,7 +36,7 @@ from gestures import (
     GestureRecogniser,
 )
 from home import (DEMO_QUOTAS, HomeScroll, ROW_HEIGHT, SOURCE_HEIGHT, SOURCE_TOP,
-                  overflow_rows, row_at, source_rows)
+                  alert_settings, overflow_rows, row_at, source_rows)
 from net import (
     StatusClient,
     StatusError,
@@ -44,6 +45,7 @@ from net import (
     embedded_payload,
     load_static_payload,
 )
+from popup import PopToTop
 from ui import (Palette, build_home_layout, dot_hit, draw_boot, draw_card, draw_home,
                 draw_sources, draw_message)
 
@@ -111,6 +113,14 @@ class App(object):
             debounce_ms=self.tap_debounce_ms,
         )
         self.alerts = AlertTracker()
+        # The alarm pop-to-top: Home scrolls to a service that got worse.
+        self.popup = PopToTop()
+        # What the daemon says about alerts, and whether it is quiet now.
+        self.quiet = False
+        self.alert_sound = True
+        self.pop_to_top = True
+        # The LED shows the worst of every service, not just the open card.
+        self.overall_accent = None
 
         self.cards = []
         self.index = 0
@@ -148,7 +158,9 @@ class App(object):
 
     def _play_cue(self, cue):
         """Play a sound cue. Quiet by design."""
-        if not self.sound_enabled or self._buzzer is None:
+        if not self.sound_enabled or not self.alert_sound or self.quiet:
+            return
+        if self._buzzer is None:
             return
         from alerts import chirp_count
 
@@ -202,7 +214,38 @@ class App(object):
         self.index = next((i for i, card in enumerate(cards) if card.id == selected), 0)
         if selected is not None and self._current_card().id != selected:
             self.detail_open = False
+        if error is None:
+            self._apply_alerts(payload)
         self._needs_redraw = True
+
+    def _apply_alerts(self, payload):
+        """Sound, LED and pop-to-top decisions for a new payload.
+
+        The daemon sends the alert settings; the device trusts nothing but
+        a real boolean, and falls back to its own defaults for the rest.
+        """
+        settings = alert_settings(payload)
+        self.quiet = settings["quiet"]
+        self.alert_sound = settings["sound"]
+        self.pop_to_top = settings["pop_to_top"]
+        self.alerts.quiet = self.quiet
+        statuses = {}
+        sources = payload.get("sources") if isinstance(payload, dict) else None
+        for source in sources or ():
+            if isinstance(source, dict) and source.get("id"):
+                statuses[source["id"]] = normalise_status(source.get("status"))
+        if not statuses:
+            # An older daemon sends no sources: the card carries the status.
+            card = self._current_card()
+            statuses = {card.id: card.status}
+        # The LED is a status meter: it shows the worst service, not only
+        # the one the user happens to be looking at.
+        self.overall_accent = worst_accent(statuses.values())
+        for _service, cue in self.alerts.update(statuses):
+            self._play_cue(cue)
+        now = _now_ms() / 1000.0
+        for service, status in statuses.items():
+            self.popup.observe(service, status, now)
 
     async def poll_once(self):
         """Reconnect when needed and accept only a usable authenticated payload."""
@@ -387,27 +430,57 @@ class App(object):
         touch = self.presto.touch
         touch.poll()
         state = bool(touch.state)
+        now = _now_ms() / 1000.0
         if state:
             self._touch_x = touch.x
             self._touch_y = touch.y
+            # The user is at the screen: the list must not move under them.
+            self.popup.touch(now)
         previous_offset = self.home_scroll.offset
         self.home_scroll.update(state, self._touch_x, self._touch_y,
                                 enabled=self._current_card().id == "dash" and
                                 self._connection_screen() is None)
         if self.home_scroll.offset != previous_offset:
+            # The user scrolled: that also cancels a pending return.
+            self.popup.scrolled(now)
             self._needs_redraw = True
         # Use the final touched position on release, rather than resetting to
         # (0, 0), so left/right swipes use the actual gesture.
         return self.gestures.update(state, self._touch_x, self._touch_y, _now_ms())
 
+    def _poll_popup(self):
+        """Move Home to an alarmed service, and back to the user's position.
+
+        Home only: never on a card, never on a detail view, and never while
+        the daemon connection is broken.
+        """
+        if not self.pop_to_top or self.home_layout is None:
+            return
+        if self._current_card().id != "dash" or self.detail_open:
+            return
+        if self.connection_error is not None:
+            return
+        now = _now_ms() / 1000.0
+        action = self.popup.poll(now, self.home_layout, self.home_scroll.offset)
+        if action is None:
+            return
+        offset = max(0, min(int(action["offset"]), self.home_scroll.limit))
+        self.home_scroll.offset = offset
+        self._needs_redraw = True
+
     # -- rendering ----------------------------------------------------------
 
     def _update_leds(self):
         card = self._current_card()
-        accent = ("red" if self._connection_screen() else "grey") if self.connection_error else card.accent
+        if self.connection_error:
+            accent = "red" if self._connection_screen() else "grey"
+        else:
+            # The worst of every service, so a warning on another account is
+            # still visible from across the desk.
+            accent = self.overall_accent or card.accent
         rgb = led_pattern(
             accent,
-            brightness=self.led_brightness,
+            brightness=led_brightness(self.led_brightness, self.quiet),
             muted=self.alerts.muted,
             dim_when_muted=self.led_dim_when_muted,
         )
@@ -470,6 +543,7 @@ class App(object):
         while True:
             gestures = self._poll_touch()
             self._handle_gestures(gestures)
+            self._poll_popup()
 
             # A detail view closes itself after a while.
             if self.detail_open:
@@ -487,6 +561,7 @@ class App(object):
         try:
             while True:
                 self._handle_gestures(self._poll_touch())
+                self._poll_popup()
                 if self._last_screen != self._connection_screen():
                     self._needs_redraw = True
                 if self.detail_open and _ticks_diff(_now_ms(), self.detail_opened_at) > DETAIL_TIMEOUT_MS:

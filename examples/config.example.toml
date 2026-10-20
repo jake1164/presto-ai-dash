@@ -44,6 +44,26 @@ token = ""
 # DASH_ENCRYPTION_KEY can instead supply a Fernet master key.
 key_file = ""
 
+# --- Alerts ----------------------------------------------------------------
+# These apply to every service. The admin page's Alerts section overrides
+# them; see docs/configuration.md.
+
+[alerts]
+# A quota window at this percentage makes the service "near limit" (yellow).
+warning_percent = 80
+# A quota window at this percentage makes the service "critical" (red).
+# It must be above the warning percent. At 100% a service is rate limited.
+critical_percent = 95
+# Sound a short cue when a service gets worse.
+sound = true
+# Be silent and dim the light during the quiet window. The times are the
+# local time of the machine the daemon runs on.
+quiet_hours = false
+quiet_start = "22:00"
+quiet_end = "07:00"
+# Let the Presto's Home list scroll to a service that has just got worse.
+pop_to_top = true
+
 # --- Sources ---------------------------------------------------------------
 # Fake data is enabled by default. Disable it before enabling a live source so
 # synthetic metrics can never be mistaken for real usage.

@@ -111,6 +111,15 @@ class PopToTop(object):
             # It recovered: the pending alarm is void.
             self._pending.pop(service, None)
 
+    def forget(self, service):
+        """Forget one service: its baseline and any alarm waiting to be shown.
+
+        A service whose alerts are turned off does not take part in the
+        pop-to-top, so an alarm it raised must not move the list any more.
+        """
+        self._seen.pop(service, None)
+        self._pending.pop(service, None)
+
     def _forget_shown(self):
         """Clear the worst alarm shown once no service is alarmed any more.
 

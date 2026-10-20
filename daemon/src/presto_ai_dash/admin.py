@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 MAX_BODY = 65536
 COLLECTOR_FILE = "claude_statusline.py"
 INGEST_TOKEN_PATH = r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/ingest-token"
+SERVICE_ALERTS_PATH = r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/alerts"
 ASSETS = {"/": ("index.html", "text/html; charset=utf-8"),
           "/admin.js": ("admin.js", "text/javascript; charset=utf-8"),
           "/admin.css": ("admin.css", "text/css; charset=utf-8")}
@@ -173,6 +174,17 @@ def make_admin_handler(manager, token):
                         log.error("admin alert settings failed")
                         self._send(500, {"error": "alert settings could not be read"})
                 return
+            service_alerts = re.fullmatch(SERVICE_ALERTS_PATH, path)
+            if service_alerts:
+                if self._authorized():
+                    try:
+                        self._send(200, manager.service_alert_state(service_alerts[1]))
+                    except KeyError:
+                        self._send(404, {"error": "source not found"})
+                    except Exception:
+                        log.error("admin service alert settings failed")
+                        self._send(500, {"error": "service alert settings could not be read"})
+                return
             if path == "/api/admin/status":
                 # Read-only: the Status tab's daemon, client, reader and
                 # problem information. It changes nothing.
@@ -212,9 +224,11 @@ def make_admin_handler(manager, token):
             ingest_setting = method == "PUT" and path == "/api/admin/ingest"
             display_setting = method == "PUT" and path == "/api/admin/display"
             alerts_setting = method == "PUT" and path == "/api/admin/alerts"
+            service_alerts = method == "PUT" and re.fullmatch(SERVICE_ALERTS_PATH, path)
             if ((method == "POST" and path != "/api/admin/sources" and export is None) or
                     (method != "POST" and match is None and not reorder and
-                     not ingest_setting and not display_setting and not alerts_setting)):
+                     not ingest_setting and not display_setting and not alerts_setting
+                     and not service_alerts)):
                 self._send(404, {"error": "not found"})
                 return
             if (self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json"
@@ -243,6 +257,8 @@ def make_admin_handler(manager, token):
                     result = manager.set_display(data)
                 elif alerts_setting:
                     result = manager.set_alerts(data)
+                elif service_alerts:
+                    result = manager.set_service_alerts(service_alerts[1], data)
                 elif export:
                     result = manager.configure_claude_export(export[1], data)
                 elif method == "DELETE":

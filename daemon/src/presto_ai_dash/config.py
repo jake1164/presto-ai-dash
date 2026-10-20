@@ -21,7 +21,8 @@ DEFAULTS = {
     "logging": {"level": "INFO"},
     "admin": {"enabled": False, "port": 8788, "token": "", "key_file": ""},
     "display": {"overflow_rows": 1},
-    "alerts": {"warning_percent": 80, "critical_percent": 95,
+    "alerts": {"enabled": True,
+               "warning_percent": 80, "critical_percent": 95,
                "sound": True, "quiet_hours": False,
                "quiet_start": "22:00", "quiet_end": "07:00",
                "pop_to_top": True},
@@ -130,8 +131,8 @@ def ingest_enabled(config, stored=None, environ=None):
 
 
 # The alert settings the admin page can change, and the file can set.
-ALERT_KEYS = ("warning_percent", "critical_percent", "sound", "quiet_hours",
-              "quiet_start", "quiet_end", "pop_to_top")
+ALERT_KEYS = ("enabled", "warning_percent", "critical_percent", "sound",
+              "quiet_hours", "quiet_start", "quiet_end", "pop_to_top")
 
 
 def alert_base_settings(config):
@@ -170,7 +171,7 @@ def alert_settings(config, stored=None, now=None):
     except ValueError:
         values["warning_percent"] = DEFAULT_WARNING_PERCENT
         values["critical_percent"] = DEFAULT_CRITICAL_PERCENT
-    for key in ("sound", "quiet_hours", "pop_to_top"):
+    for key in ("enabled", "sound", "quiet_hours", "pop_to_top"):
         if type(values[key]) is not bool:
             values[key] = DEFAULTS["alerts"][key]
     for key in ("quiet_start", "quiet_end"):
@@ -264,7 +265,7 @@ def load_config(path=None):
         validate_thresholds(alerts["warning_percent"], alerts["critical_percent"])
     except ValueError as exc:
         raise ConfigError("alerts: %s" % exc) from exc
-    for key in ("sound", "quiet_hours", "pop_to_top"):
+    for key in ("enabled", "sound", "quiet_hours", "pop_to_top"):
         if type(alerts.get(key)) is not bool:
             raise ConfigError("alerts.%s must be a boolean" % key)
     for key in ("quiet_start", "quiet_end"):

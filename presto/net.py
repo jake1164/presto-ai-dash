@@ -73,6 +73,24 @@ def build_url(host, port, path="/api/v1/status"):
     return "http://{}:{}{}".format(host, port, path)
 
 
+# The device's only write: one service's alerts on or off. The service id
+# goes into the path, so it must be the plain identifier the daemon uses.
+SAFE_SERVICE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+MAX_SERVICE_CHARS = 80
+# The answer is a small JSON object; a bigger one is not what we asked for.
+ALERT_RESPONSE_LIMIT = 1024
+
+
+def safe_service_id(service):
+    """The service id as it may appear in a path, or None when unusable."""
+    if not isinstance(service, str) or not service or len(service) > MAX_SERVICE_CHARS:
+        return None
+    for char in service:
+        if char not in SAFE_SERVICE_CHARS:
+            return None
+    return service
+
+
 def safe_label(value, limit=MAX_LABEL):
     """A printable ASCII label of at most ``limit`` characters.
 
@@ -321,6 +339,114 @@ class StatusClient(object):
                 raise StatusError("response was not UTF-8")
             self.stage = "parse"
             body = header = None
+            _collect()
+            return parse_payload(text)
+        finally:
+            if writer is not None:
+                try:
+                    writer.close()
+                    await writer.wait_closed()
+                except OSError:
+                    pass
+
+
+    async def post_alert(self, service, enabled):
+        """Set one service's alerts on or off; return the daemon's answer.
+
+        The same contract as ``fetch_async``: bounded asyncio streams, no
+        redirect, no chunked body, a capped answer and the same exceptions.
+        The body is exactly ``{"enabled": true|false}``: it sets a state and
+        never toggles, so a double tap or a retry is harmless.
+
+        Raises ``Unauthorised`` on 401, ``StatusError`` on any other status
+        or an unusable body, and ``NetworkUnavailable`` when the daemon
+        cannot be reached at all.
+        """
+        import asyncio
+        try:
+            return await asyncio.wait_for(self._post_alert_stream(service, enabled),
+                                          self.timeout)
+        except (Unauthorised, StatusError):
+            raise
+        except Exception as exc:
+            error = NetworkUnavailable("cannot reach daemon")
+            error.reason = describe_error(exc, self.stage)
+            raise error
+
+    async def _post_alert_stream(self, service, enabled):
+        import asyncio
+        writer = None
+        self.stage = "conn"
+        self.received = 0
+        identifier = safe_service_id(service)
+        if identifier is None:
+            raise StatusError("invalid service id")
+        if type(enabled) is not bool:
+            raise StatusError("enabled must be true or false")
+        path = "/api/v1/alerts/" + identifier
+        try:
+            headers = self.headers
+            if any(char in str(value) for value in (self.host, self.token, path)
+                   for char in ("\r", "\n")):
+                raise StatusError("invalid connection settings")
+            body = json.dumps({"enabled": enabled})
+            reader, writer = await asyncio.open_connection(self.host, self.port)
+            request = ("POST %s HTTP/1.1\r\nHost: %s:%s\r\n"
+                       "Authorization: %s\r\nX-Presto-Client: %s\r\n"
+                       "X-Presto-Revision: %s\r\nContent-Type: application/json\r\n"
+                       "Content-Length: %d\r\nConnection: close\r\n\r\n%s" %
+                       (path, self.host, self.port, headers["Authorization"],
+                        headers["X-Presto-Client"], headers["X-Presto-Revision"],
+                        len(body), body))
+            self.stage = "send"
+            writer.write(request.encode("utf-8"))
+            await writer.drain()
+            self.stage = "head"
+
+            header = b""
+            while b"\r\n\r\n" not in header:
+                chunk = await reader.read(256)
+                if not chunk:
+                    raise NetworkUnavailable("short head")
+                header += chunk
+                if len(header) > 4096:
+                    raise StatusError("response headers too large")
+            header, body_bytes = header.split(b"\r\n\r\n", 1)
+            lines = header.split(b"\r\n")
+            try:
+                status = int(lines[0].split()[1])
+                response_headers = {}
+                for line in lines[1:]:
+                    key, value = line.split(b":", 1)
+                    key = key.strip().lower()
+                    if key in response_headers:
+                        raise ValueError
+                    response_headers[key] = value.strip()
+                length = int(response_headers.get(b"content-length", b"-1"))
+            except (ValueError, IndexError):
+                raise StatusError("invalid HTTP response")
+            if status == 401:
+                raise Unauthorised("daemon rejected the shared token")
+            if status != 200:
+                raise StatusError("daemon returned HTTP %s" % status)
+            if not 0 <= length <= ALERT_RESPONSE_LIMIT or b"transfer-encoding" in response_headers:
+                raise StatusError("unsupported response size or framing")
+            self.stage = "body"
+            self.received = len(body_bytes)
+            while len(body_bytes) < length:
+                chunk = await reader.read(min(512, length - len(body_bytes)))
+                if not chunk:
+                    raise NetworkUnavailable("short body")
+                body_bytes += chunk
+                self.received = len(body_bytes)
+            if len(body_bytes) != length:
+                raise StatusError("invalid response length")
+            try:
+                text = body_bytes.decode("utf-8")
+            except UnicodeError:
+                raise StatusError("response was not UTF-8")
+            self.stage = "parse"
+            body_bytes = header = None
             _collect()
             return parse_payload(text)
         finally:

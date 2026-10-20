@@ -33,6 +33,7 @@
     </div>
 
     <section class="panel" role="tabpanel" id="panel-services" aria-labelledby="tab-services" tabindex="0">
+      <p id="services-alerts-banner" class="banner" hidden>Alerts are off for all services</p>
       <div class="section-title"><h2>Your services</h2><button id="add-source">Add source</button></div>
       <p>Manage accounts, keys, and refresh settings here. Changes are saved in the database.
         Disable demo data before enabling a live source.</p>
@@ -54,6 +55,10 @@
       <div id="status-clients"></div>
       <h3>Accounts</h3>
       <div id="status-accounts"></div>
+      <h3>Alerts</h3>
+      <p class="note">Which services are alerting, and which are not. Alerts can be off for every
+        service at once, with the master switch on the Settings tab.</p>
+      <div id="status-alerts"></div>
       <h3>Readers and collectors</h3>
       <div id="status-readers"></div>
       <h3>Problems</h3>
@@ -97,9 +102,14 @@
         </div>
       </details>
 
-      <details class="setting">
-        <summary><span class="setting-title">Alerts</span><span class="scope-badge">Applies to all services</span></summary>
+      <details class="setting" id="alerts-setting">
+        <summary><span class="setting-title">Alerts</span><span class="scope-badge">Applies to all services</span>
+          <span class="scope-badge" id="alert-master-summary">Alerts on for every service</span></summary>
         <div class="setting-body">
+          <p id="alerts-banner" class="banner" hidden>Alerts are off for all services</p>
+          <label class="check"><input id="alert-master" type="checkbox"> Alerts on for all services</label>
+          <p id="alert-master-reason" class="note" hidden>Alerts are off for all services: no service chirps,
+            lights up or scrolls Home to an alarm. Turn the master switch on to use the settings below.</p>
           <label for="alert-warning">Warning percent</label>
           <input id="alert-warning" type="number" min="1" max="100" step="1" inputmode="numeric">
           <p class="note">A service that has used this much of an allowance turns yellow.</p>

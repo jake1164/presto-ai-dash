@@ -10,6 +10,18 @@
   let dragging = null;
   let ingestState = null, tokenReveal = null, displayState = null;
   let alertsState = null;
+  // The master switch: alerts on or off for every service. It is kept apart
+  // from the form, so a background refresh never rewrites what the reader
+  // is typing.
+  let masterOn = true;
+  // What the master switch was the last time the page was drawn, so a change
+  // of it can repaint the account cards at once.
+  let lastMasterOn = null;
+  // One service's own alert settings, by service id, and the values the
+  // reader has typed but not saved yet. Both survive the ten-second refresh.
+  const serviceAlertStates = new Map();
+  const serviceAlertDrafts = new Map();
+  const serviceAlertLoading = new Set();
   let statusState = null, configState = null;
   let activeTab = "services";
   // Which account cards are open. Kept across the ten-second refresh, so the
@@ -162,16 +174,35 @@
     element("overflow-rows").disabled = !!displayState?.locked_by_environment;
     element("display-lock").hidden = !displayState?.locked_by_environment;
   }
-  async function loadAlerts() {
+  // The reason the reader sees in words when the master switch is off.
+  // It is text, not only a colour, so it is never missed.
+  const MASTER_OFF_REASON = "Alerts are off for all services: no service chirps, lights up or " +
+    "scrolls Home to an alarm. Turn the master switch on to use the settings below.";
+  const MASTER_OFF_BANNER = "Alerts are off for all services";
+
+  async function loadAlerts(quiet = false) {
     // The alert settings travel with the status payload, so they are read on
-    // their own, like the display settings.
+    // their own, like the display settings. A quiet read only refreshes the
+    // master switch and the banners: it never rewrites the form the reader
+    // is filling in.
     try {
+      const previous = alertsState;
       alertsState = await request("/api/admin/alerts");
-      renderAlerts();
+      if (quiet) { masterOn = alertsState.enabled !== false; renderMasterState(); }
+      else renderAlerts();
+      // A service's own thresholds are resolved against the global ones, so
+      // the open cards are read again when the global ones move.
+      if (!previous || previous.enabled !== alertsState.enabled
+        || previous.warning_percent !== alertsState.warning_percent
+        || previous.critical_percent !== alertsState.critical_percent) {
+        await refreshOpenServiceAlerts();
+      }
     } catch (_) { /* keep the last known settings */ }
   }
   function renderAlerts() {
     const state = alertsState || {};
+    masterOn = state.enabled !== false;
+    element("alert-master").checked = masterOn;
     element("alert-warning").value = String(state.warning_percent ?? 80);
     element("alert-critical").value = String(state.critical_percent ?? 95);
     element("alert-sound").checked = state.sound !== false;
@@ -180,11 +211,52 @@
     element("alert-quiet-end").value = state.quiet_end ?? "07:00";
     element("alert-pop").checked = state.pop_to_top !== false;
     element("alert-quiet-now").hidden = !state.quiet;
+    renderMasterState();
+  }
+  // Everything that depends on the master switch: the banners, the reason in
+  // words, the controls that cannot be used, and the summary line.
+  function renderMasterState() {
+    const off = !masterOn;
+    const changed = lastMasterOn !== masterOn;
+    lastMasterOn = masterOn;
+    element("alert-master").checked = masterOn;
+    element("alerts-banner").textContent = MASTER_OFF_BANNER;
+    element("services-alerts-banner").textContent = MASTER_OFF_BANNER;
+    element("alerts-banner").hidden = !off;
+    element("services-alerts-banner").hidden = !off;
+    element("alert-master-reason").hidden = !off;
+    element("alert-master-summary").textContent =
+      off ? "Alerts off for all services" : "Alerts on for every service";
+    // The sound, the quiet hours and the scroll to an alarm are all the
+    // master's business. They keep their values: only their use is stopped.
+    for (const id of ["alert-sound", "alert-quiet", "alert-quiet-start",
+      "alert-quiet-end", "alert-pop"]) setDisabled(id, off);
+    for (const group of document.querySelectorAll(".service-alerts")) {
+      applyServiceAlertDisabled(group);
+    }
+    // The chips on the account cards say whether a service alerts, so they
+    // follow the master switch at once.
+    if (changed) renderList();
+  }
+  function setDisabled(id, off) {
+    const node = element(id);
+    if (!node) return;
+    node.disabled = off;
+    if (off) node.setAttribute("aria-disabled", "true");
+    else node.removeAttribute("aria-disabled");
+  }
+  function percentValue(id, fallback) {
+    // An empty field must not send a broken value: the stored one is used.
+    const raw = String(element(id).value || "").trim();
+    if (raw === "") return fallback;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : fallback;
   }
   function alertValues() {
     return {
-      warning_percent: Number(element("alert-warning").value),
-      critical_percent: Number(element("alert-critical").value),
+      enabled: element("alert-master").checked,
+      warning_percent: percentValue("alert-warning", alertsState?.warning_percent ?? 80),
+      critical_percent: percentValue("alert-critical", alertsState?.critical_percent ?? 95),
       sound: element("alert-sound").checked,
       quiet_hours: element("alert-quiet").checked,
       quiet_start: element("alert-quiet-start").value || "00:00",
@@ -194,11 +266,21 @@
   }
   async function saveAlerts() {
     if (busy) { renderAlerts(); return; }
+    const wanted = alertValues();
+    const wasOn = masterOn;
     busy = true;
     try {
-      alertsState = await request("/api/admin/alerts", "PUT", alertValues());
-      message("Alerts saved: warning at " + alertsState.warning_percent + "%, critical at " +
-        alertsState.critical_percent + "%.");
+      alertsState = await request("/api/admin/alerts", "PUT", wanted);
+      // The open cards are resolved against these values, so they are read
+      // again: the master switch and the thresholds both moved.
+      await refreshOpenServiceAlerts();
+      if (wanted.enabled !== wasOn) {
+        message(wanted.enabled ? "Alerts are on for every service." :
+          "Alerts are off for all services. The settings below are kept for later.");
+      } else {
+        message("Alerts saved: warning at " + alertsState.warning_percent + "%, critical at " +
+          alertsState.critical_percent + "%.");
+      }
     } catch (error) { message(error.message, true); }
     finally { busy = false; renderAlerts(); }
   }
@@ -218,6 +300,172 @@
     }
     container.append(buildTable(["Setting", "Value", "Comes from"],
       settings.map((entry) => [entry.name, String(entry.value), entry.origin])));
+  }
+
+  // -- one service's alert settings ------------------------------------------
+
+  function globalPercent(key, fallback) {
+    const value = alertsState?.[key];
+    return typeof value === "number" ? value : fallback;
+  }
+  function serviceAlertDraft(id, state) {
+    // What the form shows: the saved values, or what the reader has typed.
+    let draft = serviceAlertDrafts.get(id);
+    if (!draft) {
+      draft = {
+        enabled: state ? state.enabled !== false : true,
+        warning: state && state.warning_percent !== null && state.warning_percent !== undefined
+          ? String(state.warning_percent) : "",
+        critical: state && state.critical_percent !== null && state.critical_percent !== undefined
+          ? String(state.critical_percent) : "",
+      };
+      serviceAlertDrafts.set(id, draft);
+    }
+    return draft;
+  }
+  async function loadServiceAlerts(id, force = false) {
+    // One service's own settings, read when its card is opened.
+    if ((!force && serviceAlertStates.has(id)) || serviceAlertLoading.has(id)) return;
+    serviceAlertLoading.add(id);
+    try {
+      const state = await request("/api/admin/sources/" + id + "/alerts");
+      serviceAlertStates.set(id, state);
+      serviceAlertDraft(id, state);
+      renderList();
+    } catch (error) { message(error.message, true); }
+    finally { serviceAlertLoading.delete(id); }
+  }
+  async function refreshOpenServiceAlerts() {
+    // The open cards, read again: their own thresholds are resolved against
+    // the global ones, which may have moved.
+    for (const id of [...expanded]) {
+      if (serviceAlertStates.has(id)) await loadServiceAlerts(id, true);
+    }
+  }
+  function numberField(id, labelText, ariaText, value, placeholder) {
+    const label = document.createElement("label");
+    label.htmlFor = id; label.textContent = labelText;
+    const input = document.createElement("input");
+    input.id = id; input.type = "number"; input.min = "1"; input.max = "100"; input.step = "1";
+    input.inputMode = "numeric"; input.value = value;
+    if (placeholder) input.placeholder = placeholder;
+    input.setAttribute("aria-label", ariaText);
+    return {label, input};
+  }
+  function renderServiceAlerts(source, detail) {
+    // The Alerts group inside one expanded account card.
+    const group = document.createElement("div");
+    group.className = "service-alerts";
+    group.dataset.id = source.id;
+    group.append(el("h4", "", "Alerts"));
+    const state = serviceAlertStates.get(source.id);
+    if (!state) {
+      group.append(el("p", "note", "Reading this service's alert settings..."));
+      detail.append(group);
+      loadServiceAlerts(source.id);
+      return;
+    }
+    const draft = serviceAlertDraft(source.id, state);
+    const summary = el("p", "note");
+    if (!masterOn || state.master_off) {
+      summary.textContent = "Alerts are off for all services, so this service does not alert.";
+    } else if (state.effective?.enabled) {
+      summary.textContent = "Alerts on for this service. Warning at " +
+        state.effective.warning_percent + "%, critical at " + state.effective.critical_percent + "%.";
+    } else {
+      summary.textContent = "Alerts off for this service. Its thresholds are kept for later.";
+    }
+    group.append(summary);
+    if (state.override_ignored) {
+      const note = el("p", "note service-alerts-override");
+      note.textContent = "override ignored: this service's own thresholds cannot be used, so the " +
+        "global ones are used instead (" + state.effective.warning_percent + "% warning, " +
+        state.effective.critical_percent + "% critical).";
+      group.append(note);
+    }
+    const reason = el("p", "note service-alerts-reason");
+    reason.textContent = MASTER_OFF_REASON;
+    group.append(reason);
+
+    const enabledLabel = document.createElement("label");
+    enabledLabel.className = "check";
+    const enabled = document.createElement("input");
+    enabled.type = "checkbox"; enabled.id = "svc-alert-" + source.id + "-enabled";
+    enabled.checked = draft.enabled;
+    enabled.setAttribute("aria-label", "Alerts for this service (" + source.name + ")");
+    enabled.addEventListener("change", () => { draft.enabled = enabled.checked; });
+    enabledLabel.append(enabled, document.createTextNode("Alerts for this service"));
+    group.append(enabledLabel);
+
+    const warning = numberField("svc-alert-" + source.id + "-warning", "Warning percent",
+      "Warning percent for " + source.name, draft.warning,
+      "global " + globalPercent("warning_percent", 80));
+    warning.input.addEventListener("input", () => { draft.warning = warning.input.value; });
+    const critical = numberField("svc-alert-" + source.id + "-critical", "Critical percent",
+      "Critical percent for " + source.name, draft.critical,
+      "global " + globalPercent("critical_percent", 95));
+    critical.input.addEventListener("input", () => { draft.critical = critical.input.value; });
+    group.append(warning.label, warning.input, critical.label, critical.input);
+    group.append(el("p", "note", "An empty field inherits the global value."));
+
+    const actions = el("div", "actions");
+    const save = document.createElement("button");
+    save.type = "button"; save.id = "svc-alert-" + source.id + "-save";
+    save.textContent = "Save";
+    save.addEventListener("click", () => saveServiceAlerts(source));
+    actions.append(save);
+    group.append(actions);
+
+    detail.append(group);
+    applyServiceAlertDisabled(group);
+  }
+  function applyServiceAlertDisabled(group) {
+    const off = !masterOn;
+    for (const node of group.querySelectorAll("input, button")) {
+      node.disabled = off;
+      if (off) node.setAttribute("aria-disabled", "true");
+      else node.removeAttribute("aria-disabled");
+    }
+    const reason = group.querySelector(".service-alerts-reason");
+    if (reason) reason.hidden = !off;
+  }
+  function parsePercent(text) {
+    // An empty field means "inherit the global value"; anything else must be
+    // a whole number between 1 and 100.
+    if (String(text).trim() === "") return null;
+    const value = Number(text);
+    if (!Number.isInteger(value) || value < 1 || value > 100) return undefined;
+    return value;
+  }
+  async function saveServiceAlerts(source) {
+    if (busy) return;
+    const draft = serviceAlertDrafts.get(source.id);
+    if (!draft) return;
+    const warning = parsePercent(draft.warning);
+    const critical = parsePercent(draft.critical);
+    if (warning === undefined) {
+      message("The warning percent must be a whole number between 1 and 100.", true); return;
+    }
+    if (critical === undefined) {
+      message("The critical percent must be a whole number between 1 and 100.", true); return;
+    }
+    const body = {enabled: !!draft.enabled, warning_percent: warning, critical_percent: critical};
+    busy = true;
+    try {
+      const saved = await request("/api/admin/sources/" + source.id + "/alerts", "PUT", body);
+      serviceAlertStates.set(source.id, saved);
+      serviceAlertDrafts.set(source.id, {
+        enabled: saved.enabled !== false,
+        warning: saved.warning_percent === null || saved.warning_percent === undefined
+          ? "" : String(saved.warning_percent),
+        critical: saved.critical_percent === null || saved.critical_percent === undefined
+          ? "" : String(saved.critical_percent),
+      });
+      await reload();
+      message("Alerts for " + saved.name + " saved: warning at " +
+        saved.effective.warning_percent + "%, critical at " + saved.effective.critical_percent + "%.");
+    } catch (error) { message(error.message, true); }
+    finally { busy = false; renderList(); }
   }
 
   // -- the editor -----------------------------------------------------------
@@ -443,6 +691,16 @@
     if (quota.local_activity && quota.local_activity.available) return chip("local logs", "chip-source");
     return null;
   }
+  function alertsChip(source) {
+    // A chip on the collapsed card line: it says the service does not alert,
+    // and why. It is information, not a control. The master switch is read
+    // from the alert settings, so the chip follows it at once and does not
+    // wait for the next list refresh.
+    const alerts = source.alerts || {};
+    if (!masterOn) return chip("alerts off (global)", "chip-muted");
+    if (alerts.service_enabled === false) return chip("alerts off", "chip-muted");
+    return null;
+  }
   function toggleCard(id) {
     const open = !expanded.has(id);
     if (open) expanded.add(id); else expanded.delete(id);
@@ -456,6 +714,8 @@
       const chevron = toggle.querySelector(".chevron");
       if (chevron) chevron.textContent = open ? "▾" : "▸";
     }
+    // An open card reads its own alert settings.
+    if (open) loadServiceAlerts(id);
   }
   function copyCell(text) {
     const container = document.createElement("div"); container.className = "ingest-line";
@@ -498,6 +758,9 @@
     const list = element("source-list"), active = document.activeElement;
     const focusedId = list.contains(active) ? active.closest(".source")?.dataset.id : null;
     const focusedAction = active?.dataset.action;
+    // The alert controls of an open card keep the keyboard focus when the
+    // list is rebuilt underneath the reader.
+    const focusedField = active?.id && active.id.startsWith("svc-alert-") ? active.id : null;
     list.replaceChildren();
     if (!sources.length) {
       const empty = document.createElement("p"); empty.textContent = "No sources configured. Add your first source.";
@@ -507,6 +770,7 @@
       list.append(buildCard(source, index));
     }
     if (focusedId && focusedAction) focusAccount(focusedId, focusedAction);
+    else if (focusedField) document.getElementById(focusedField)?.focus({preventScroll: true});
   }
   function buildCard(source, index) {
     const card = document.createElement("article");
@@ -529,6 +793,8 @@
     toggle.append(dot, name, figures, freshnessChip(source));
     const origin = sourceChip(source);
     if (origin) toggle.append(origin);
+    const alerting = alertsChip(source);
+    if (alerting) toggle.append(alerting);
     const chevron = document.createElement("span");
     chevron.className = "chevron"; chevron.setAttribute("aria-hidden", "true");
     chevron.textContent = expanded.has(source.id) ? "▾" : "▸";
@@ -715,6 +981,9 @@
         paragraph.textContent = line; detail.append(paragraph);
       }
     }
+    // This service's own alert settings: its own switch and its own
+    // thresholds, or the global ones when it sets none.
+    renderServiceAlerts(source, detail);
   }
 
   // -- the status tab -------------------------------------------------------
@@ -784,6 +1053,24 @@
             whenText(collector.last_seen), collector.state])));
       }
     }
+    const alertBox = element("status-alerts");
+    alertBox.replaceChildren();
+    const alerts = state.alerts || {};
+    const master = alerts.master !== false;
+    alertBox.append(el("p", master ? "note" : "banner",
+      master ? "Alerts are on for every service" : "Alerts are off for all services"));
+    const offServices = alerts.services || [];
+    if (!offServices.length) {
+      alertBox.append(el("p", "note", "Every service is alerting."));
+    } else {
+      for (const service of offServices) {
+        const line = el("p", "note");
+        line.textContent = service.name + ": alerts are off " +
+          (service.master_off ? "because the master switch is off for all services."
+            : "for this service only.");
+        alertBox.append(line);
+      }
+    }
     const problemBox = element("status-problems");
     problemBox.replaceChildren();
     const problems = state.problems || [];
@@ -812,7 +1099,8 @@
   function lock() {
     csrfToken = ""; unlocked = false; sources = []; catalog = []; editing = null;
     ingestState = null; tokenReveal = null; displayState = null;
-    alertsState = null;
+    alertsState = null; masterOn = true; lastMasterOn = null;
+    serviceAlertStates.clear(); serviceAlertDrafts.clear(); serviceAlertLoading.clear();
     statusState = null; configState = null; expanded.clear();
     element("admin-token").value = ""; element("source-form").reset();
     element("source-list").replaceChildren(); element("source-fields").replaceChildren();
@@ -917,8 +1205,8 @@
     } catch (error) { message(error.message, true); }
     finally { busy = false; renderDisplay(); }
   });
-  for (const id of ["alert-warning", "alert-critical", "alert-sound", "alert-quiet",
-    "alert-quiet-start", "alert-quiet-end", "alert-pop"]) {
+  for (const id of ["alert-master", "alert-warning", "alert-critical", "alert-sound",
+    "alert-quiet", "alert-quiet-start", "alert-quiet-end", "alert-pop"]) {
     element(id).addEventListener("change", saveAlerts);
   }
   element("add-source").addEventListener("click", () => { if (!busy) { openEditor(); message(""); } });  element("close-editor").addEventListener("click", () => { if (!busy) closeEditor(); });
@@ -960,8 +1248,14 @@
     } catch (error) { message(error.message, true); }
     finally { busy = false; }
   });
-  // The account list refreshes every ten seconds, as before.
-  setInterval(() => { if (unlocked && !busy) reload(true).catch((error) => message(error.message, true)); }, 10000);
+  // The account list refreshes every ten seconds, as before. The alert
+  // settings are read quietly with it: the master switch and the banners
+  // stay current, and the form the reader is filling in is left alone.
+  setInterval(() => {
+    if (!unlocked || busy) return;
+    reload(true).catch((error) => message(error.message, true));
+    loadAlerts(true);
+  }, 10000);
   // The status tab refreshes itself while it is open and the browser tab is in
   // the foreground. Nothing is fetched while another tab is showing.
   setInterval(() => {

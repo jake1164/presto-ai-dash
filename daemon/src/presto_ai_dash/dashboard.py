@@ -3,7 +3,8 @@
 from . import __version__
 from . import quotas
 from .alert_policy import (DEFAULT_CRITICAL_PERCENT, DEFAULT_WARNING_PERCENT,
-                           apply_threshold, threshold_status)
+                           apply_threshold, resolve_alert_settings,
+                           threshold_status)
 from .models import Card, iso, now_utc, overall_status, severity
 from .quotas import (QUOTA_SCHEMA_VERSION, age_label, compact_age, compact_tokens,
                      estimated_weekly_reset, present_quota, present_snapshot, timestamp)
@@ -376,17 +377,35 @@ def _account_card(row, snapshot, now=None):
                 secondary=row["type"], detail=[snapshot.error] if snapshot.error else [])
 
 
-def _with_threshold(card, snapshot, alerts, now):
+def _resolution_for(row, alerts, resolutions):
+    """One service's effective alert behaviour.
+
+    The caller may pass the resolved behaviour per service; a service
+    without one falls back to the global settings, which is what an older
+    daemon or a caller that knows nothing about the service sees.
+    """
+    found = resolutions.get(row["id"]) if isinstance(resolutions, dict) else None
+    if isinstance(found, dict):
+        return found
+    return resolve_alert_settings(alerts, None)
+
+
+def _with_threshold(card, snapshot, resolution, now):
     """Raise a card's status when one of its quota windows crosses a limit.
 
     The daemon decides the user-facing status; the device only draws it.
     Only a fresh, available window alerts, and a window that resets within
     the grace period never does, so a reset or a stale reading can never
     raise a misleading alert.
+
+    ``resolution`` is the service's effective alert behaviour: its own
+    thresholds, or the global ones it inherits. A service whose alerts are
+    off keeps its true status on its own card: turning the alerts off
+    never hides a number.
     """
     if snapshot is None:
         return card
-    settings = alerts if isinstance(alerts, dict) else {}
+    settings = resolution if isinstance(resolution, dict) else {}
     report = snapshot.metrics.get("quota")
     level = threshold_status(
         report,
@@ -402,11 +421,15 @@ def _with_threshold(card, snapshot, alerts, now):
                 card.detail, None, card.alert)
 
 
-def build_instance_payload(snapshots, instances, alerts=None, now=None):
+def build_instance_payload(snapshots, instances, alerts=None, now=None,
+                           resolutions=None):
     """Home plus one card per enabled account, without overlapping totals.
 
     ``alerts`` carries the warning and critical percentages; they decide
     the user-facing status of a source whose quota window is nearly used.
+    ``resolutions`` carries each service's own resolved alert behaviour, so
+    a service with its own thresholds uses them and a service whose alerts
+    are off does not count towards the overall status.
     ``now`` is the moment every reading is judged against, so a window's
     freshness and its reset are read against the same clock.
     """
@@ -419,9 +442,15 @@ def build_instance_payload(snapshots, instances, alerts=None, now=None):
         payload = _fake_payload(reporting.get(fake["id"]))
     else:
         states = [_account_card(row, reporting.get(row["id"])) for row in enabled]
-        states = [_with_threshold(card, reporting.get(row["id"]), alerts, now)
+        states = [_with_threshold(card, reporting.get(row["id"]),
+                                   _resolution_for(row, alerts, resolutions), now)
                   for card, row in zip(states, enabled)]
-        status = overall_status(states)
+        # A service whose alerts are off does not count towards the overall
+        # status: it must not colour the light or the Home card. Its own
+        # card keeps its true status, and its numbers are unchanged.
+        contributing = [card for card, row in zip(states, enabled)
+                        if _resolution_for(row, alerts, resolutions)["enabled"]]
+        status = overall_status(contributing) if contributing else "ok"
         all_alerts = [alert for snapshot in reporting.values() for alert in snapshot.alerts]
         worst = max(all_alerts, key=lambda alert: severity(alert.get("severity"))) if all_alerts else None
         home = Card(
@@ -442,7 +471,12 @@ def build_instance_payload(snapshots, instances, alerts=None, now=None):
              row["id"], reporting[row["id"]].status if row["id"] in reporting else "offline"),
          "updated_at": iso(reporting[row["id"]].updated_at) if row["id"] in reporting else None,
          "metrics": reporting[row["id"]].metrics if row["id"] in reporting else {},
-         "alerts": reporting[row["id"]].alerts if row["id"] in reporting else []}
+         # The snapshot's own alert observations, under their own name: the
+         # "alerts" key of a source is the switch that says whether this
+         # service alerts at all.
+         "alert_observations": (reporting[row["id"]].alerts
+                                if row["id"] in reporting else []),
+         "alerts": _resolution_for(row, alerts, resolutions)["enabled"]}
         for row in enabled
     ]
     payload["quota_schema_version"] = QUOTA_SCHEMA_VERSION
@@ -460,7 +494,7 @@ def build_instance_payload(snapshots, instances, alerts=None, now=None):
 # screens from the slim payload, and that this list covers every key that
 # presto/home.py reads). Everything else stays available to the admin page, which
 # builds its own listing. Add a key here when presto/ starts reading it.
-DEVICE_SOURCE_KEYS = ("id", "type", "name", "status", "quota", "metrics")
+DEVICE_SOURCE_KEYS = ("id", "type", "name", "status", "quota", "metrics", "alerts")
 DEVICE_QUOTA_KEYS = ("windows", "activity", "hint", "reset_credits")
 DEVICE_WINDOW_KEYS = ("label", "used_percent", "state", "period_minutes",
                       "resets_at", "observed_at")
@@ -470,7 +504,7 @@ DEVICE_METRICS_KEYS = ("requests_today", "tokens_today", "loaded_model", "spend_
                        "errors_today", "last_measured_tokens_per_sec", "available_models")
 # The top-level keys the device reads, and the keys inside "alerts".
 DEVICE_TOP_KEYS = ("sources", "card_order", "updated_at", "display", "alerts")
-DEVICE_ALERT_KEYS = ("quiet", "sound", "pop_to_top")
+DEVICE_ALERT_KEYS = ("quiet", "sound", "pop_to_top", "enabled")
 
 
 def _pick(value, keys):

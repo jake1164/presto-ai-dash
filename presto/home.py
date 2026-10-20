@@ -94,7 +94,8 @@ def overflow_rows(payload):
 
 # The alert settings the daemon sends, and the device's own defaults for
 # anything the payload does not say.
-DEFAULT_ALERT_SETTINGS = {"quiet": False, "sound": True, "pop_to_top": True}
+DEFAULT_ALERT_SETTINGS = {"quiet": False, "sound": True, "pop_to_top": True,
+                           "enabled": True}
 
 
 def alert_settings(payload):
@@ -102,8 +103,8 @@ def alert_settings(payload):
 
     A missing key, a payload that is not an object, a value that is not a
     real boolean: the device falls back to its own defaults - sound on,
-    quiet off, pop-to-top on - so a broken payload can never silence the
-    device in a way the user did not ask for.
+    quiet off, pop-to-top on, alerts on - so a broken payload can never
+    silence the device in a way the user did not ask for.
     """
     result = dict(DEFAULT_ALERT_SETTINGS)
     alerts = payload.get("alerts") if isinstance(payload, dict) else None
@@ -112,13 +113,43 @@ def alert_settings(payload):
     quiet = alerts.get("quiet")
     sound = alerts.get("sound")
     pop_to_top = alerts.get("pop_to_top")
+    enabled = alerts.get("enabled")
     if type(quiet) is bool:
         result["quiet"] = quiet
     if type(sound) is bool:
         result["sound"] = sound
     if type(pop_to_top) is bool:
         result["pop_to_top"] = pop_to_top
+    if type(enabled) is bool:
+        result["enabled"] = enabled
     return result
+
+
+def alerts_flag(source):
+    """Whether a service alerts at all.
+
+    The daemon says so with a boolean. A missing value, or one that is not a
+    real boolean, counts as alerting: an older daemon knows nothing about
+    this switch, and a service must not go quiet because the payload was
+    odd.
+    """
+    if not isinstance(source, dict):
+        return True
+    return source.get("alerts", True) is not False
+
+
+def alerts_state(source):
+    """The service's alerts state: True, False, or None when unknown.
+
+    None means the daemon did not say anything about this service, so the
+    device shows no bell: there is nothing to switch.
+    """
+    if not isinstance(source, dict) or "alerts" not in source:
+        return None
+    value = source.get("alerts")
+    if type(value) is bool:
+        return value
+    return True
 
 
 def strip_needed(total_height, setting):
@@ -530,7 +561,8 @@ def source_rows(payload):
                              "status": normalise_status(source.get("status")), "usage": text,
                              "windows": windows, "activity": text, "hint": hint,
                              "reset_badge": reset_badge(quota.get("reset_credits"), now),
-                             "binding": binding_window(windows)})
+                             "binding": binding_window(windows),
+                             "alerts": alerts_state(source)})
                 continue
         metrics = source.get("metrics")
         metrics = metrics if isinstance(metrics, dict) else {}
@@ -545,7 +577,8 @@ def source_rows(payload):
         rows.append({"id": source.get("id"), "type": source.get("type"),
                      "name": str(source.get("name") or source.get("type") or "Source"),
                      "status": normalise_status(source.get("status")), "usage": text,
-                     "parts": local_parts(metrics, usage)})
+                     "parts": local_parts(metrics, usage),
+                     "alerts": alerts_state(source)})
     return rows
 
 

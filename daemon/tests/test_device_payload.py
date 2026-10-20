@@ -172,7 +172,8 @@ class DevicePayloadTests(unittest.TestCase):
         """The display and alert settings travel with the payload."""
         payload = dict(self.slim)
         payload["display"] = {"overflow_rows": 1}
-        payload["alerts"] = {"quiet": False, "sound": True, "pop_to_top": True}
+        payload["alerts"] = {"quiet": False, "sound": True, "pop_to_top": True,
+                             "enabled": True}
         self.assertLessEqual(size(payload), BUDGET_BYTES,
                              "device payload %d bytes" % size(payload))
         self.assertLessEqual(size(payload) / len(payload["sources"]), BUDGET_PER_SOURCE)
@@ -181,6 +182,18 @@ class DevicePayloadTests(unittest.TestCase):
         for source in self.slim["sources"]:
             self.assertNotIn("quota", source.get("metrics", {}))
         self.assertTrue(any("quota" in source for source in self.slim["sources"]))
+
+    def test_every_source_says_whether_it_alerts(self):
+        """The device needs one boolean per service to draw the bell."""
+        for source in self.slim["sources"]:
+            self.assertIn("alerts", source)
+            self.assertIs(type(source["alerts"]), bool)
+
+    def test_the_device_never_receives_the_thresholds(self):
+        """The device switches the alerts; it does not choose the numbers."""
+        payload = json.dumps(self.slim)
+        self.assertNotIn("warning_percent", payload)
+        self.assertNotIn("critical_percent", payload)
 
     def test_admin_only_fields_are_not_sent(self):
         for source in self.slim["sources"]:
@@ -234,6 +247,7 @@ class WhitelistMatchesTheDeviceTests(unittest.TestCase):
     # The device functions that read the payload, and the file they live in.
     SCANNED = (("home.py", "source_rows"), ("home.py", "reset_badge"),
                ("home.py", "overflow_rows"), ("home.py", "alert_settings"),
+               ("home.py", "alerts_state"), ("home.py", "alerts_flag"),
                ("main.py", "_apply_alerts"))
 
     def keys_read(self, scanned=None):
@@ -273,13 +287,15 @@ class WhitelistMatchesTheDeviceTests(unittest.TestCase):
                      ("reset_credits", "available"), ("metrics", "loaded_model"),
                      ("source", "quota"), ("payload", "sources"), ("payload", "display"),
                      ("payload", "alerts"), ("alerts", "quiet"), ("alerts", "sound"),
-                     ("alerts", "pop_to_top")):
+                     ("alerts", "pop_to_top"), ("alerts", "enabled"),
+                     ("source", "alerts")):
             self.assertIn(pair, found)
 
     def test_the_alert_settings_are_on_the_whitelist(self):
-        for key in ("quiet", "sound", "pop_to_top"):
+        for key in ("quiet", "sound", "pop_to_top", "enabled"):
             self.assertIn(key, DEVICE_ALERT_KEYS)
         self.assertIn("alerts", DEVICE_TOP_KEYS)
+        self.assertIn("alerts", DEVICE_SOURCE_KEYS)
 
     def test_metrics_read_through_a_loop_are_whitelisted_too(self):
         """source_rows reads requests_today and tokens_today through a loop over a
@@ -329,7 +345,7 @@ class ManagerServesTheDeviceViewTests(unittest.TestCase):
         self.addCleanup(base.tearDown)
         payload = base.manager.status_payload()
         self.assertEqual(payload["alerts"], {"quiet": False, "sound": True,
-                                              "pop_to_top": True})
+                                              "pop_to_top": True, "enabled": True})
 
 
 if __name__ == "__main__":

@@ -211,6 +211,16 @@ class AlertTracker(object):
         """Forget history, e.g. after a reconnect."""
         self._statuses.clear()
 
+    def forget(self, service):
+        """Forget one service's baseline.
+
+        A service whose alerts are turned off stops counting at once: it
+        makes no sound and no longer colours the light. Its baseline goes
+        with it, so turning the alerts back on starts from the status as it
+        is now - an alarm that already existed does not chirp again.
+        """
+        self._statuses.pop(service, None)
+
     def update(self, statuses):
         """Record every service's status and return the cues to play.
 

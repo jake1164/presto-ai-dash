@@ -43,6 +43,9 @@ RESET_GRACE_SECONDS = 30 * 60
 DEFAULT_QUIET_START = "22:00"
 DEFAULT_QUIET_END = "07:00"
 
+# The master switch: alerts are on unless the user turns them off.
+DEFAULT_MASTER_ENABLED = True
+
 
 def validate_thresholds(warning_percent, critical_percent):
     """Raise ValueError unless the two percentages can be used.
@@ -60,6 +63,74 @@ def validate_thresholds(warning_percent, critical_percent):
             "the warning percent (%d) must be below the critical percent (%d)" %
             (warning_percent, critical_percent))
     return warning_percent, critical_percent
+
+
+def _pair_is_usable(warning_percent, critical_percent):
+    """Whether these two percentages can be used together."""
+    try:
+        validate_thresholds(warning_percent, critical_percent)
+    except ValueError:
+        return False
+    return True
+
+
+def resolve_alert_settings(global_settings=None, service_settings=None):
+    """One service's effective alert behaviour, resolved from two settings.
+
+    Pure: it reads two dictionaries and returns a dictionary. It never
+    logs, writes or reads anything, so the same answer comes out every
+    time and it can be tested on its own.
+
+    * the master switch in ``global_settings`` governs every service,
+    * the service's own switch in ``service_settings`` governs that one
+      service, and a service is alerting only when both are on,
+    * a threshold the service set wins over the global one, and a
+      threshold it did not set is inherited, and
+    * a pair that cannot be used - the warning is not below the
+      critical one, which can happen when the global value changed
+      under a service that had set its own - falls back to the global
+      pair, and the caller is told with ``override_ignored`` so the
+      admin page can say that the override was not used.
+
+    The result holds ``enabled`` (the effective answer), the two
+    effective percentages, and the flags ``master_enabled``,
+    ``service_enabled`` and ``override_ignored``.
+    """
+    global_settings = global_settings if isinstance(global_settings, dict) else {}
+    service_settings = service_settings if isinstance(service_settings, dict) else {}
+
+    master = global_settings.get("enabled", DEFAULT_MASTER_ENABLED)
+    if type(master) is not bool:
+        master = DEFAULT_MASTER_ENABLED
+    service_enabled = service_settings.get("enabled", True)
+    if type(service_enabled) is not bool:
+        service_enabled = True
+
+    global_warning = global_settings.get("warning_percent", DEFAULT_WARNING_PERCENT)
+    global_critical = global_settings.get("critical_percent", DEFAULT_CRITICAL_PERCENT)
+    if not _pair_is_usable(global_warning, global_critical):
+        global_warning = DEFAULT_WARNING_PERCENT
+        global_critical = DEFAULT_CRITICAL_PERCENT
+
+    own_warning = service_settings.get("warning_percent")
+    own_critical = service_settings.get("critical_percent")
+    warning = global_warning if own_warning is None else own_warning
+    critical = global_critical if own_critical is None else own_critical
+    override_ignored = False
+    if not _pair_is_usable(warning, critical):
+        # The pair this service would use is impossible: fall back to the
+        # global pair and say that the override was not used.
+        warning, critical = global_warning, global_critical
+        override_ignored = own_warning is not None or own_critical is not None
+
+    return {
+        "enabled": bool(master and service_enabled),
+        "master_enabled": master,
+        "service_enabled": service_enabled,
+        "warning_percent": warning,
+        "critical_percent": critical,
+        "override_ignored": override_ignored,
+    }
 
 
 def level_for_percent(percent, warning_percent=DEFAULT_WARNING_PERCENT,

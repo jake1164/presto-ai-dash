@@ -752,17 +752,22 @@ class AlertSettingsTests(unittest.TestCase):
 
     def test_the_defaults_are_used_when_the_key_is_missing(self):
         self.assertEqual(alert_settings({}),
-                         {"quiet": False, "sound": True, "pop_to_top": True})
+                         {"quiet": False, "sound": True, "pop_to_top": True,
+                          "enabled": True})
 
     def test_the_settings_are_read(self):
-        payload = {"alerts": {"quiet": True, "sound": False, "pop_to_top": False}}
+        payload = {"alerts": {"quiet": True, "sound": False, "pop_to_top": False,
+                              "enabled": False}}
         self.assertEqual(alert_settings(payload),
-                         {"quiet": True, "sound": False, "pop_to_top": False})
+                         {"quiet": True, "sound": False, "pop_to_top": False,
+                          "enabled": False})
 
     def test_junk_is_ignored(self):
         for payload in ({"alerts": "nonsense"}, {"alerts": None}, {"alerts": []},
-                        {"alerts": {"quiet": "yes", "sound": 1, "pop_to_top": None}},
+                        {"alerts": {"quiet": "yes", "sound": 1, "pop_to_top": None,
+                                    "enabled": "no"}},
                         {"alerts": {"quiet": 1}}, "nonsense", None, 5):
             with self.subTest(payload=payload):
                 self.assertEqual(alert_settings(payload),
-                                 {"quiet": False, "sound": True, "pop_to_top": True})
+                                 {"quiet": False, "sound": True, "pop_to_top": True,
+                                  "enabled": True})

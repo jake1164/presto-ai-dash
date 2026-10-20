@@ -44,6 +44,41 @@ LIMIT = (255, 64, 64)
 MARKER = 8
 BARS_H = 11
 
+# The bell that switches one service's alerts on and off. It sits in the
+# top-right corner of a card: the drawn bell is small, the tap area is
+# large.
+BELL_ICON = 12
+BELL_HIT = 48
+BELL_GAP = 4
+BELL_ON = "ALERTS ON"
+BELL_OFF = "ALERTS OFF"
+BELL_OFF_ALL = "ALERTS OFF (ALL)"
+
+# The bell, drawn from rectangles: the primitives the preview understands.
+# It is an outline, so it reads as a bell at twelve pixels.
+BELL_SHAPE = (
+    (5, 0, 2, 2),     # the knob
+    (4, 2, 1, 1), (7, 2, 1, 1),
+    (3, 3, 1, 1), (8, 3, 1, 1),
+    (2, 4, 1, 1), (9, 4, 1, 1),
+    (2, 5, 1, 1), (9, 5, 1, 1),
+    (1, 6, 1, 1), (10, 6, 1, 1),
+    (1, 7, 1, 1), (10, 7, 1, 1),
+    (1, 8, 1, 1), (10, 8, 1, 1),
+    (0, 9, 12, 1),    # the rim
+    (5, 10, 2, 2),    # the clapper
+)
+
+# The small mark on a Home row whose service has its alerts off.
+ALERT_MARK = 6
+ALERT_MARK_SHAPE = (
+    (2, 0, 2, 1),
+    (1, 1, 4, 1),
+    (1, 2, 4, 1),
+    (0, 3, 6, 1),
+    (2, 4, 2, 2),
+)
+
 
 class Palette(object):
     """Creates and caches pens for one display."""
@@ -80,6 +115,63 @@ def _text(display, palette, text, x, y, rgb, scale=2, max_chars=None,
         fitted = truncate(text, length)
     display.set_pen(palette.pen(rgb))
     display.text(fitted, x, y, available, scale)
+
+
+def bell_box(width=240):
+    """Where the bell is drawn: (x, y)."""
+    return (width - MARGIN - BELL_ICON, TITLE_Y)
+
+
+def bell_hit(x, y, width=240, height=240):
+    """Whether a touch is on the bell, and so switches a service's alerts.
+
+    The tap area is the top-right corner of the card, about 48 by 48
+    pixels: big enough for a fingertip, and it never overlaps the page
+    dots at the bottom or the Home rows.
+    """
+    if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+        return False
+    left = width - BELL_HIT
+    return left <= x < width and 0 <= y < BELL_HIT
+
+
+def bell_label(alerts):
+    """The label next to the bell: what the service's alerts are doing.
+
+    ``alerts`` is the service's state as the daemon reports it, with the
+    master switch applied. None means the daemon said nothing about this
+    service, so there is no bell and no label.
+    """
+    if not isinstance(alerts, dict):
+        return None
+    if alerts.get("master_off"):
+        return BELL_OFF_ALL
+    return BELL_ON if alerts.get("enabled") else BELL_OFF
+
+
+def _draw_bell(display, palette, x, y, rgb, slashed=False, crossed=False):
+    """A bell made of rectangles, with a slash or a cross when asked."""
+    display.set_pen(palette.pen(rgb))
+    for dx, dy, w, h in BELL_SHAPE:
+        display.rectangle(x + dx, y + dy, w, h)
+    if not slashed and not crossed:
+        return
+    # The mark is drawn over the bell in the bright ink, so it reads on
+    # every background.
+    display.set_pen(palette.pen(INK))
+    for step in range(11):
+        if slashed:
+            display.rectangle(x + step, y + step, 2, 2)
+        if crossed:
+            display.rectangle(x + step, y + step, 2, 2)
+            display.rectangle(x + 10 - step, y + step, 2, 2)
+
+
+def _draw_alert_mark(display, palette, x, y):
+    """The small dim bell on a Home row whose service has its alerts off."""
+    display.set_pen(palette.pen(INK_DIM))
+    for dx, dy, w, h in ALERT_MARK_SHAPE:
+        display.rectangle(x + dx, y + dy, w, h)
 
 
 def draw_home(display, palette, quotas, index, total, muted=False,
@@ -218,13 +310,28 @@ def _draw_quota_row(display, palette, row, y, row_width, stale):
     badge_text = badge.get("text") if isinstance(badge, dict) else None
     badge_w = display.measure_text(badge_text, 1) + 4 if badge_text else 0
     name_w = display.measure_text(row["name"], 1)
-    # The badge is drawn only when it fits between the name and the note.
-    # A hint or a reset note always wins the space.
-    draw_badge = bool(badge_text) and name_w + badge_w <= space
+    # The mark and the badge are drawn only when they fit between the name
+    # and the note. A name that has to be cut never pushes them over it.
+    mark_w = (ALERT_MARK + 4) if row.get("alerts") is False else 0
+    draw_mark = bool(mark_w) and name_w + mark_w <= space
+    draw_badge = (bool(badge_text) and
+                  name_w + badge_w + (mark_w if draw_mark else 0) <= space)
+    used = (mark_w if draw_mark else 0) + (badge_w if draw_badge else 0)
+    name_limit = space - used
+    if name_w > name_limit:
+        draw_mark = False
+        draw_badge = False
+        used = 0
+        name_limit = space
     _text(display, palette, row["name"], name_x, y, INK, scale=1,
-          max_width=space - badge_w if draw_badge else space)
+          max_width=name_limit)
+    cursor = name_x + name_w + 4
+    if draw_mark:
+        # A small dim bell: this service's alerts are off.
+        _draw_alert_mark(display, palette, cursor, y + 1)
+        cursor += mark_w
     if draw_badge:
-        _text(display, palette, badge_text, name_x + name_w + 4, y,
+        _text(display, palette, badge_text, cursor, y,
               AMBER if badge.get("amber") else INK_DIM, scale=1)
     if note:
         _text(display, palette, note, right - note_w, y, note_rgb, scale=1)
@@ -276,8 +383,15 @@ def _draw_local_row(display, palette, row, y, row_width, stale):
     display.set_font("bitmap8")
     status = row["status"].upper()
     status_w = display.measure_text(status, 1)
-    _text(display, palette, row["name"], 14 + MARKER + 4, y, INK, scale=1,
-          max_width=max(0, row_width - MARKER - status_w - 12))
+    mark_w = (ALERT_MARK + 4) if row.get("alerts") is False else 0
+    name_x = 14 + MARKER + 4
+    name_limit = max(0, row_width - MARKER - status_w - 12 - mark_w)
+    _text(display, palette, row["name"], name_x, y, INK, scale=1,
+          max_width=name_limit)
+    if mark_w:
+        name_w = display.measure_text(row["name"], 1)
+        if name_w + mark_w <= row_width - MARKER - status_w - 12:
+            _draw_alert_mark(display, palette, name_x + name_w + 2, y + 1)
     _text(display, palette, status, 14 + row_width - status_w, y, rgb, scale=1)
     display.set_font("bitmap6")
     _text(display, palette, row["usage"], 14, y + 13, INK_DIM, scale=1)
@@ -311,8 +425,15 @@ def _draw_compact_local_row(display, palette, row, y, row_width, stale):
     detail_w = display.measure_text(detail, 1) + 2
     text_y = y + (LOCAL_ROW - 8) // 2
     _marker(display, palette, row, 14, y + (LOCAL_ROW - 6) // 2, 6, stale)
-    _text(display, palette, row["name"], 14 + 6 + 4, text_y, INK, scale=1,
-          max_width=max(0, row_width - 6 - 4 - detail_w - 8))
+    mark_w = (ALERT_MARK + 4) if row.get("alerts") is False else 0
+    name_x = 14 + 6 + 4
+    name_limit = max(0, row_width - 6 - 4 - detail_w - 8 - mark_w)
+    _text(display, palette, row["name"], name_x, text_y, INK, scale=1,
+          max_width=name_limit)
+    if mark_w:
+        name_w = display.measure_text(row["name"], 1)
+        if name_w + mark_w <= row_width - 6 - 4 - detail_w - 8:
+            _draw_alert_mark(display, palette, name_x + name_w + 2, text_y + 1)
     rgb = INK_DIM if stale or row["status"] == "ok" else rgb_for_accent(accent_for(row["status"]))
     _text(display, palette, detail, 14 + row_width - detail_w, text_y, rgb, scale=1)
 
@@ -427,11 +548,13 @@ def draw_sources(display, palette, rows, index, total, status="offline",
 
 
 def draw_card(display, palette, card, index, total, muted=False,
-              width=240, height=240, stale=False):
+              width=240, height=240, stale=False, alerts=None, message=None):
     """Draw one card.
 
     ``index``/``total`` drive the page dots at the bottom. ``muted`` dims the
-    accent so the device visibly acknowledges a long-press.
+    accent so the device visibly acknowledges a long-press. ``alerts`` is
+    the service's alert state, and draws the bell in the top-right corner.
+    ``message`` is a short line above the dots, used when a write fails.
     """
     from alerts import rgb_for_accent
 
@@ -444,15 +567,37 @@ def draw_card(display, palette, card, index, total, muted=False,
     display.set_pen(palette.pen(accent_rgb))
     display.rectangle(0, 0, 5, height)
 
-    # Title
+    # Title. It is cut so it never reaches the bell.
+    title_x = MARGIN + 6
+    label = bell_label(alerts)
+    bell_x = width - MARGIN - BELL_ICON
+    label_right = bell_x - BELL_GAP
+    label_w = 0
+    if label:
+        display.set_font("bitmap6")
+        label_w = display.measure_text(label, 1)
     display.set_font("bitmap8")
-    _text(display, palette, card.title, MARGIN + 6, TITLE_Y, INK,
-          scale=2, max_chars=TITLE_MAX)
+    title_width = None
+    if label:
+        title_width = max(0, label_right - label_w - BELL_GAP - title_x)
+    _text(display, palette, card.title, title_x, TITLE_Y, INK,
+          scale=2, max_chars=TITLE_MAX, max_width=title_width)
 
     # Status pill
     display.set_font("bitmap6")
     _text(display, palette, card.status.upper(), MARGIN + 6, STATUS_Y,
           accent_rgb, scale=2, max_chars=14)
+
+    # The bell: the service's own alert switch.
+    if label:
+        bell_colour = accent_rgb if (alerts.get("enabled") and
+                                     not alerts.get("master_off")) else INK_DIM
+        _draw_bell(display, palette, bell_x, TITLE_Y, bell_colour,
+                   slashed=not alerts.get("enabled"),
+                   crossed=bool(alerts.get("master_off")))
+        display.set_font("bitmap6")
+        _text(display, palette, label, label_right - label_w, TITLE_Y + 3,
+              bell_colour, scale=1, max_width=label_w + 2)
 
     # Primary metric, the biggest thing on screen.
     display.set_font("bitmap8")
@@ -472,7 +617,12 @@ def draw_card(display, palette, card, index, total, muted=False,
         y += DETAIL_LINE_H
 
     # Page dots
-    if stale:
+    if message:
+        # A short line above the dots: what went wrong, or what to do.
+        display.set_font("bitmap6")
+        _text(display, palette, message, MARGIN + 6, 208, INK, scale=1,
+              max_chars=DETAIL_MAX)
+    elif stale:
         display.set_font("bitmap6")
         _text(display, palette, "STALE - retrying", MARGIN + 6, 208, INK_DIM, scale=1)
     _draw_dots(display, palette, index, total, accent_rgb, width, height)

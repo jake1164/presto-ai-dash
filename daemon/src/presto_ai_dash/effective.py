@@ -136,6 +136,8 @@ def effective_settings(config, storage=None, config_path=None, environ=None, now
             return FILE
         return DEFAULT
 
+    add("Alerts master", "on" if settings["enabled"] else "off",
+        alert_origin("enabled"))
     add("Alert warning percent", settings["warning_percent"],
         alert_origin("warning_percent"))
     add("Alert critical percent", settings["critical_percent"],

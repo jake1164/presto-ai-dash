@@ -29,7 +29,7 @@ input[type=checkbox] { accent-color: #7ce6da; width: 18px; height: 18px; }
 #login-form button { margin-top: 20px; }
 .source { padding: 16px 0; border-bottom: 1px solid #2a3b53; }
 .source strong { overflow-wrap: anywhere; }
-.source-head strong { flex: 1; min-width: 0; }
+.source-head strong { flex: 1 1 auto; min-width: 0; }
 .source-enabled { margin: 0; white-space: nowrap; cursor: pointer; min-height: 44px; }
 .source-enabled input { cursor: pointer; flex-shrink: 0; }
 .source.is-disabled .source-head strong { color: #91a3b9; }
@@ -63,11 +63,12 @@ main > .panel { min-width: 0; }
 [role=tabpanel]:focus-visible { outline-offset: -2px; }
 
 /* The account cards: one line at a glance, everything else when opened. */
-.card-toggle { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0;
+.card-toggle { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0;
   background: none; color: inherit; border: 1px solid transparent; border-radius: 9px;
   padding: 8px 10px; text-align: left; font-weight: 400; flex-wrap: wrap; }
 .card-toggle:hover { background: #1c2a41; }
 .card-toggle strong { font-weight: 650; }
+.card-toggle .chip { padding: 2px 7px; font-size: .7rem; }
 .figures { color: #b1c2d7; font-size: .9rem; }
 .chevron { color: #7ce6da; margin-left: auto; }
 .dot { width: 12px; height: 12px; border-radius: 50%; flex: 0 0 auto; background: #56687f; }
@@ -83,6 +84,17 @@ main > .panel { min-width: 0; }
 .chip-muted { color: #91a3b9; }
 .card-detail { padding: 4px 0 0 22px; border-left: 2px solid #2a3b53; margin-left: 5px; }
 .card-detail .actions { margin-top: 14px; }
+
+/* The banners that say the master switch is off, and the per-service alert
+   group inside an open account card. */
+.banner { background: #2a2130; border: 1px solid #8a6a3a; border-left: 4px solid #fbbf24;
+  color: #fcd34d; border-radius: 8px; padding: 10px 14px; margin: 0 0 14px; font-weight: 600; }
+.service-alerts { margin-top: 20px; padding-top: 14px; border-top: 1px solid #2a3b53; }
+.service-alerts h4 { margin-top: 0; }
+.service-alerts input[type=number] { max-width: 220px; }
+.service-alerts input:disabled, .setting-body input:disabled { opacity: .55; }
+.service-alerts button:disabled { cursor: not-allowed; }
+.service-alerts-override { color: #fcd34d; }
 
 /* Read-only tables and lists on the Status tab. */
 .grid { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: .88rem; }

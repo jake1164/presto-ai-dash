@@ -21,9 +21,9 @@ from presto_ai_dash.config import ConfigError, alert_settings, load_config
 from envutil import clean_env
 from test_management import AdminServerBase
 
-DEFAULTS = {"warning_percent": 80, "critical_percent": 95, "sound": True,
-            "quiet_hours": False, "quiet_start": "22:00", "quiet_end": "07:00",
-            "pop_to_top": True}
+DEFAULTS = {"enabled": True, "warning_percent": 80, "critical_percent": 95,
+            "sound": True, "quiet_hours": False, "quiet_start": "22:00",
+            "quiet_end": "07:00", "pop_to_top": True}
 
 
 def body(**changes):
@@ -133,12 +133,13 @@ class AlertAdminTests(AdminServerBase):
         self.assertEqual(payload["alerts"]["sound"], True)
         self.assertEqual(payload["alerts"]["pop_to_top"], True)
         self.assertEqual(payload["alerts"]["quiet"], False)
+        self.assertEqual(payload["alerts"]["enabled"], True)
 
     def test_the_sound_and_pop_to_top_switches_reach_the_payload(self):
         self.request("/api/admin/alerts", "PUT", body(sound=False, pop_to_top=False))
         payload = self.manager.status_payload()
         self.assertEqual(payload["alerts"], {"quiet": False, "sound": False,
-                                              "pop_to_top": False})
+                                              "pop_to_top": False, "enabled": True})
 
     def test_the_quiet_flag_reaches_the_payload(self):
         self.request("/api/admin/alerts", "PUT",

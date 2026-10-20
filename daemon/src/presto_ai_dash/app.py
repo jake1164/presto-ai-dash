@@ -108,7 +108,12 @@ class Daemon:
                                  status_provider=(self.source_configuration.status_payload
                                                   if managed else None),
                                  ingest_enabled=self.ingest_allowed,
-                                 client_registry=self.clients)
+                                 client_registry=self.clients,
+                                 # The device's only write: one service's
+                                 # alerts on or off. It is a setting of this
+                                 # daemon, not a provider action.
+                                 alert_writer=(self.source_configuration.set_service_alert_enabled
+                                               if managed else None))
             if self.config["admin"]["enabled"]:
                 token = resolve_admin_token(self.config, self.shared_token)
                 self.admin = AdminServer(self.config["admin"]["port"],

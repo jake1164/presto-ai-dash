@@ -221,6 +221,7 @@ The alert settings apply to every service. They live in the admin page's
 
 | Key | Meaning | Default |
 | --- | --- | --- |
+| `enabled` | The master switch: alerts on or off for every service | on |
 | `warning_percent` | A window that has used this much of its allowance makes the service *near limit*: yellow. 1..100 | 80 |
 | `critical_percent` | A window that has used this much makes the service *critical*: red. 1..100, and above the warning percent | 95 |
 | `sound` | Sound a short cue when a service gets worse | on |
@@ -231,6 +232,7 @@ The alert settings apply to every service. They live in the admin page's
 
 ```toml
 [alerts]
+enabled = true
 warning_percent = 80
 critical_percent = 95
 sound = true
@@ -253,6 +255,39 @@ value came from.
 
 The daemon reads them afresh for every status payload, so a change applies on
 the next poll without restarting the daemon.
+
+**The master switch and the per-service settings.** `enabled = false` turns
+alerts off for every service at once. With the master off the admin page
+disables the sound, quiet-hours and pop-to-top controls and every per-service
+control (it keeps their stored values, and says in words why they are off),
+and the service cards show the chip *alerts off (global)*.
+
+Each service can also have its own settings, on the Services tab in the
+service's expanded card:
+
+- **alerts on or off** for that one service, and
+- its own warning and critical percent. A blank field means *use the global
+  value*; the field shows the global value as its placeholder (`global 80`).
+
+These per-service settings are **not** source configuration fields. They are
+stored in their own rows in SQLite, keyed by the service's instance id, so
+switching the alerts of one service never rebuilds the source and never
+restarts its readers. They survive an edit, a rename and a rebuild of the
+source, and they are removed when the service is deleted.
+
+A service's own thresholds are used only when the pair is usable: the
+warning percent must sit below the critical one. When it does not - for
+example because the global value changed under it - the service falls back
+to the global pair, the daemon logs one line, and the admin page says
+*override ignored*. A pair that is saved is checked against the pair it
+would produce, so an unusable one is refused with a plain message.
+
+**What "alerts off" means.** For that service (or for all of them when the
+master is off): no chirp, no LED escalation and no pop-to-top, and the
+service does not count towards the overall accent or the Home card's status.
+It never hides data: the row, the numbers, the true threshold status colour
+and the service's own card are unchanged. The daemon still computes the
+service's true status.
 
 **What alerts.** The percentage is mapped onto the status vocabulary: at the
 warning percent a service is *near limit*, at the critical percent it is
@@ -341,8 +376,8 @@ after a restart.
 **Remote reports** holds the ingest switch, the collector download and the
 plain-HTTP warning.
 
-**Alerts** holds the thresholds, the sound switch, quiet hours and the
-pop-to-top switch, all of which apply to every service.
+**Alerts** holds the master switch, the thresholds, the sound switch, quiet
+hours and the pop-to-top switch, all of which apply to every service.
 
 **Effective daemon configuration** is read-only. Every value says where it
 came from: `environment`, `dash.toml`, `database`, or `default` when nothing
@@ -365,8 +400,10 @@ The admin port serves the page plus:
 | PUT | `/api/admin/source-order` | Save a complete account order, including disabled accounts |
 | GET | `/api/admin/display` | The Home display settings and whether the environment locks them |
 | PUT | `/api/admin/display` | Save the Home display settings (409 when the environment locks them) |
-| GET | `/api/admin/alerts` | The alert settings, the thresholds, the quiet hours and whether it is quiet now |
+| GET | `/api/admin/alerts` | The alert settings, the master switch, the thresholds, the quiet hours and whether it is quiet now |
 | PUT | `/api/admin/alerts` | Save the alert settings; the body must carry every one of them |
+| GET | `/api/admin/sources/{id}/alerts` | One service's alert settings: its own values (a threshold that is null is inherited), the resolved values, and the flags `override_ignored` and `master_off` |
+| PUT | `/api/admin/sources/{id}/alerts` | Save one service's alert settings; the body is a subset of `enabled`, `warning_percent` and `critical_percent`, and a null threshold means "inherit" |
 | GET | `/api/admin/status` | The Status tab: the daemon, the clients, the account health, the readers, the collectors and the recent problems. Read-only |
 | GET | `/api/admin/config` | The effective daemon configuration and where each value came from. Read-only |
 | DELETE | `/api/admin/sources/{id}` | Delete the instance and its saved key |
@@ -407,6 +444,47 @@ follow the saved admin order. Additional accounts/windows scroll; swipe
 cards show details and UTC resets. Names, enable/disable changes, and accounts
 appear on the next successful poll. Refreshes preserve the selected card by
 instance ID; removing it returns to Home. Static samples remain DEMO.
+
+## The device's one write: `POST /api/v1/alerts/{id}`
+
+The Presto can switch the alerts of one service on or off. It sends the shared
+bearer token and a body of exactly `{"enabled": true}` or `{"enabled": false}`:
+
+```text
+POST /api/v1/alerts/<source id>
+Authorization: Bearer <shared token>
+Content-Type: application/json
+
+{"enabled": false}
+```
+
+The answer is `{"ok": true, "alerts": <the effective answer>, "master": <bool>}`.
+
+- It **sets** a state and never toggles, so a double tap or a retry is
+  harmless.
+- It changes only that one service's *alerts on/off* value: never the
+  thresholds, never the master switch, never anything else, and never a
+  provider. It is a setting of this daemon, not a provider action.
+- The body must be JSON, with a `Content-Length` of at most 256 bytes, no
+  chunked encoding, and exactly the one key `enabled` with a real boolean.
+  Anything else is refused with 400 (413 for an oversized body, 415 for the
+  wrong content type).
+- An unknown service is 404, a wrong token is 401, and any method other
+  than POST on that path is 405.
+- The route has its own rate limit: 30 writes a minute per address, then
+  429. It is separate from the ingest limiter.
+- The daemon logs one line at INFO: `alerts for <id> turned on|off by
+  <client name>`. The name comes from the `X-Presto-Client` header and is
+  sanitised; the token is never logged.
+- The write goes through the same code as the admin page's per-service
+  control, so both surfaces agree and the last write wins.
+
+**The shared token travels over plain HTTP on the LAN.** The device already
+uses it to read the status payload. The worst an eavesdropper on the LAN
+could do with it is switch the alerts of one service on or off: no provider
+is contacted, no quota is changed, and no data is read or written that the
+device could not read anyway. On an untrusted network, put the daemon behind
+a reverse proxy with TLS or use a private network such as Tailscale.
 
 The updated renderer is deployed to the connected Presto. Automated real-font,
 live-data, navigation, and clipped-scroll checks pass. Codex now reports live

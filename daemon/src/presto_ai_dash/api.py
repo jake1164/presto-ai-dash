@@ -5,6 +5,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import socket
 import threading
 import time
@@ -18,6 +19,10 @@ log = logging.getLogger(__name__)
 STATUS_PATH = "/api/v1/status"
 INGEST_PATH = "/api/v1/ingest"
 INGEST_BODY_LIMIT = 16384
+# The device's only write: one service's alerts on or off. It sets a
+# state, so a double tap or a retry is harmless.
+ALERTS_PATH = re.compile(r"^/api/v1/alerts/([A-Za-z0-9_-]{1,80})$")
+ALERT_BODY_LIMIT = 256
 
 
 class _IngestRateLimiter:
@@ -49,11 +54,48 @@ class _IngestRateLimiter:
             return True
 
 
+class _AlertRateLimiter:
+    """A per-address limit for the device's alert writes.
+
+    It counts the writes of one address inside a sliding window, so a
+    device that taps quickly is stopped without stopping the others. It is
+    separate from the ingest limiter on purpose: the two routes have
+    different shapes and different clients.
+    """
+
+    LIMIT = 30
+    WINDOW_SECONDS = 60.0
+    MAX_ENTRIES = 1024
+
+    def __init__(self):
+        self._hits = {}
+        self._lock = threading.Lock()
+
+    def check(self, key, now):
+        """Whether a request with this key may proceed; it is registered when so."""
+        with self._lock:
+            times = [stamp for stamp in self._hits.get(key, ())
+                     if now - stamp < self.WINDOW_SECONDS]
+            if len(times) >= self.LIMIT:
+                self._hits[key] = times
+                return False
+            times.append(now)
+            if len(self._hits) >= self.MAX_ENTRIES:
+                oldest = min(self._hits,
+                             key=lambda name: self._hits[name][-1] if self._hits[name] else 0)
+                self._hits.pop(oldest, None)
+            self._hits[key] = times
+            return True
+
+
 def make_handler(storage, shared_token, source_ids=None, status_provider=None,
-                 *, ingest_enabled=None, ingest_rate_limiter=None, client_registry=None):
+                 *, ingest_enabled=None, ingest_rate_limiter=None, client_registry=None,
+                 alert_writer=None, alert_rate_limiter=None):
     if not shared_token:
         raise ValueError("API requires a nonempty shared token")
     limiter = ingest_rate_limiter if ingest_rate_limiter is not None else _IngestRateLimiter()
+    alert_limiter = (alert_rate_limiter if alert_rate_limiter is not None
+                     else _AlertRateLimiter())
 
     class StatusHandler(BaseHTTPRequestHandler):
         def setup(self):
@@ -63,7 +105,7 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
         def log_message(self, fmt, *args):
             log.debug(fmt, *args)
 
-        def _send_json(self, status, payload):
+        def _send_json(self, status, payload, headers=None):
             body = json.dumps(payload).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
@@ -71,17 +113,34 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
             self.send_header("Cache-Control", "no-store")
             if status == 401:
                 self.send_header("WWW-Authenticate", "Bearer")
+            for name, value in (headers or {}).items():
+                self.send_header(name, value)
             self.end_headers()
             self.wfile.write(body)
 
+        def _authorized(self):
+            """The shared bearer token, compared in constant time."""
+            parts = self.headers.get("Authorization", "").split()
+            return (len(parts) == 2 and parts[0].lower() == "bearer" and
+                    hmac.compare_digest(parts[1].encode("utf-8"),
+                                        shared_token.encode("utf-8")))
+
+        def _client_name(self):
+            """The client's own name for itself, sanitised."""
+            from .clients import sanitize_header
+            return sanitize_header(self.headers.get("X-Presto-Client"))
+
         def do_GET(self):
-            if urlparse(self.path).path != STATUS_PATH:
+            path = urlparse(self.path).path
+            if ALERTS_PATH.match(path):
+                # The route takes a body: only POST may be used here.
+                self._send_json(405, {"error": "method_not_allowed"},
+                                headers={"Allow": "POST"})
+                return
+            if path != STATUS_PATH:
                 self._send_json(404, {"error": "not_found"})
                 return
-            parts = self.headers.get("Authorization", "").split()
-            if (len(parts) != 2 or parts[0].lower() != "bearer" or
-                    not hmac.compare_digest(parts[1].encode("utf-8"),
-                                            shared_token.encode("utf-8"))):
+            if not self._authorized():
                 self._send_json(401, {"error": "unauthorised"})
                 return
             try:
@@ -120,7 +179,12 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                 return False
 
         def do_POST(self):
-            if urlparse(self.path).path != INGEST_PATH:
+            path = urlparse(self.path).path
+            match = ALERTS_PATH.match(path)
+            if match:
+                self._set_alert(match[1])
+                return
+            if path != INGEST_PATH:
                 self._send_json(404, {"error": "not_found"})
                 return
             if not self._ingest_allowed():
@@ -171,6 +235,105 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
             self.send_response(204)
             self.end_headers()
 
+        def _set_alert(self, instance_id):
+            """One service's alerts on or off. The device's only write.
+
+            It sets a state and never toggles, so a double tap or a retry
+            is harmless, and it changes only that one setting: never the
+            thresholds, never the master switch, never a provider.
+            """
+            if not self._authorized():
+                self._send_json(401, {"error": "unauthorised"})
+                return
+            if alert_writer is None:
+                # No managed sources: there is nothing to switch.
+                self._send_json(404, {"error": "not_found"})
+                return
+            if not alert_limiter.check(self.client_address[0], time.monotonic()):
+                self._send_json(429, {"error": "rate_limited"})
+                return
+            if (self.headers.get("Content-Type", "").split(";")[0].strip() !=
+                    "application/json"):
+                self._send_json(415, {"error": "send an application/json body"})
+                return
+            if self.headers.get("Transfer-Encoding"):
+                self._send_json(400, {"error": "unsupported_transfer_encoding"})
+                return
+            raw_length = self.headers.get("Content-Length")
+            if raw_length is None:
+                self._send_json(400, {"error": "invalid_length"})
+                return
+            try:
+                length = int(raw_length)
+            except ValueError:
+                self._send_json(400, {"error": "invalid_length"})
+                return
+            if length < 0:
+                self._send_json(400, {"error": "invalid_length"})
+                return
+            if length > ALERT_BODY_LIMIT:
+                # Refuse the size before reading a single body byte.
+                self._send_json(413, {"error": "body_too_large"})
+                return
+            data = self.rfile.read(length) if length else b""
+            try:
+                payload = json.loads(data.decode("utf-8")) if data else None
+            except (ValueError, UnicodeError):
+                self._send_json(400, {"error": "invalid_json"})
+                return
+            if (not isinstance(payload, dict) or set(payload) != {"enabled"} or
+                    type(payload["enabled"]) is not bool):
+                self._send_json(400, {"error": "invalid_body"})
+                return
+            enabled = payload["enabled"]
+            try:
+                state = alert_writer(instance_id, enabled)
+            except KeyError:
+                self._send_json(404, {"error": "not_found"})
+                return
+            except ValueError:
+                self._send_json(400, {"error": "invalid_body"})
+                return
+            except Exception:
+                log.exception("could not save the alert setting")
+                self._send_json(500, {"error": "internal_error"})
+                return
+            # The token is never logged, and neither is anything else the
+            # client sent: only the name the client gives itself.
+            log.info("alerts for %s turned %s by %s", instance_id,
+                     "on" if enabled else "off", self._client_name())
+            self._send_json(200, {"ok": True,
+                                  "alerts": bool(state["effective"]["enabled"]),
+                                  "master": bool(state["master"])})
+
+        def do_PUT(self):
+            if ALERTS_PATH.match(urlparse(self.path).path):
+                self._send_json(405, {"error": "method_not_allowed"},
+                                headers={"Allow": "POST"})
+                return
+            self._send_json(404, {"error": "not_found"})
+
+        def do_DELETE(self):
+            if ALERTS_PATH.match(urlparse(self.path).path):
+                self._send_json(405, {"error": "method_not_allowed"},
+                                headers={"Allow": "POST"})
+                return
+            self._send_json(404, {"error": "not_found"})
+
+        def do_PATCH(self):
+            if ALERTS_PATH.match(urlparse(self.path).path):
+                self._send_json(405, {"error": "method_not_allowed"},
+                                headers={"Allow": "POST"})
+                return
+            self._send_json(404, {"error": "not_found"})
+
+        def do_HEAD(self):
+            if ALERTS_PATH.match(urlparse(self.path).path):
+                self._send_json(405, {"error": "method_not_allowed"},
+                                headers={"Allow": "POST"})
+                return
+            self._send_json(404, {"error": "not_found"})
+
     return StatusHandler
 
 
@@ -189,14 +352,17 @@ class _ExclusiveHTTPServer(ThreadingHTTPServer):
 class ApiServer:
     def __init__(self, host, port, storage, shared_token, source_ids=None,
                  status_provider=None, *, ingest_enabled=None, ingest_rate_limiter=None,
-                 handler_class=None, client_registry=None):
+                 handler_class=None, client_registry=None, alert_writer=None,
+                 alert_rate_limiter=None):
         self.host = host
         self._server = _ExclusiveHTTPServer(
             (host, port), handler_class or make_handler(
                 storage, shared_token, source_ids, status_provider,
                 ingest_enabled=ingest_enabled,
                 ingest_rate_limiter=ingest_rate_limiter,
-                client_registry=client_registry))
+                client_registry=client_registry,
+                alert_writer=alert_writer,
+                alert_rate_limiter=alert_rate_limiter))
         self._server.daemon_threads = False
         self._server.block_on_close = True
         self._server._active_condition = threading.Condition()

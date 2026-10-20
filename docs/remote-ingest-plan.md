@@ -872,6 +872,26 @@ In order (item 0 is an urgent defect and goes first):
      the overall accent, but it never hides data: the row, numbers and true
      status colour are unchanged, and the admin card says "alerts off". The
      prompt is in the conversation record; it builds on M12.
+     **Done 2026-10-20.** The master switch is the `enabled` key of the
+     global `[alerts]` settings (admin-stored > dash.toml > default, with the
+     origin in the effective configuration). The per-service settings are NOT
+     source config fields: they are their own rows in SQLite keyed by the
+     instance id, so a toggle never rebuilds the source and never restarts
+     its readers; they survive an edit, a rename and a rebuild, and they are
+     deleted with the service. The resolution (master AND service enabled;
+     own threshold else inherited; an unusable pair falls back to the global
+     pair with one INFO line and "override ignored" in the admin page) is one
+     pure function in `alert_policy.py`. Each source in the payload carries
+     `"alerts": true|false` and the top-level `alerts` object carries the
+     master; the device never receives a threshold. "Alerts off" removes the
+     service from the chirp, the LED escalation, the pop-to-top and the
+     overall accent, and hides nothing. The admin page has the master at the
+     top of the Alerts section, disables every control while it is off
+     (keeping the values, with the reason in words), shows the banner
+     "Alerts are off for all services" in the Alerts section and on the
+     Services tab, has an Alerts group per service with the inherited global
+     value as the placeholder, and lists every service with alerts off on the
+     Status tab.
    - **M12c, a bell per service on the Presto (author's idea).** The control
      is on each service's card, not on the Home rows (rows are 18 and 46 px
      tall: too small to tap reliably, and a tap on a row already opens its
@@ -894,6 +914,30 @@ In order (item 0 is an urgent defect and goes first):
      (author, 2026-10-20: for example resetting a weekly quota); the Presto
      changing a setting on its own daemon is not a provider action, and
      `AGENTS.md` now says so.
+     **Done 2026-10-20.** The route is `POST /api/v1/alerts/<source id>` on
+     the device port with the shared bearer token (constant-time compare): the
+     body is exactly `{"enabled": true|false}`, at most 256 bytes, JSON, no
+     chunked body; it sets a state and never toggles; it changes only that
+     one value and goes through the same code as the admin page's per-service
+     control, so both surfaces agree and the last write wins; it has its own
+     rate limit (30 a minute per address) and logs one INFO line with the
+     sanitised client name and never the token. The device writes it with a
+     bounded async `post_alert` in `presto/net.py` (no redirect, a capped
+     answer, the same exceptions as a fetch) and runs it as a task, so a
+     touch never blocks. The bell is drawn in the top-right of a service's
+     card from rectangles: the status colour when on, a grey bell with a
+     slash when off, a grey crossed bell when the master is off, with the
+     label "ALERTS ON" / "ALERTS OFF" / "ALERTS OFF (ALL)" next to it and the
+     title cut so it never reaches it. A tap on the bell applies the new
+     state at once and holds it until a payload confirms it or 20 seconds
+     pass; a failed write reverts and says "COULD NOT SAVE - DAEMON OFFLINE"
+     for four seconds, and a tap with the master off says "ALERTS OFF FOR ALL
+     - SEE ADMIN". A tap elsewhere on the card still opens its detail, and a
+     swipe over the bell is never a tap. Home shows a small dim bell next to
+     the name of a service whose alerts are off, and the row is unchanged
+     otherwise. The device observes only the services whose `alerts` is true:
+     a missing or junk value counts as true, so an older daemon behaves as
+     before.
    - **Mute that expires.** Long-press mute is a toggle that can be forgotten.
      Add an expiry (default 4 hours, settable in the Alerts section, 0 = never)
      and an on-screen indicator while muted, so "I did not realise it was off"

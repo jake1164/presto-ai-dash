@@ -36,7 +36,8 @@ from gestures import (
     GestureRecogniser,
 )
 from home import (DEMO_QUOTAS, HomeScroll, ROW_HEIGHT, SOURCE_HEIGHT, SOURCE_TOP,
-                  alert_settings, overflow_rows, row_at, source_rows)
+                  alert_settings, alerts_flag, alerts_state, overflow_rows, row_at,
+                  source_rows)
 from net import (
     StatusClient,
     StatusError,
@@ -46,8 +47,8 @@ from net import (
     load_static_payload,
 )
 from popup import PopToTop
-from ui import (Palette, build_home_layout, dot_hit, draw_boot, draw_card, draw_home,
-                draw_sources, draw_message)
+from ui import (Palette, bell_hit, build_home_layout, dot_hit, draw_boot,
+                draw_card, draw_home, draw_sources, draw_message)
 
 
 # Where to look for a sample payload, in order.
@@ -55,6 +56,15 @@ SAMPLE_PATHS = ("sample-status.json", "/sample-status.json")
 
 # How long a detail view stays open before returning to the card.
 DETAIL_TIMEOUT_MS = 15000
+
+# How long the optimistic bell state is held before the payload wins again.
+ALERT_HOLD_MS = 20000
+# How long a one-line message stays above the dots.
+ALERT_MESSAGE_MS = 4000
+# The messages are drawn in the detail line's font, which fits 34 characters.
+ALERT_MESSAGE_MAX = 34
+SAVE_FAILED_MESSAGE = "COULD NOT SAVE - DAEMON OFFLINE"
+ALERTS_OFF_MESSAGE = "ALERTS OFF FOR ALL - SEE ADMIN"
 
 
 def _now_ms():
@@ -119,6 +129,15 @@ class App(object):
         self.quiet = False
         self.alert_sound = True
         self.pop_to_top = True
+        # The master switch: with it off, no service alerts at all.
+        self.alerts_master = True
+        # What each service's alerts are doing, as the payload says.
+        self.service_alerts = {}
+        # The optimistic state of a bell the user has just tapped, and the
+        # services whose write is still on its way.
+        self.alert_holds = {}
+        self.alert_inflight = set()
+        self.alert_message = None
         # The LED shows the worst of every service, not just the open card.
         self.overall_accent = None
 
@@ -223,29 +242,165 @@ class App(object):
 
         The daemon sends the alert settings; the device trusts nothing but
         a real boolean, and falls back to its own defaults for the rest.
+
+        A service whose own alerts are off takes no part: it makes no
+        sound, it does not colour the light, and it never moves the list.
+        Its numbers and its own card are unchanged.
         """
         settings = alert_settings(payload)
         self.quiet = settings["quiet"]
         self.alert_sound = settings["sound"]
         self.pop_to_top = settings["pop_to_top"]
+        self.alerts_master = settings["enabled"]
         self.alerts.quiet = self.quiet
         statuses = {}
+        alerting = {}
         sources = payload.get("sources") if isinstance(payload, dict) else None
         for source in sources or ():
             if isinstance(source, dict) and source.get("id"):
                 statuses[source["id"]] = normalise_status(source.get("status"))
+                if alerts_flag(source):
+                    alerting[source["id"]] = statuses[source["id"]]
         if not statuses:
             # An older daemon sends no sources: the card carries the status.
             card = self._current_card()
             statuses = {card.id: card.status}
+            alerting = dict(statuses)
+        # The per-service switch, for the bell on the card.
+        self.service_alerts = {}
+        for source in sources or ():
+            if isinstance(source, dict) and source.get("id"):
+                state = alerts_state(source)
+                if state is not None:
+                    self.service_alerts[source["id"]] = state
+        # A service whose alerts were turned off stops counting at once:
+        # its baseline goes with it, so turning them back on starts from
+        # the status as it is now and never chirps for an old alarm.
+        for service in list(self.alerts.statuses):
+            if service not in alerting:
+                self.alerts.forget(service)
+                self.popup.forget(service)
         # The LED is a status meter: it shows the worst service, not only
         # the one the user happens to be looking at.
-        self.overall_accent = worst_accent(statuses.values())
-        for _service, cue in self.alerts.update(statuses):
+        self.overall_accent = worst_accent(alerting.values())
+        for _service, cue in self.alerts.update(alerting):
             self._play_cue(cue)
         now = _now_ms() / 1000.0
-        for service, status in statuses.items():
+        for service, status in alerting.items():
             self.popup.observe(service, status, now)
+        self._confirm_holds()
+
+    def _confirm_holds(self):
+        """A payload that agrees with a pending write confirms it."""
+        for service in list(self.alert_holds):
+            hold = self.alert_holds[service]
+            if service in self.service_alerts and \
+                    self.service_alerts[service] == hold["enabled"]:
+                del self.alert_holds[service]
+
+    def _card_alerts(self, card):
+        """The bell state of a card, or None when there is no bell.
+
+        The bell is on a service's own card: never on Home, never on the
+        summary card, and never while a detail view is open.
+        """
+        if card is None or card.id == "dash" or self.detail_open:
+            return None
+        if card.id not in self.service_alerts:
+            return None
+        enabled = self.service_alerts[card.id]
+        hold = self.alert_holds.get(card.id)
+        if hold is not None:
+            # The optimistic state, until the payload confirms it.
+            enabled = hold["enabled"]
+        return {"enabled": bool(enabled), "master_off": not self.alerts_master}
+
+    def _bell_tap(self):
+        """A tap on the bell switches one service's alerts.
+
+        Returns True when the tap was the bell's, so that it never opens
+        the card's detail as well.
+        """
+        if self.detail_open or self._connection_screen() is not None:
+            return False
+        card = self._current_card()
+        state = self._card_alerts(card)
+        if state is None:
+            return False
+        if not bell_hit(self._touch_x, self._touch_y, self.width, self.height):
+            return False
+        if state["master_off"]:
+            # The master switch is off: nothing can be turned on here.
+            self._set_alert_message(ALERTS_OFF_MESSAGE)
+            return True
+        service = card.id
+        if service in self.alert_inflight:
+            # A write for this service is still on its way: ignore it.
+            return True
+        enabled = not state["enabled"]
+        self.alert_holds[service] = {"enabled": enabled, "at": _now_ms()}
+        self.alert_inflight.add(service)
+        self._needs_redraw = True
+        self._start_alert_write(service, enabled)
+        return True
+
+    def _start_alert_write(self, service, enabled):
+        """Send the change to the daemon without blocking the touch loop."""
+        if self.static_demo:
+            # The static demo has no daemon to write to.
+            self._fail_alert_write(service)
+            return
+        try:
+            import asyncio
+            asyncio.create_task(self._write_alert(service, enabled))
+        except Exception:
+            self._fail_alert_write(service)
+
+    async def _write_alert(self, service, enabled):
+        """The device's one write: one service's alerts on or off."""
+        response = None
+        try:
+            response = await self.client.post_alert(service, enabled)
+        except Exception:
+            response = None
+        self.alert_inflight.discard(service)
+        if not isinstance(response, dict) or not response.get("ok"):
+            self._fail_alert_write(service)
+            return
+        # The optimistic state stays until a payload confirms it: a payload
+        # that was fetched before the write still carries the old value.
+        if type(response.get("alerts")) is bool:
+            self.service_alerts[service] = response["alerts"]
+        if type(response.get("master")) is bool:
+            self.alerts_master = response["master"]
+        self._needs_redraw = True
+
+    def _fail_alert_write(self, service):
+        """The write did not happen: show the old state and say why."""
+        self.alert_inflight.discard(service)
+        self.alert_holds.pop(service, None)
+        self._set_alert_message(SAVE_FAILED_MESSAGE)
+
+    def _set_alert_message(self, text):
+        """Show a one-line message above the dots for a few seconds."""
+        text = str(text)[:ALERT_MESSAGE_MAX]
+        self.alert_message = (text, _now_ms())
+        self._needs_redraw = True
+
+    def _expire_alerts(self):
+        """Drop an expired hold or message; the payload wins again."""
+        changed = False
+        now = _now_ms()
+        for service in list(self.alert_holds):
+            if _ticks_diff(now, self.alert_holds[service]["at"]) > ALERT_HOLD_MS:
+                del self.alert_holds[service]
+                changed = True
+        if self.alert_message is not None:
+            _text, started = self.alert_message
+            if _ticks_diff(now, started) > ALERT_MESSAGE_MS:
+                self.alert_message = None
+                changed = True
+        return changed
 
     async def poll_once(self):
         """Reconnect when needed and accept only a usable authenticated payload."""
@@ -410,7 +565,9 @@ class App(object):
             elif gesture == SWIPE_RIGHT:
                 self._prev_card()
             elif gesture == TAP:
-                if self._tap_navigates():
+                if self._bell_tap():
+                    pass
+                elif self._tap_navigates():
                     pass
                 elif self._current_card().id == "dash":
                     # Both periods are always visible on Home.
@@ -512,6 +669,8 @@ class App(object):
                 muted=self.alerts.muted,
                 width=self.width, height=self.height,
                 stale=bool(self.connection_error),
+                alerts=self._card_alerts(card),
+                message=(self.alert_message[0] if self.alert_message else None),
             )
 
         self.presto.update()
@@ -544,6 +703,8 @@ class App(object):
             gestures = self._poll_touch()
             self._handle_gestures(gestures)
             self._poll_popup()
+            if self._expire_alerts():
+                self._needs_redraw = True
 
             # A detail view closes itself after a while.
             if self.detail_open:
@@ -562,6 +723,8 @@ class App(object):
             while True:
                 self._handle_gestures(self._poll_touch())
                 self._poll_popup()
+                if self._expire_alerts():
+                    self._needs_redraw = True
                 if self._last_screen != self._connection_screen():
                     self._needs_redraw = True
                 if self.detail_open and _ticks_diff(_now_ms(), self.detail_opened_at) > DETAIL_TIMEOUT_MS:

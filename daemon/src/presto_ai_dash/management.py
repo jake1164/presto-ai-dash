@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+import logging
 import os
 import threading
 import time
@@ -9,7 +10,8 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 from . import __version__
-from .alert_policy import apply_threshold, parse_clock, threshold_status, validate_thresholds
+from .alert_policy import (apply_threshold, parse_clock, resolve_alert_settings,
+                           threshold_status, validate_thresholds)
 from .clients import ClientRegistry
 from .codex_login import CodexLoginManager
 from .collectors import claude_statusline
@@ -26,6 +28,8 @@ from .storage import ConfigurationConflict
 
 # The snippet URL is deliberately a placeholder: the user edits the address.
 INGEST_URL_PLACEHOLDER = "http://REPLACE-WITH-DASH-ADDRESS:8787/api/v1/ingest"
+
+log = logging.getLogger(__name__)
 
 
 def _stamp(value):
@@ -127,6 +131,9 @@ class SourceConfiguration:
         self.problems = ProblemBuffer()
         self.changed = threading.Event()
         self._edit_lock = threading.RLock()
+        # The services whose own alert thresholds are being ignored, so the
+        # daemon says it once and not once per payload.
+        self._ignored_overrides = set()
         marker = storage.configuration_marker()
         if marker is None and storage.source_instances():
             raise ValueError("credential store verifier is missing; restore the database backup")
@@ -161,6 +168,7 @@ class SourceConfiguration:
         records = self.storage.source_instances()
         snapshots = self.storage.latest_snapshots()
         settings = self.alerts_state()
+        stored = self.storage.service_alert_settings_all()
         sources = []
         for record in records:
             public = {key: record[key] for key in ("id", "type", "name", "enabled", "config", "revision")}
@@ -168,6 +176,17 @@ class SourceConfiguration:
             if record["type"] == "claude":
                 public["export_installed"] = self.storage.claude_bridge(record["id"]) is not None
             self._attach_ingest(public, record)
+            resolution = resolve_alert_settings(settings, stored.get(record["id"]))
+            # What the admin page needs to say: whether this service
+            # alerts, and why not when it does not.
+            public["alerts"] = {
+                "enabled": resolution["enabled"],
+                "service_enabled": resolution["service_enabled"],
+                "master_off": not resolution["master_enabled"],
+                "override_ignored": resolution["override_ignored"],
+                "warning_percent": resolution["warning_percent"],
+                "critical_percent": resolution["critical_percent"],
+            }
             snapshot = snapshots.get(record["id"])
             if snapshot:
                 snapshot = present_snapshot(snapshot)
@@ -177,8 +196,8 @@ class SourceConfiguration:
                 # shows the same warning a nearly used window raises on the
                 # device.
                 level = threshold_status(snapshot.metrics.get("quota"),
-                                         settings["warning_percent"],
-                                         settings["critical_percent"])
+                                         resolution["warning_percent"],
+                                         resolution["critical_percent"])
                 if level:
                     status = apply_threshold(status, level)
             public["status"] = status
@@ -247,7 +266,8 @@ class SourceConfiguration:
         """The alert settings, and whether it is quiet right now.
 
         The quiet flag is judged against the daemon's own local time, so the
-        device needs no clock and no time zone.
+        device needs no clock and no time zone. ``enabled`` is the master
+        switch: with it off, no service alerts at all.
         """
         return alert_settings(self.config, self.storage.alerts_settings())
 
@@ -261,7 +281,7 @@ class SourceConfiguration:
         if not isinstance(data, dict) or set(data) != set(ALERT_KEYS):
             raise ValueError("alerts needs every alert setting")
         validate_thresholds(data["warning_percent"], data["critical_percent"])
-        for key in ("sound", "quiet_hours", "pop_to_top"):
+        for key in ("enabled", "sound", "quiet_hours", "pop_to_top"):
             if type(data[key]) is not bool:
                 raise ValueError("alerts.%s must be true or false" % key)
         for key in ("quiet_start", "quiet_end"):
@@ -274,6 +294,131 @@ class SourceConfiguration:
                 changed[key] = data[key]
         self.storage.save_alerts(changed)
         return self.alerts_state()
+
+    # -- per-service alert settings ------------------------------------------
+
+    def _service_record(self, instance_id):
+        """One source instance, or None."""
+        return next((row for row in self.storage.source_instances()
+                     if row["id"] == instance_id), None)
+
+    def service_alert_state(self, instance_id):
+        """One service's alert settings, resolved against the global ones.
+
+        The stored values are the user's own: a threshold that is null is
+        inherited from the global setting. The resolved values say what the
+        service actually uses, and the flags say why they differ.
+        """
+        record = self._service_record(instance_id)
+        if record is None:
+            raise KeyError(instance_id)
+        settings = self.alerts_state()
+        stored = self.storage.service_alert_settings(instance_id) or {}
+        resolution = resolve_alert_settings(settings, stored)
+        self._note_ignored_override(instance_id, resolution)
+        return {
+            "id": instance_id,
+            "name": record["name"],
+            "enabled": stored.get("enabled", True),
+            "warning_percent": stored.get("warning_percent"),
+            "critical_percent": stored.get("critical_percent"),
+            "effective": {
+                "enabled": resolution["enabled"],
+                "warning_percent": resolution["warning_percent"],
+                "critical_percent": resolution["critical_percent"],
+            },
+            "override_ignored": resolution["override_ignored"],
+            "master_off": not resolution["master_enabled"],
+            "master": resolution["master_enabled"],
+        }
+
+    def set_service_alerts(self, instance_id, data):
+        """Save one service's alert settings.
+
+        Only the keys in the request are changed: a write that switches the
+        service's alerts on or off never touches its thresholds, and the
+        device's write and the admin page's write go through here, so the
+        last one wins.
+        """
+        if self._service_record(instance_id) is None:
+            raise KeyError(instance_id)
+        if not isinstance(data, dict) or not data:
+            raise ValueError("service alerts need at least one setting")
+        unknown = set(data) - {"enabled", "warning_percent", "critical_percent"}
+        if unknown:
+            raise ValueError("unknown service alert setting: %s" % sorted(unknown)[0])
+        if "enabled" in data and type(data["enabled"]) is not bool:
+            raise ValueError("enabled must be true or false")
+        thresholds = {}
+        for key in ("warning_percent", "critical_percent"):
+            if key not in data:
+                continue
+            value = data[key]
+            if value is None:
+                thresholds[key] = None
+                continue
+            if type(value) is not int or value < 1 or value > 100:
+                raise ValueError("%s must be an integer in range 1..100" % key)
+            thresholds[key] = value
+        if thresholds:
+            # The pair that would result must be usable: the warning must
+            # sit below the critical one, whether the value is the
+            # service's own or the global one it inherits.
+            settings = self.alerts_state()
+            stored = self.storage.service_alert_settings(instance_id) or {}
+            warning = (thresholds["warning_percent"]
+                       if "warning_percent" in thresholds
+                       else stored.get("warning_percent"))
+            critical = (thresholds["critical_percent"]
+                        if "critical_percent" in thresholds
+                        else stored.get("critical_percent"))
+            if warning is None:
+                warning = settings["warning_percent"]
+            if critical is None:
+                critical = settings["critical_percent"]
+            validate_thresholds(warning, critical)
+        values = {}
+        if "enabled" in data:
+            values["enabled"] = data["enabled"]
+        values.update(thresholds)
+        self.storage.save_service_alert_settings(instance_id, values)
+        return self.service_alert_state(instance_id)
+
+    def set_service_alert_enabled(self, instance_id, enabled):
+        """Switch one service's alerts on or off. The device's only write.
+
+        It changes that one setting and nothing else: never the thresholds,
+        never the master switch, never a provider.
+        """
+        if type(enabled) is not bool:
+            raise ValueError("enabled must be true or false")
+        return self.set_service_alerts(instance_id, {"enabled": enabled})
+
+    def alert_resolutions(self):
+        """Every service's effective alert behaviour, by instance id."""
+        settings = self.alerts_state()
+        stored = self.storage.service_alert_settings_all()
+        result = {}
+        for record in self.storage.source_instances():
+            resolution = resolve_alert_settings(settings, stored.get(record["id"]))
+            self._note_ignored_override(record["id"], resolution)
+            result[record["id"]] = resolution
+        return result
+
+    def _note_ignored_override(self, instance_id, resolution):
+        """Say once that a service's own thresholds are not being used.
+
+        The service falls back to the global pair when its own pair cannot
+        be used - for example after the global value changed under it. The
+        line is logged once per service, not once per payload.
+        """
+        if not resolution.get("override_ignored"):
+            return
+        if instance_id in self._ignored_overrides:
+            return
+        self._ignored_overrides.add(instance_id)
+        log.info("the alert thresholds of %s are ignored: they would not be usable, "
+                 "so the global values are used", instance_id)
 
     def create_ingest_token(self, instance_id):
         """Mint or rotate one write-only push token, shown exactly once."""
@@ -407,27 +552,31 @@ class SourceConfiguration:
             raise ValueError("Codex logout is only available for Codex sources")
         return self.codex_logins.logout(instance_id)
 
-    def full_status_payload(self, alerts=None):
+    def full_status_payload(self, alerts=None, resolutions=None):
         """Every field of every report: the superset the Presto's view is cut from."""
         with self.storage._lock:
             records = self.storage.source_instances()
             snapshots = self.storage.latest_snapshots()
-        return build_instance_payload(snapshots, records, alerts)
+        return build_instance_payload(snapshots, records, alerts, resolutions=resolutions)
 
     def status_payload(self):
         settings = self.alerts_state()
+        resolutions = self.alert_resolutions()
         thresholds = {"warning_percent": settings["warning_percent"],
-                      "critical_percent": settings["critical_percent"]}
+                      "critical_percent": settings["critical_percent"],
+                      "enabled": settings["enabled"]}
         # The Presto parses the whole response in a few hundred KB of RAM, so it
         # gets only the fields it reads (dashboard.device_view).
-        payload = device_view(self.full_status_payload(thresholds))
+        payload = device_view(self.full_status_payload(thresholds, resolutions))
         # The Home display settings travel with the payload, so a change
         # applies on the next poll without restarting the daemon.
         payload["display"] = {"overflow_rows": self.display_state()["overflow_rows"]}
         # The alert settings travel too: the device has no clock of its own,
-        # so the daemon says whether it is quiet right now.
+        # so the daemon says whether it is quiet right now, and whether
+        # alerts are on at all.
         payload["alerts"] = {"quiet": settings["quiet"], "sound": settings["sound"],
-                             "pop_to_top": settings["pop_to_top"]}
+                             "pop_to_top": settings["pop_to_top"],
+                             "enabled": settings["enabled"]}
         return payload
 
     def effective_config(self):
@@ -459,11 +608,27 @@ class SourceConfiguration:
                         for record in self.clients.clients(poll_interval=poll_interval)],
             "accounts": [self._account_health(source, snapshots.get(source["id"]))
                          for source in sources],
+            "alerts": self._alert_state_view(sources),
             "readers": self._readers(sources),
             "collectors": self._collectors(sources),
             "problems": [dict(record, time=_stamp(record["time"]))
                          for record in self.problems.problems()],
         }
+
+    def _alert_state_view(self, sources):
+        """Who is not alerting, and why: the Status tab's alert list."""
+        settings = self.alerts_state()
+        master = settings["enabled"]
+        rows = []
+        for source in sources:
+            alerts = source.get("alerts") or {}
+            if alerts.get("master_off") or not alerts.get("enabled"):
+                rows.append({"id": source["id"], "name": source["name"],
+                             "enabled": alerts.get("enabled", True),
+                             "service_enabled": alerts.get("service_enabled", True),
+                             "master_off": alerts.get("master_off", False),
+                             "override_ignored": alerts.get("override_ignored", False)})
+        return {"master": master, "master_off": not master, "services": rows}
 
     @staticmethod
     def _account_health(source, snapshot):

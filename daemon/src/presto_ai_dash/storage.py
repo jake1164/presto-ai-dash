@@ -13,8 +13,25 @@ from .sources import source_type
 
 # The alert settings the admin page can store. Each one is stored under
 # its own name in configuration_meta.
-ALERT_SETTING_KEYS = ("warning_percent", "critical_percent", "sound",
+ALERT_SETTING_KEYS = ("enabled", "warning_percent", "critical_percent", "sound",
                       "quiet_hours", "quiet_start", "quiet_end", "pop_to_top")
+
+# The per-service alert settings live in configuration_meta too, under
+# "alerts.service.<instance id>". They are not source configuration fields:
+# editing a source rebuilds it and rescans its logs, and a toggle must
+# never do that.
+SERVICE_ALERT_PREFIX = "alerts.service."
+
+
+def _service_alert_name(instance_id):
+    """The configuration_meta name one service's alert settings use."""
+    if not isinstance(instance_id, str) or not instance_id:
+        raise ValueError("instance id must be a nonempty string")
+    if any(char not in
+           "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-"
+           for char in instance_id):
+        raise ValueError("instance id has unusable characters")
+    return SERVICE_ALERT_PREFIX + instance_id
 
 
 def _utc(moment):
@@ -421,7 +438,7 @@ class Storage:
                     values[key] = int(text)
                 except ValueError:
                     continue
-            elif key in ("sound", "quiet_hours", "pop_to_top"):
+            elif key in ("enabled", "sound", "quiet_hours", "pop_to_top"):
                 if text not in ("1", "0"):
                     continue
                 values[key] = text == "1"
@@ -458,6 +475,110 @@ class Storage:
                     "INSERT INTO configuration_meta (name, value) VALUES (?, ?)"
                     " ON CONFLICT(name) DO UPDATE SET value=excluded.value",
                     (name, data))
+
+    # -- per-service alert settings ------------------------------------------
+
+    @staticmethod
+    def _validated_service_alerts(values):
+        """The stored form of one service's alert settings."""
+        if not isinstance(values, dict):
+            raise ValueError("service alert settings must be an object")
+        unknown = set(values) - {"enabled", "warning_percent", "critical_percent"}
+        if unknown:
+            raise ValueError("unknown service alert setting: %s" %
+                             sorted(unknown)[0])
+        result = {}
+        if "enabled" in values:
+            if type(values["enabled"]) is not bool:
+                raise ValueError("enabled must be a boolean")
+            result["enabled"] = values["enabled"]
+        for key in ("warning_percent", "critical_percent"):
+            if key not in values:
+                continue
+            value = values[key]
+            if value is None:
+                # None means "inherit the global value".
+                result[key] = None
+                continue
+            if type(value) is not int or value < 1 or value > 100:
+                raise ValueError("%s must be an integer in range 1..100" % key)
+            result[key] = value
+        return result
+
+    def service_alert_settings(self, instance_id):
+        """One service's stored alert settings, or None when it has none.
+
+        The stored form keeps only what the user set: a threshold that is
+        absent is inherited from the global setting, and an absent
+        ``enabled`` means the service is on.
+        """
+        try:
+            name = _service_alert_name(instance_id)
+        except ValueError:
+            return None
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT value FROM configuration_meta WHERE name = ?", (name,)).fetchone()
+        if row is None:
+            return None
+        try:
+            stored = json.loads(bytes(row["value"]).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            return None
+        if not isinstance(stored, dict):
+            return None
+        try:
+            return self._validated_service_alerts(stored)
+        except ValueError:
+            return None
+
+    def service_alert_settings_all(self):
+        """Every service's stored alert settings, by instance id."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT name, value FROM configuration_meta WHERE name LIKE ?",
+                (SERVICE_ALERT_PREFIX + "%",)).fetchall()
+        result = {}
+        for row in rows:
+            instance_id = row["name"][len(SERVICE_ALERT_PREFIX):]
+            try:
+                stored = json.loads(bytes(row["value"]).decode("utf-8"))
+            except (ValueError, UnicodeDecodeError):
+                continue
+            if not isinstance(stored, dict):
+                continue
+            try:
+                result[instance_id] = self._validated_service_alerts(stored)
+            except ValueError:
+                continue
+        return result
+
+    def save_service_alert_settings(self, instance_id, values):
+        """Store one service's alert settings.
+
+        A setting that is not in ``values`` keeps its stored value, so a
+        write that only switches the service on or off never touches its
+        thresholds.
+        """
+        name = _service_alert_name(instance_id)
+        stored = self._validated_service_alerts(values)
+        with self._lock, self._conn:
+            current = self.service_alert_settings(instance_id) or {}
+            current.update(stored)
+            self._conn.execute(
+                "INSERT INTO configuration_meta (name, value) VALUES (?, ?)"
+                " ON CONFLICT(name) DO UPDATE SET value=excluded.value",
+                (name, json.dumps(current, sort_keys=True).encode("utf-8")))
+        return current
+
+    def delete_service_alert_settings(self, instance_id):
+        """Forget one service's alert settings; used when it is deleted."""
+        try:
+            name = _service_alert_name(instance_id)
+        except ValueError:
+            return
+        with self._lock, self._conn:
+            self._conn.execute("DELETE FROM configuration_meta WHERE name = ?", (name,))
 
 
     def save_claude_bridge(self, instance_id, settings_path, previous, command):
@@ -579,6 +700,10 @@ class Storage:
                 if row["revision"] != expected_revision:
                     raise ConfigurationConflict("source changed; reload before deleting")
                 self._conn.execute("DELETE FROM source_instances WHERE id = ?", (instance_id,))
+                # The service is gone: its alert settings go with it, so a
+                # row never outlives the service it belongs to.
+                self._conn.execute("DELETE FROM configuration_meta WHERE name = ?",
+                                   (SERVICE_ALERT_PREFIX + instance_id,))
                 self._conn.commit()
             except Exception:
                 self._conn.rollback()

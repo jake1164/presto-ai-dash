@@ -1,7 +1,7 @@
 # Plan: optional observation ingest (local and remote collectors)
 
-Status (2026-10-18): **Phases 1-4 are implemented; Phases 1-3 are committed.**
-The database schema is v7. Next: Phase 9, then 7. Phases 5, 6 and 8 are
+Status (2026-10-19): **Phases 1-5 are implemented; Phases 1-4 are committed.**
+The database schema is v7. Next: Phase 9, then 7. Phases 5b, 5c, 6 and 8 are
 optional. Written for an implementing agent. Read
 `AGENTS.md`, `docs/claude.md`, `docs/sources.md` and `docs/quotas.md` first. Do
 not start a phase until the previous one passes its tests.
@@ -12,11 +12,11 @@ not start a phase until the previous one passes its tests.
 | 2 | Standalone collector `collectors/claude_statusline.py` | Done |
 | 3 | `POST /api/v1/ingest`, tokens (schema v7), admin controls | Done |
 | 4 | Freshness hints and the Presto display | Done (2026-10-18) |
-| 5 | Claude activity from local session logs (VS Code panel and CLI); 5b Stop hook and 5c remote push optional | **Next** |
+| 5 | Claude activity from local session logs (VS Code panel and CLI); 5b Stop hook and 5c remote push optional | Done (2026-10-19) |
 | 6 | Codex over push | Optional |
 | 7 | "Adding a source" guide and template | Not started (an earlier attempt was discarded) |
 | 8 | OpenTelemetry activity detail | Optional, only if asked |
-| 9 | Banked reset credits (Codex) | After Phase 4 |
+| 9 | Banked reset credits (Codex) | **Next** |
 
 ## Goal
 
@@ -461,6 +461,15 @@ reading; detail-card order and the 6-line cap; opt-in off means no
 `local_activity` and unchanged Phase 4 behaviour; the admin checkbox round
 trip. Docs: `docs/claude.md` section "Local activity (VS Code panel and CLI)"
 covering what is read, what is not, assumptions E and F, and how to enable.
+
+Done 2026-10-19: implemented with tests. The opt-in boolean setting, the
+stdlib-only activity reader, the in-use status and hints, the estimated weekly
+reset and the new detail lines are in place; `presto/` needed no change.
+
+Amended 2026-10-19: the reader reads in bounded chunks under a per-refresh
+byte budget, probes the tail of the newest files so the last use is right on
+the first poll, and reports a `complete` flag; while that flag is false the
+detail card shows `Tokens 5h/7d: scanning` instead of lower-bound numbers.
 
 **Phase 5b (optional, only if 5 is unacceptable): `Stop` hook.** Hooks are
 documented to run in IDE extensions. A `Stop` hook running the collector in

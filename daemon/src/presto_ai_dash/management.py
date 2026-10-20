@@ -34,6 +34,11 @@ def validate_settings(cls, settings):
             if (type(value) is not int or value < field.get("minimum", 1) or
                     value > field.get("maximum", 3600)):
                 raise ValueError(field["label"] + " is out of range")
+        elif field["type"] == "bool":
+            # Only a real boolean: "true" or 1 must never silently enable a
+            # privacy-relevant setting like local activity reading.
+            if type(value) is not bool:
+                raise ValueError(field["label"] + " must be true or false")
         else:
             if not isinstance(value, str) or len(value) > 2048 or "\x00" in value:
                 raise ValueError(field["label"] + " must be a valid string")

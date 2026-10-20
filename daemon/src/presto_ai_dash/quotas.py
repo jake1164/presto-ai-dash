@@ -1,7 +1,7 @@
 """Provider-independent allowance windows, preserving observation and reset times."""
 
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import math
 
 from .models import iso, now_utc, severity
@@ -10,6 +10,9 @@ QUOTA_SCHEMA_VERSION = 1
 
 # The device draws a hint instead of a reset note, so it must stay short.
 MAX_HINT_CHARS = 28
+
+# Claude's weekly window has a fixed cycle (Phase 5); its 5h window does not.
+WEEKLY_WINDOW_ID = "seven_day"
 
 
 def compact_age(seconds):
@@ -42,6 +45,67 @@ def age_label(seconds):
     return "%d day%s" % (days, "" if days == 1 else "s")
 
 
+def compact_tokens(count):
+    """A token total for the detail card: plain, whole k under a million, else M."""
+    if count is None:
+        return None
+    if count < 1000:
+        return "%d" % count
+    if count < 1000000:
+        return "%dk" % (count // 1000)
+    return "%.1fM" % (count / 1000000)
+
+
+def estimated_weekly_reset(windows, now):
+    """The next weekly reset guessed from the newest real seven_day reset.
+
+    The weekly cycle is fixed: from a real reset R (even one long past) the
+    next reset is R plus 7 days, repeated until it lies after ``now``. Returns
+    None when no weekly window ever reported a reset, and when the newest real
+    reset is still in the future - a measured future reset is shown as today,
+    only a passed one needs the guess. The 5h window never gets an estimate:
+    its start rule is not documented. Callers must label the result an
+    estimate; it is never presented as a provider reading.
+    """
+    real = [timestamp(window["resets_at"]) for window in windows
+            if window.get("id") == WEEKLY_WINDOW_ID and window.get("resets_at")]
+    if not real:
+        return None
+    estimate = max(real)
+    if estimate > now:
+        return None
+    while estimate <= now:
+        estimate += timedelta(days=7)
+    return estimate
+
+
+def activity_hint(report, measured, last_request_at, now):
+    """The Phase 5 hint while the local activity reader is working.
+
+    Called when Claude has been used within the last 24 hours; older silence
+    belongs to the Phase 4 rules. At most MAX_HINT_CHARS ASCII characters;
+    if the quota-age wording does not fit, the word "old" goes first.
+    """
+    idle = (now - timestamp(last_request_at)).total_seconds()
+    if not measured:
+        tail = "no quota data"
+    elif all(window["resets_at"] and timestamp(window["resets_at"]) <= now
+             for window in measured):
+        tail = "quota expired"
+    else:
+        newest = max(timestamp(window["observed_at"]) for window in report["windows"])
+        tail = "quota %s old" % compact_age((now - newest).total_seconds())
+    active_seconds = report.get("active_seconds", 300)
+    if idle <= active_seconds:
+        head = "In use"
+    else:
+        head = "Used %s ago" % compact_age(idle)
+    hint = "%s - %s" % (head, tail)
+    if len(hint) > MAX_HINT_CHARS and tail.endswith(" old"):
+        hint = hint[:-len(" old")]
+    return hint
+
+
 def claude_hint(report, now=None):
     """Why a Claude account's readings are missing or old, and what to do.
 
@@ -49,6 +113,9 @@ def claude_hint(report, now=None):
     observation trail (collector_seen_at and friends) get None, so providers
     that send no hint are never decorated. First match wins; every answer stays
     a warning, because none of these cases means the provider is unreachable.
+    While the Phase 5 local activity reader reports use in the last 24 hours,
+    its in-use table speaks instead; with the reader off or failing, exactly
+    the Phase 4 rules apply.
     """
     if "collector_seen_at" not in report:
         return None
@@ -63,14 +130,20 @@ def claude_hint(report, now=None):
         return None
     measured = [window for window in report["windows"]
                 if window["used_percent"] is not None]
+    seen = report.get("collector_seen_at")
+    activity = report.get("local_activity")
+    if (isinstance(activity, dict) and activity.get("available")
+            and activity.get("last_request_at")):
+        idle = (now - timestamp(activity["last_request_at"])).total_seconds()
+        if idle < 24 * 3600:
+            return activity_hint(report, measured, activity["last_request_at"], now)
     if not measured:
-        if report.get("collector_seen_at"):
+        if seen:
             return "Waiting for a Claude reply"
         return "Run claude in a terminal"
     if all(window["resets_at"] and timestamp(window["resets_at"]) <= now
            for window in measured):
         return "Awaiting refresh"
-    seen = report.get("collector_seen_at")
     if seen and (now - timestamp(seen)).total_seconds() <= stale_after:
         return "Reply in claude to refresh"
     # The newest signal of any kind quotes: a recent collector beats an old
@@ -159,8 +232,9 @@ def present_snapshot(snapshot, now=None):
         return snapshot
     result = deepcopy(snapshot)
     result.metrics["quota"] = present_quota(report, now)
-    if ((any(w["state"] == "stale" for w in result.metrics["quota"]["windows"]) or
-         result.metrics["quota"].get("activity", {}).get("state") == "stale") and
-            severity(result.status) < severity("warning")):
+    if (report.get("warn_on_stale", True) and
+            (any(w["state"] == "stale" for w in result.metrics["quota"]["windows"]) or
+             result.metrics["quota"].get("activity", {}).get("state") == "stale") and
+             severity(result.status) < severity("warning")):
         result.status = "warning"
     return result

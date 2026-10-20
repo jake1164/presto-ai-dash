@@ -49,6 +49,14 @@ hide the account on Presto without deleting it. Check it again to resume.
 Changes save immediately; the settings, stored key, history, and display
 position are retained. Presto updates on its next successful poll.
 
+Source settings render according to their declared type: `string` and `url`
+fields are text inputs, `int` fields are number inputs bounded by their
+configured minimum and maximum, and `bool` fields are checkboxes whose stored
+value is a real JSON boolean. The management API accepts only that exact type
+(`"true"` or `1` for a checkbox setting is a validation error), so an
+opt-in setting such as Claude's local activity reader can never be enabled by
+an ambiguous value.
+
 Disable the fake source before enabling a live source. Only one demo instance
 can be enabled, and it cannot run with live sources. Fake remains an available
 **demo/test** connector for hardware and connection checks. Delete its saved

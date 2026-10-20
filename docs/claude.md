@@ -111,6 +111,67 @@ it behind a reverse proxy with TLS. A token is write-only for one account:
 it cannot read the status payload, list sources, or touch any other source,
 and revoking it stops that computer's reports immediately.
 
+## Local activity (VS Code panel and CLI)
+
+The status line is the only source of Claude **quota**, and the VS Code panel
+does not run it; panel users therefore see stale quota or none at all. The
+optional local activity reader closes that visibility gap without quota: it
+proves Claude **is in use on this machine** even while its quota is stale.
+It changes no provider setting and makes no provider request.
+
+1. Open the Claude account on the admin page and tick **Read local Claude
+   Code activity (timestamps and token counts only)**. Off by default.
+2. Set **Treat Claude as in use for (seconds) after a request** (default
+   300) if you want a longer or shorter "in use" window.
+3. Nothing else. The daemon re-reads only bytes appended since its last
+   poll; no restart or Claude-side setup is needed.
+
+**What is read.** The session log files Claude Code and the panel write under
+`<profile>/projects/**/*.jsonl` next to the account's `settings.json`. The
+reader keeps only each request's timestamp, entrypoint (surface), model name
+and token counts, deduped by request id: the same API response is written on
+several lines, so counting lines would inflate tokens about 2.7x. Tokens are
+`input + output + cache creation`; cached reads are excluded as cheap against
+limits. The first scan skips files untouched for eight days and is byte-capped;
+memory keeps at most the last seven days.
+
+**Cold start.** A week of session logs is around 70 MB, so the first refresh
+cannot read all of it at once. The daemon reads it in bounded chunks across
+the following polls (at most 64 MB per poll), and the reader says so: its
+`complete` flag is false until every file inside the eight-day window has been
+read to the end. Until then the token totals are lower bounds and the detail
+card shows `Tokens 5h/7d: scanning` instead of numbers. The last use is
+never delayed: the newest files are read from their end first, so
+`Last used: <age> ago (<surface>)` and the `active` marker are right on the
+first refresh. Later refreshes only read what was appended and stay cheap.
+
+**What is never read, stored or sent**: prompt text, tool inputs, file paths,
+session identities — anything else those files contain. The on-screen result
+is only an age, a surface label (`VS Code`, `CLI`), a model name and token
+totals. The reader opens the files directly from the profile path in the
+account's settings; it never follows symlinks out of that `projects` tree and
+never sends the data anywhere (this machine only).
+
+**What it shows.** In use: a solid marker and blue accent while a request is
+newer than the active window, with the hint `In use - quota 6d old` (or
+`In use - no quota data`) replacing the stale-quota warning — while the
+reader works, stale quota alone never raises a yellow warning (the text says
+what's stale instead). Recently used: `Used 3h ago - quota expired`. After a
+quiet day the Phase 4 hints apply unchanged. The detail card adds
+`Last used: <age> ago (<surface>)`, `Tokens 5h/7d: 120k/2.1M`, and an
+`Wk reset ~4 days (est)` line when the weekly reset has passed: the weekly
+cycle is fixed, so the next reset is the newest real one plus whole weeks —
+an estimate, never presented as a provider reading. The 5h window is not
+estimated (its start rule is undocumented).
+
+**Limits.** The session file format is **not an official interface**; it can
+change without notice, and the reader then degrades to "activity
+unavailable" rather than breaking quota display. Activity is a **lower
+bound**: use on claude.ai, a phone, or another computer never appears in
+these files. No percentage is ever derived from tokens — subscription limits
+are not published, so tokens are shown as load only. Quota percentages still
+come only from the terminal status-line export above.
+
 
 ## Implementation checkpoint — 2026-10-11
 

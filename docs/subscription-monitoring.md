@@ -108,6 +108,20 @@ M11 connects the reusable windows to Home:
   `0%` value; its last measured value stays on the detail card.
   Stale-but-unexpired windows keep today's dimmed value. Rows without a hint
   behave exactly as before.
+- Local activity (Phase 5): with the Claude account's activity-log reader on
+  and working, in-use Claude reads `In use - quota 6d old` (or
+  `In use - no quota data`) and becomes `active` — a solid marker and the
+  blue accent while a request is within the configured active window;
+  `Used 3h ago - quota expired` shows recent but out-of-window use. While
+  the reader works, stale or missing quota alone never raises the row to a
+  warning; the hint text carries the staleness. After a quiet 24 hours the
+  Phase 4 hints apply again, and with the reader off or failing every line
+  and status is exactly Phase 4. The detail card then leads with
+  `Wk reset ~4 days (est)` (only when the real weekly reset has passed),
+  `Last used: <age> ago (<surface>)` in place of `Last reply`, and
+  `Tokens 5h/7d: 120k/2.1M` — token load only, never a percentage; no quota
+  is derived from them. The estimate is labelled and never shown as a
+  measured reset.
 - Local services (Ollama, LiteLLM) are health, not allowance: they share one
   line under the cloud rows, or become the list when no quota account exists.
 - Show additional windows, such as Go's monthly allowance, in the same reusable

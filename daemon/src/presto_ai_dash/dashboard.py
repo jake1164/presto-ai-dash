@@ -2,8 +2,8 @@
 
 from . import __version__
 from .models import Card, iso, now_utc, overall_status, severity
-from .quotas import (QUOTA_SCHEMA_VERSION, age_label, present_quota,
-                     present_snapshot, timestamp)
+from .quotas import (QUOTA_SCHEMA_VERSION, age_label, compact_age, compact_tokens,
+                     estimated_weekly_reset, present_quota, present_snapshot, timestamp)
 
 
 def _short_label(value, limit=8):
@@ -20,20 +20,48 @@ def _short_label(value, limit=8):
 
 
 def _trail_lines(report, now):
-    """Detail lines about the observation trail: data age, last reply, collector.
+    """Detail lines about the observation trail: estimates, use, data age, collector.
 
     They follow the per-window reset lines and the six-line cap drops them
-    bottom-first, so a full reset list always keeps every reset line.
+    bottom-first, so a full reset list always keeps every reset line. With
+    the Phase 5 local activity reader working, its estimated weekly reset,
+    last-used line and token totals come first and "Last used" replaces
+    "Last reply"; while the reader's cold scan is unfinished the totals are
+    lower bounds, so the line says "scanning" instead of numbers. "Data age"
+    needs a measured window: a placeholder window has no age to show.
     """
     def ago(moment):
         return "%s ago" % age_label((now - timestamp(moment)).total_seconds())
 
     lines = []
-    ages = [timestamp(window["observed_at"]) for window in report["windows"]]
+    activity = report.get("local_activity")
+    reading = isinstance(activity, dict) and activity.get("available")
+    if reading:
+        estimate = estimated_weekly_reset(report["windows"], now)
+        if estimate:
+            lines.append("Wk reset ~%s (est)"
+                         % age_label((estimate - now).total_seconds()))
+        last = activity.get("last_request_at")
+        if last:
+            lines.append("Last used: %s (%s)" % (
+                "%s ago" % compact_age((now - timestamp(last)).total_seconds()),
+                activity["last_entrypoint"]))
+        else:
+            lines.append("Last used: unavailable")
+        if activity.get("complete", True):
+            lines.append("Tokens 5h/7d: %s/%s" % (compact_tokens(activity["tokens_5h"]),
+                                                  compact_tokens(activity["tokens_7d"])))
+        else:
+            # The cold scan is still reading the week: the totals are lower
+            # bounds, and lower bounds are not shown as measurements.
+            lines.append("Tokens 5h/7d: scanning")
+    ages = [timestamp(window["observed_at"]) for window in report["windows"]
+            if window.get("used_percent") is not None]
     if ages:
         lines.append("Data age: %s" % age_label((now - max(ages)).total_seconds()))
-    replied = report.get("last_progress_at")
-    lines.append("Last reply: %s" % ("unavailable" if replied is None else ago(replied)))
+    if not reading:
+        replied = report.get("last_progress_at")
+        lines.append("Last reply: %s" % ("unavailable" if replied is None else ago(replied)))
     seen = report.get("collector_seen_at")
     if seen is None:
         lines.append("Reports: never")
@@ -212,8 +240,11 @@ def _account_card(row, snapshot, now=None):
         if "collector_seen_at" in report:
             # Claude accounts carry the observation trail: an old reading is
             # never presented as current, and a hint never reads as offline.
+            # warn_on_stale (Phase 5) means the local activity reader is
+            # working, so stale quota alone stays quiet and the hint speaks.
             status = snapshot.status
-            if report.get("hint") and severity(status) < severity("warning"):
+            if (report.get("hint") and report.get("warn_on_stale", True) and
+                    severity(status) < severity("warning")):
                 status = "warning"
             return Card(row["id"], row["name"], status, primary, secondary,
                         (details + _trail_lines(report, now) +

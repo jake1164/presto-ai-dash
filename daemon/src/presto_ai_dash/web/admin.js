@@ -55,8 +55,13 @@
       label.htmlFor = "field-" + field.key; label.textContent = field.label;
       const input = document.createElement("input");
       input.id = label.htmlFor; input.dataset.key = field.key;
-      input.type = field.type === "int" ? "number" : field.type === "url" ? "url" : "text";
-      input.value = settings[field.key] ?? field.default;
+      input.type = field.type === "int" ? "number" : field.type === "url" ? "url"
+        : field.type === "bool" ? "checkbox" : "text";
+      if (field.type === "bool") {
+        input.checked = Boolean(settings[field.key] ?? field.default);
+      } else {
+        input.value = settings[field.key] ?? field.default;
+      }
       if (field.type === "int") {
         input.min = field.minimum; input.max = field.maximum; input.step = "1"; input.required = true;
       } else if (field.type === "url") input.required = true;
@@ -478,8 +483,9 @@
     const type = selectedType(), config = {};
     if (!type) { message("Restore the source module before saving.", true); return; }
     for (const field of type.fields) {
-      const value = element("field-" + field.key).value;
-      config[field.key] = field.type === "int" ? Number(value) : value;
+      const input = element("field-" + field.key);
+      config[field.key] = field.type === "int" ? Number(input.value)
+        : field.type === "bool" ? input.checked : input.value;
     }
     const data = { type: type.id, name: element("source-name").value,
       enabled: element("source-enabled").checked, config };

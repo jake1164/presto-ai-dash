@@ -132,9 +132,9 @@ class HomeRowTextTests(unittest.TestCase):
         draw_sources(display, Palette(display), self.rows(), 0, 3)
         drawn = {text: (x, y) for text, x, y, wrap, scale, font in display.rows}
         self.assertIn("Local service", drawn)
-        self.assertIn("12 req", drawn)
+        self.assertIn("12 req / 340 tok", drawn)
         name_x, name_y = drawn["Local service"]
-        detail_x, detail_y = drawn["12 req"]
+        detail_x, detail_y = drawn["12 req / 340 tok"]
         self.assertEqual(name_y, detail_y)
         display.set_font("bitmap8")
         self.assertLessEqual(name_x + display.measure_text("Local service", 1), detail_x)
@@ -204,3 +204,28 @@ class FirmwareTextFitTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DotHitTests(unittest.TestCase):
+    def test_the_nearest_dot_wins_and_the_band_is_the_footer(self):
+        from ui import dot_hit
+        total = 7
+        start = (240 - 6 * 12) // 2
+        for card in range(total):
+            self.assertEqual(dot_hit(start + 12 * card, 232, 0, total), card)
+            self.assertEqual(dot_hit(start + 12 * card + 5, 232, 0, total), card)
+        self.assertIsNone(dot_hit(start, 100, 0, total))        # above the footer band
+        self.assertIsNone(dot_hit(start - 12, 232, 0, total))   # left of the first dot
+        self.assertIsNone(dot_hit(start + 12 * 7, 232, 0, total))
+
+    def test_it_follows_the_drawn_dots_when_there_are_more_than_nine(self):
+        from ui import dot_hit
+        total, index = 20, 12
+        first = max(0, min(index - 9 // 2, total - 9))
+        start = (240 - 8 * 12) // 2
+        self.assertEqual(dot_hit(start, 232, index, total), first)
+        self.assertEqual(dot_hit(start + 12 * 8, 232, index, total), first + 8)
+
+    def test_a_single_card_has_no_dots(self):
+        from ui import dot_hit
+        self.assertIsNone(dot_hit(120, 232, 0, 1))

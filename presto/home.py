@@ -515,8 +515,56 @@ def source_rows(payload):
             text = str(metrics["loaded_model"])
         rows.append({"id": source.get("id"), "type": source.get("type"),
                      "name": str(source.get("name") or source.get("type") or "Source"),
-                     "status": normalise_status(source.get("status")), "usage": text})
+                     "status": normalise_status(source.get("status")), "usage": text,
+                     "parts": local_parts(metrics, usage)})
     return rows
+
+
+def _number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def local_parts(metrics, usage):
+    """What a one-line local row can say, most useful first.
+
+    The row shows as many leading parts as fit beside the name. ``usage`` is
+    the request and token counts already formatted. Only numbers and the
+    loaded model's name are used, so an "unavailable" marker never shows.
+    """
+    parts = []
+    model = metrics.get("loaded_model")
+    if isinstance(model, str) and model:
+        parts.append(model[:16])
+    parts.extend(usage)
+    spend = metrics.get("spend_today")
+    if _number(spend) and spend > 0:
+        parts.append("$%.2f" % spend)
+    errors = metrics.get("errors_today")
+    if _number(errors) and errors > 0:
+        parts.append("%d err" % errors)
+    speed = metrics.get("last_measured_tokens_per_sec")
+    if _number(speed) and speed > 0:
+        parts.append("%.1f t/s" % speed)
+    models = metrics.get("available_models")
+    if not parts and _number(models) and models > 0:
+        parts.append("%d models" % models)
+    return parts
+
+
+def row_at(layout, scroll, y):
+    """The Home row under a touch at screen height ``y``, or None.
+
+    Only the list region answers; the strip and the footer are not rows. The
+    rows are walked with the same heights and scroll the drawing uses.
+    """
+    if y < SOURCE_TOP or y >= SOURCE_TOP + layout.region:
+        return None
+    top = SOURCE_TOP - scroll
+    for row, height, _compact in layout.rows:
+        if top <= y < top + height:
+            return row
+        top += height
+    return None
 
 
 class HomeScroll(object):

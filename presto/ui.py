@@ -294,8 +294,18 @@ def _draw_compact_local_row(display, palette, row, y, row_width, stale):
     from home import LOCAL_ROW
     display.set_font("bitmap8")
     # A healthy service shows what it is doing; otherwise its status.
-    detail = (row["usage"].split(" / ")[0] if row["status"] in ("ok", "active")
+    healthy = row["status"] in ("ok", "active")
+    detail = (row["usage"].split(" / ")[0] if healthy
               and row["usage"] != "Usage unavailable" else row["status"].upper())
+    parts = row.get("parts") if healthy else None
+    if parts:
+        # As many leading parts as fit beside the name; never fewer than before.
+        space = row_width - 6 - 4 - display.measure_text(row["name"], 1) - 8 - 2
+        for count in range(len(parts), 0, -1):
+            candidate = " / ".join(parts[:count])
+            if display.measure_text(candidate, 1) <= space:
+                detail = candidate
+                break
     # Two spare pixels: the firmware wraps a line whose last word does not
     # fit, and the text is measured one pixel narrower than it is drawn.
     detail_w = display.measure_text(detail, 1) + 2
@@ -473,16 +483,35 @@ def draw_card(display, palette, card, index, total, muted=False,
               scale=1, max_chars=8)
 
 
+DOT_SPACING = 12
+DOT_BAND = 24
+
+
+def _dot_span(index, total, width):
+    """(dots shown, first card index shown, x of the first dot)."""
+    visible = min(total, 9)
+    first = max(0, min(index - visible // 2, total - visible))
+    return visible, first, (width - (visible - 1) * DOT_SPACING) // 2
+
+
+def dot_hit(x, y, index, total, width=240, height=240):
+    """The card whose page dot is nearest a touch in the footer band, or None."""
+    if total <= 1 or y < height - DOT_BAND:
+        return None
+    visible, first, start = _dot_span(index, total, width)
+    position = (x - start + DOT_SPACING // 2) // DOT_SPACING
+    if position < 0 or position >= visible:
+        return None
+    return first + position
+
+
 def _draw_dots(display, palette, index, total, accent_rgb, width, height):
     """Small dots showing which card is showing."""
     if total <= 1:
         return
     radius = 3
-    spacing = 12
-    visible = min(total, 9)
-    first = max(0, min(index - visible // 2, total - visible))
-    block = (visible - 1) * spacing
-    start = (width - block) // 2
+    spacing = DOT_SPACING
+    visible, first, start = _dot_span(index, total, width)
     y = height - 12
     for position in range(visible):
         i = first + position

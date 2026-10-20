@@ -516,8 +516,7 @@ class HomeOrderTests(unittest.TestCase):
     def test_a_local_service_among_quota_rows_is_one_compact_line(self):
         _, display = self.drawn([("Ollama", "local"), ("Codex", "quota")])
         texts = [text for text, *_ in display.rows]
-        self.assertIn("12 req", texts)                # what the old strip showed
-        self.assertNotIn("12 req / 340 tok", texts)   # one line: the first item only
+        self.assertIn("12 req / 340 tok", texts)      # as much as fits on the one line
         self.assertNotIn("OK", texts)                 # a healthy service shows its usage
         found = self.name_positions(display, ["Ollama", "Codex"])
         self.assertEqual([text for text, _ in found], ["Ollama", "Codex"])
@@ -684,3 +683,65 @@ class HomeScrollTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LocalPartsTests(unittest.TestCase):
+    def parts(self, metrics):
+        row = source_rows({"sources": [{"id": "x", "type": "litellm", "name": "X",
+                                        "status": "ok", "metrics": metrics}]})[0]
+        return row["parts"]
+
+    def test_litellm_says_requests_tokens_spend_and_errors(self):
+        self.assertEqual(self.parts({"requests_today": 5, "tokens_today": 340,
+                                     "spend_today": 0.1234, "errors_today": 2}),
+                         ["5 req", "340 tok", "$0.12", "2 err"])
+
+    def test_zero_spend_and_no_errors_are_not_shown(self):
+        self.assertEqual(self.parts({"requests_today": 5, "spend_today": 0,
+                                     "errors_today": 0}), ["5 req"])
+
+    def test_ollama_says_the_model_and_its_speed(self):
+        self.assertEqual(self.parts({"loaded_model": "llama3.2:3b",
+                                     "last_measured_tokens_per_sec": 41.26}),
+                         ["llama3.2:3b", "41.3 t/s"])
+
+    def test_an_idle_ollama_says_how_many_models(self):
+        self.assertEqual(self.parts({"available_models": 7}), ["7 models"])
+
+    def test_unavailable_markers_and_booleans_never_show(self):
+        self.assertEqual(self.parts({"requests_today": "unavailable", "spend_today": True,
+                                     "errors_today": "unavailable",
+                                     "available_models": False}), [])
+
+    def test_a_long_model_name_is_cut(self):
+        self.assertEqual(len(self.parts({"loaded_model": "m" * 60})[0]), 16)
+
+
+class RowAtTests(unittest.TestCase):
+    def layout(self):
+        rows = source_rows({"sources": [
+            {"id": "q%d" % i, "type": "claude", "name": "Q%d" % i, "status": "ok",
+             "quota": {"windows": [{"label": "Weekly", "period_minutes": 10080,
+                                    "used_percent": 5, "state": "available",
+                                    "resets_at": "2026-10-25T12:00:00+00:00",
+                                    "observed_at": "2026-10-20T11:55:00+00:00"}]}}
+            for i in range(5)] + [{"id": "l", "type": "litellm", "name": "L", "status": "ok",
+                                   "metrics": {"requests_today": 1}}]})
+        from home import HomeLayout
+        return HomeLayout(rows, 1, lambda text: len(text) * 6, 200)
+
+    def test_the_row_under_a_touch_follows_heights_and_scroll(self):
+        from home import row_at
+        layout = self.layout()
+        self.assertEqual(row_at(layout, 0, 10)["id"], "q0")
+        self.assertEqual(row_at(layout, 0, 4 + 46)["id"], "q1")        # first pixel of row 1
+        self.assertEqual(row_at(layout, 0, 4 + 46 - 1)["id"], "q0")    # last pixel of row 0
+        self.assertEqual(row_at(layout, 46, 10)["id"], "q1")           # scrolled one row
+        self.assertEqual(row_at(layout, layout.limit, 4 + layout.region - 5)["id"], "l")
+
+    def test_outside_the_list_region_is_not_a_row(self):
+        from home import row_at
+        layout = self.layout()
+        self.assertIsNone(row_at(layout, 0, 2))                        # above the list
+        self.assertIsNone(row_at(layout, 0, 4 + layout.region))        # the strip band
+        self.assertIsNone(row_at(layout, 0, 235))                      # the footer

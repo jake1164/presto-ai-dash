@@ -428,7 +428,8 @@ DEVICE_WINDOW_KEYS = ("label", "used_percent", "state", "period_minutes",
                       "resets_at", "observed_at")
 DEVICE_ACTIVITY_KEYS = ("request_count", "usage_usd", "from", "until", "state")
 DEVICE_RESET_KEYS = ("available", "expires_at")
-DEVICE_METRICS_KEYS = ("requests_today", "tokens_today", "loaded_model")
+DEVICE_METRICS_KEYS = ("requests_today", "tokens_today", "loaded_model", "spend_today",
+                       "errors_today", "last_measured_tokens_per_sec", "available_models")
 
 
 def _pick(value, keys):

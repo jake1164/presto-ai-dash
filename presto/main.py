@@ -35,7 +35,7 @@ from gestures import (
     GestureRecogniser,
 )
 from home import (DEMO_QUOTAS, HomeScroll, ROW_HEIGHT, SOURCE_HEIGHT, SOURCE_TOP,
-                  overflow_rows, source_rows)
+                  overflow_rows, row_at, source_rows)
 from net import (
     StatusClient,
     StatusError,
@@ -44,7 +44,7 @@ from net import (
     embedded_payload,
     load_static_payload,
 )
-from ui import (Palette, build_home_layout, draw_boot, draw_card, draw_home,
+from ui import (Palette, build_home_layout, dot_hit, draw_boot, draw_card, draw_home,
                 draw_sources, draw_message)
 
 
@@ -337,6 +337,29 @@ class App(object):
         self.detail_open = False
         self._needs_redraw = True
 
+    def _tap_navigates(self):
+        """A tap on a page dot or a Home row goes to that card.
+
+        Swipes and scrolls never reach here: the recogniser reports a tap only
+        for a short press that stayed within the drag slop. Returns True when
+        the tap was used.
+        """
+        if self._connection_screen() is not None or not self.cards:
+            return False
+        x, y = self._touch_x, self._touch_y
+        target = dot_hit(x, y, self.index, len(self.cards), self.width, self.height)
+        if target is None and self._current_card().id == "dash" and self.home_layout:
+            row = row_at(self.home_layout, self.home_scroll.offset, y)
+            if row is not None:
+                target = next((i for i, card in enumerate(self.cards)
+                               if card.id == row.get("id")), None)
+        if target is None:
+            return False
+        self.index = target
+        self.detail_open = False
+        self._needs_redraw = True
+        return True
+
     def _handle_gestures(self, gestures):
         for gesture in gestures:
             if gesture == SWIPE_LEFT:
@@ -344,7 +367,9 @@ class App(object):
             elif gesture == SWIPE_RIGHT:
                 self._prev_card()
             elif gesture == TAP:
-                if self._current_card().id == "dash":
+                if self._tap_navigates():
+                    pass
+                elif self._current_card().id == "dash":
                     # Both periods are always visible on Home.
                     self._needs_redraw = True
                 elif self.detail_open:

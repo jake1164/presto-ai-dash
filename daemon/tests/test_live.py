@@ -273,6 +273,88 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(texts[:2], ['Gateway 0', 'OK'])
         self.assertNotIn('OpenAI', texts)
 
+    def tappable_payload(self):
+        """Mixed Home rows, with a card for every account, as the daemon sends."""
+        payload = self.mixed_payload()
+        payload['cards'] = [payload['cards'][0]] + [
+            {'id': source['id'], 'title': source['name'], 'status': 'ok', 'primary': 'p',
+             'secondary': 's', 'detail': ['d'], 'accent': 'green', 'alert': None}
+            for source in payload['sources']]
+        return payload
+
+    def touch(self, x, y, path=()):
+        """A press at (x, y), optionally dragged through ``path``, then released."""
+        touch = self.device.touch
+        touch.state = True
+        touch.x, touch.y = x, y
+        self.app._poll_touch()
+        for px, py in path:
+            touch.x, touch.y = px, py
+            self.app._poll_touch()
+        touch.state = False
+        gestures = self.app._poll_touch()
+        self.app._handle_gestures(gestures)
+        return gestures
+
+    async def test_tapping_a_home_row_opens_that_card(self):
+        self.app.client.fetch_async.return_value = self.tappable_payload()
+        await self.app.poll_once()
+        self.assertEqual(self.app._current_card().id, 'dash')
+        # Rows are 46 px from y=4: Cloud 0, Cloud 1, Cloud 2 ...
+        self.assertEqual(self.touch(100, 4 + 46 + 20), ['tap'])
+        self.assertEqual(self.app._current_card().id, 'cloud-1')
+        self.assertFalse(self.app.detail_open)
+
+    async def test_a_tap_lands_on_the_row_under_a_scrolled_list(self):
+        self.app.client.fetch_async.return_value = self.tappable_payload()
+        await self.app.poll_once()
+        self.app.home_scroll.offset = 50          # Cloud 0 is mostly scrolled off
+        self.touch(100, 4 + 10)                   # y=14 is row 0 at offset 50: 4 - 50 + 46 = 0 .. Cloud 1
+        self.assertEqual(self.app._current_card().id, 'cloud-1')
+
+    async def test_a_swipe_or_a_scroll_never_opens_a_card(self):
+        self.app.client.fetch_async.return_value = self.tappable_payload()
+        await self.app.poll_once()
+        self.touch(200, 60, path=[(150, 62), (90, 62), (60, 62)])      # swipe left
+        self.assertEqual(self.app._current_card().id, 'cloud-0')       # one card along, not a row tap
+        self.app.index = 0
+        self.touch(100, 100, path=[(100, 90), (100, 70), (100, 60)])   # scroll up
+        self.assertEqual(self.app._current_card().id, 'dash')
+
+    async def test_a_tap_on_the_strip_or_blank_space_does_nothing(self):
+        self.app.client.fetch_async.return_value = self.tappable_payload()
+        await self.app.poll_once()
+        strip_y = 4 + self.app.home_layout.region + 5
+        self.touch(100, strip_y)
+        self.assertEqual(self.app._current_card().id, 'dash')
+
+    async def test_tapping_a_page_dot_jumps_to_that_card(self):
+        self.app.client.fetch_async.return_value = self.tappable_payload()
+        await self.app.poll_once()
+        self.app.index = 3
+        total = len(self.app.cards)
+        # The first dot is Home; the dots are centred, 12 px apart.
+        start = (240 - (total - 1) * 12) // 2
+        self.touch(start, 232)
+        self.assertEqual(self.app._current_card().id, 'dash')
+        with patch.object(self.module, '_now_ms', return_value=1000):   # past the debounce
+            self.touch(start + 12 * 2, 232)
+        self.assertEqual(self.app._current_card().id, self.app.cards[2].id)
+
+    async def test_a_card_tap_still_opens_its_detail(self):
+        self.app.client.fetch_async.return_value = self.tappable_payload()
+        await self.app.poll_once()
+        self.app.index = 1
+        self.touch(120, 120)
+        self.assertTrue(self.app.detail_open)
+
+    async def test_taps_do_not_navigate_on_the_offline_screen(self):
+        self.app.client.fetch_async.return_value = self.tappable_payload()
+        await self.app.poll_once()
+        self.app.connection_error = ('Daemon offline', 'x', True)
+        self.touch(100, 4 + 46 + 20)
+        self.assertEqual(self.app._current_card().id, 'dash')
+
     async def test_offline_screen_says_why_and_counts(self):
         await self.app.poll_once()
         error = NetworkUnavailable('cannot reach daemon')

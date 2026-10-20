@@ -125,6 +125,7 @@ class App(object):
         self.live_rows = None
         self.connection_error = None
         self.fail_count = 0
+        self.wifi_drops = 0
         self.started_at = None
         self._last_screen = None
 
@@ -207,6 +208,7 @@ class App(object):
         """Reconnect when needed and accept only a usable authenticated payload."""
         try:
             if not self.presto.wifi.isconnected():
+                self.wifi_drops += 1
                 # The carousel runs us from /ai_dash_files. Firmware Wi-Fi
                 # imports root /secrets.py lazily when (re)connecting.
                 if "/" not in sys.path:
@@ -273,8 +275,8 @@ class App(object):
         except Exception:
             pass
         try:
-            wifi = self.presto.wifi
-            wlan = getattr(wifi, "wlan", None) or getattr(wifi, "_wlan", None)
+            import network
+            wlan = network.WLAN(network.STA_IF)
         except Exception:
             wlan = None
         if wlan is not None:
@@ -286,6 +288,8 @@ class App(object):
                 parts.append("rssi %s" % (wlan.status("rssi"),))
             except Exception:
                 pass
+        if self.wifi_drops:
+            parts.append("drops %d" % self.wifi_drops)
         if parts:
             lines.append("  ".join(parts))
         return lines

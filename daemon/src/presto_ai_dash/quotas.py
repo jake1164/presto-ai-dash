@@ -20,6 +20,28 @@ WEEKLY_WINDOW_ID = "seven_day"
 SOURCE_EXPORT = "terminal export"
 SOURCE_CACHE = "usage cache"
 
+# How long a reading from Claude Code's usage cache stays fresh. The cache is
+# only refreshed when /usage is opened, so the terminal export's threshold
+# would call a good reading stale. A Claude account can set its own value;
+# this is the default when it does not.
+USAGE_CACHE_STALE_SECONDS = 7200
+
+
+def window_stale_after(report, window):
+    """The freshness threshold that applies to one window.
+
+    A window from Claude Code's usage cache has its own, longer threshold: the
+    cache is only refreshed when /usage is opened, so the terminal export's
+    threshold would call a good reading stale. Every other window keeps the
+    report's own threshold, so no other provider and no terminal-export window
+    changes.
+    """
+    if isinstance(window, dict) and window.get("source") == SOURCE_CACHE:
+        value = report.get("usage_cache_stale_seconds")
+        if type(value) is int and value >= 1:
+            return value
+    return report.get("stale_after_seconds", 180)
+
 
 def compact_age(seconds):
     """A compact ASCII age: 59m, 1h, 47h, 2d. A future moment counts as 0m."""
@@ -135,7 +157,8 @@ def claude_hint(report, now=None):
     fresh = not report.get("error") and any(
         window["used_percent"] is not None and
         (not window["resets_at"] or timestamp(window["resets_at"]) > now) and
-        (now - timestamp(window["observed_at"])).total_seconds() <= stale_after
+        (now - timestamp(window["observed_at"])).total_seconds() <=
+        window_stale_after(report, window)
         for window in report["windows"])
     if fresh:
         return None
@@ -496,7 +519,8 @@ def present_quota(report, now=None):
             continue
         observed = timestamp(window["observed_at"])
         reset = timestamp(window["resets_at"]) if window["resets_at"] else None
-        if result.get("error") or (now - observed).total_seconds() > result["stale_after_seconds"]:
+        stale_after = window_stale_after(result, window)
+        if result.get("error") or (now - observed).total_seconds() > stale_after:
             window["state"] = "stale"
         if reset and reset <= now:
             window["state"] = "stale"

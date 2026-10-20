@@ -57,6 +57,13 @@ value is a real JSON boolean. The management API accepts only that exact type
 opt-in setting such as Claude's local activity reader can never be enabled by
 an ambiguous value.
 
+A Claude account has a second freshness setting, **Mark usage cache readings
+stale after (seconds)** (300 to 604800, default 7200): it is how long a
+reading from Claude Code's local usage cache stays fresh, because that cache is
+only refreshed when `/usage` is opened. The terminal export keeps its own
+**Mark idle readings stale after (seconds)** threshold, and each window of a
+merged report is judged by the source it came from.
+
 Disable the fake source before enabling a live source. Only one demo instance
 can be enabled, and it cannot run with live sources. Fake remains an available
 **demo/test** connector for hardware and connection checks. Delete its saved

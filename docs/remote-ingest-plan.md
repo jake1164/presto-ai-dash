@@ -580,6 +580,12 @@ Done 2026-10-20: implemented with tests. The opt-in reader (`collectors/claude_u
 
 Follow-up done 2026-10-20: the hints of a cache reader name `/usage` instead of a terminal, the log messages quote the real checkbox label, the Edit form has a **Set up for VS Code** button, and the daemon records in memory how often the cache refreshes (one admin line, no new storage).
 
+Follow-up done 2026-10-20: the cache readings have their own stale threshold
+(`usage_cache_stale_seconds`, 300 to 604800 seconds, default 7200), because the
+export's 900 seconds marked good cache readings stale; the terminal export
+keeps its own threshold, and a merged report judges every window by the source
+it came from.
+
 ### Phase 6 (optional): Codex over push
 
 Write `collectors/codex_appserver.py` that runs on the developer machine,

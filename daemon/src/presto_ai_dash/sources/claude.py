@@ -7,7 +7,7 @@ from pathlib import Path
 from ..collectors.claude_activity import ActivityReader
 from ..collectors.claude_usage_cache import UsageCacheReader, candidate_paths
 from ..models import SourceSnapshot, now_utc
-from ..quotas import quota_report, quota_window, timestamp
+from ..quotas import (USAGE_CACHE_STALE_SECONDS, quota_report, quota_window, timestamp)
 from . import Source, register
 
 WINDOWS = (("five_hour", "5h", 300), ("seven_day", "Weekly", 10080))
@@ -54,6 +54,10 @@ class ClaudeSource(Source):
          "type": "bool", "default": False},
         {"key": "usage_cache_path", "label": "Claude Code state file (blank: automatic)",
          "type": "string", "default": ""},
+        {"key": "usage_cache_stale_seconds",
+         "label": "Mark usage cache readings stale after (seconds)",
+         "type": "int", "default": USAGE_CACHE_STALE_SECONDS, "minimum": 300,
+         "maximum": 604800},
     )
 
     def __init__(self, config=None):
@@ -126,6 +130,18 @@ class ClaudeSource(Source):
             return NOTE_AWAITING if cache is None else NOTE_AWAITING_CACHE
         return NOTE_EXPORT
 
+    def _usage_cache_stale(self):
+        """The freshness threshold for readings from the usage cache.
+
+        The cache is only refreshed when /usage is opened in Claude Code, so
+        the terminal export's threshold would call a good reading stale. A
+        missing or unusable setting falls back to the default.
+        """
+        value = self.config.get("usage_cache_stale_seconds")
+        if type(value) is not int or value < 1:
+            return USAGE_CACHE_STALE_SECONDS
+        return value
+
     def collect(self):
         now = now_utc()
         observation = self.storage.observation(self.id) if hasattr(self, "storage") else None
@@ -150,6 +166,9 @@ class ClaudeSource(Source):
         # Every report carries the collector trail (None before the first
         # push), so payload building can produce freshness hints (Phase 4).
         report["stale_after_seconds"] = self.config.get("stale_after_seconds", 900)
+        # The usage cache has its own threshold; the terminal export keeps the
+        # one above, and every window is judged by the source it came from.
+        report["usage_cache_stale_seconds"] = self._usage_cache_stale()
         for key in ("collector_seen_at", "collector_host", "collector_version", "last_progress_at"):
             report[key] = observation[key] if observation else None
         available = [w for w in report["windows"] if w["state"] == "available"]

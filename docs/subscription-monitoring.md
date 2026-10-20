@@ -145,6 +145,11 @@ M11 connects the reusable windows to Home:
   `Log tokens 5h/7d: 120k/2.1M` (from the local session logs) — token load only, never a percentage; no quota
   is derived from them. The estimate is labelled and never shown as a
   measured reset.
+- Separate staleness for the usage cache: a reading from Claude Code's local
+  usage cache stays fresh for its own account setting (default 7200 seconds),
+  because the cache is only refreshed when `/usage` is opened, while the
+  terminal export keeps its own threshold; in a merged report every window is
+  judged by the source it came from.
 - Banked resets (Phase 9): a Codex account whose provider reports banked
   reset credits shows `Resets avail: 3`, `Next exp: 10-24 12:00Z (4 days)` and
   `Credits: 0` on its detail card, and a small `R3` badge on Home that turns

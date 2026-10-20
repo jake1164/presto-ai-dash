@@ -13,6 +13,7 @@ class Display:
         self.width = width
         self.font = "bitmap8"
         self.rows = []
+        self.text_pens = []
         self.rectangles = []
         self.pen = None
         self.clip = None
@@ -29,6 +30,7 @@ class Display:
 
     def clear(self):
         self.rows = []
+        self.text_pens = []
         self.row_clips = []
         self.rectangles = []
 
@@ -53,6 +55,7 @@ class Display:
 
     def text(self, text, x, y, wrap, scale):
         self.rows.append((text, x, y, wrap, scale, self.font))
+        self.text_pens.append(self.pen)
         self.row_clips.append(self.clip)
 
 

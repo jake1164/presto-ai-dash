@@ -302,6 +302,22 @@ class QuotaDeviceTests(unittest.TestCase):
                              SourceSnapshot("c", "ok", NOW, {"quota": report}), now=NOW)
         self.assertEqual(card.detail[:2], ["5h passed 10-11 13:00Z", "Weekly reset: 10-13 14:00Z"])
 
+    def test_a_normal_window_label_is_never_abbreviated_on_the_detail_card(self):
+        """Codex's empty slot is named "Secondary"; shortening it to "Secon..."
+        threw away information the line has plenty of room for."""
+        from presto_ai_dash.dashboard import _account_card
+        report = quota_report("openai", "Codex", [
+            quota_window("a", "Weekly", 14, RESET, NOW, 10080),
+            quota_window("b", "Secondary", None, None, NOW, state="unavailable")])
+        card = _account_card({"id": "c", "name": "Codex", "type": "codex"},
+                             SourceSnapshot("c", "ok", NOW, {"quota": report}), now=NOW)
+        self.assertEqual(card.detail[:2], ["Weekly reset: 10-13 14:00Z", "Secondary reset: unavailable"])
+        long = quota_report("openai", "Codex", [
+            quota_window("a", "Monthly credits", 5, RESET, NOW)])
+        card = _account_card({"id": "c", "name": "Codex", "type": "codex"},
+                             SourceSnapshot("c", "ok", NOW, {"quota": long}), now=NOW)
+        self.assertEqual(card.detail[0], "Monthly reset: 10-13 14:00Z")  # a long label still shortens
+
     def test_passed_reset_is_judged_against_now_not_the_last_reading(self):
         """Claude's snapshot time is its last reading, so a stale account must not
         present a reset that passed since then as upcoming."""

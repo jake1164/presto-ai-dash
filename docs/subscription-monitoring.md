@@ -119,9 +119,14 @@ M11 connects the reusable windows to Home:
   and status is exactly Phase 4. The detail card then leads with
   `Wk reset ~4 days (est)` (only when the real weekly reset has passed),
   `Last used: <age> ago (<surface>)` in place of `Last reply`, and
-  `Tokens 5h/7d: 120k/2.1M` — token load only, never a percentage; no quota
+  `Log tokens 5h/7d: 120k/2.1M` (from the local session logs) — token load only, never a percentage; no quota
   is derived from them. The estimate is labelled and never shown as a
   measured reset.
+- Banked resets (Phase 9): a Codex account whose provider reports banked
+  reset credits shows `Resets avail: 3`, `Next exp: 10-24 12:00Z (4 days)` and
+  `Credits: 0` on its detail card, and a small `R3` badge on Home that turns
+  amber with the time left (`R3 2d`) when the earliest expiry is 72 hours
+  away or less; the project never redeems a reset.
 - Local services (Ollama, LiteLLM) are health, not allowance: they share one
   line under the cloud rows, or become the list when no quota account exists.
 - Show additional windows, such as Go's monthly allowance, in the same reusable

@@ -162,6 +162,95 @@ def timestamp(value):
     return value.astimezone(timezone.utc)
 
 
+def ascii_label(value, limit=32):
+    """A printable ASCII label, bounded; anything else becomes "unknown"."""
+    if not isinstance(value, str):
+        return "unknown"
+    text = "".join(char for char in value if 32 <= ord(char) < 127).strip()
+    if not text:
+        return "unknown"
+    return text[:limit]
+
+
+def mark_passed_resets(quota, now=None):
+    """Flag the windows whose reset time has passed, for the admin page.
+
+    The value of such a window is its last known one, so the page says so
+    instead of presenting it as a current reading.
+    """
+    now = timestamp(now or now_utc())
+    for window in quota.get("windows", []):
+        resets_at = window.get("resets_at")
+        window["reset_passed"] = bool(resets_at and timestamp(resets_at) <= now)
+    return quota
+
+
+def claude_provenance(report, config=None, now=None):
+    """Labelled lines that say where each Claude number came from.
+
+    The quota line names the terminal export, the time of the reading, the
+    host that reported it and how old it is. The activity line names the
+    local session logs and what they say, or why they say nothing. The status
+    note repeats the freshness hint. Nothing here is stored: the lines are
+    derived from the report the daemon already holds.
+    """
+    now = timestamp(now or now_utc())
+    report = report if isinstance(report, dict) else {}
+    config = config if isinstance(config, dict) else {}
+    return {"quota": _quota_source_line(report, now),
+            "activity": _activity_source_line(report, config, now),
+            "status_note": _status_note_line(report)}
+
+
+def _quota_source_line(report, now):
+    """Where the quota numbers came from, and how old they are."""
+    measured = [window for window in report.get("windows", [])
+                if isinstance(window, dict) and window.get("used_percent") is not None
+                and window.get("observed_at")]
+    if not measured:
+        return "Quota: no reading yet (use claude in a terminal)"
+    observed = max(timestamp(window["observed_at"]) for window in measured)
+    when = observed.astimezone().strftime("%Y-%m-%d %H:%M")
+    host = report.get("collector_host")
+    origin = " from %s" % ascii_label(host) if host else ""
+    return "Quota: terminal export - last reading %s%s (%s old)" % (
+        when, origin, age_label((now - observed).total_seconds()))
+
+
+def _activity_source_line(report, config, now):
+    """Where the activity numbers came from, and what they say."""
+    if not config.get("activity_logs"):
+        return "Activity: reader off (tick 'Read local Claude Code activity' in Edit)"
+    activity = report.get("local_activity")
+    if not isinstance(activity, dict):
+        return "Activity: unavailable (no reading yet)"
+    if not activity.get("available"):
+        return "Activity: unavailable (%s)" % ascii_label(
+            activity.get("reason") or "unknown reason", 60)
+    last = activity.get("last_request_at")
+    if last:
+        head = "Activity: local logs - last used %s ago (%s)" % (
+            compact_age((now - timestamp(last)).total_seconds()),
+            ascii_label(activity.get("last_entrypoint") or "?", 12))
+    else:
+        head = "Activity: local logs - no request recorded yet"
+    if not activity.get("complete", True):
+        return "%s - tokens scanning" % head
+    five = compact_tokens(activity.get("tokens_5h"))
+    seven = compact_tokens(activity.get("tokens_7d"))
+    if five is None or seven is None:
+        return "%s - tokens unknown" % head
+    return "%s - tokens 5h/7d %s/%s" % (head, five, seven)
+
+
+def _status_note_line(report):
+    """The freshness hint, labelled so it never reads as a measurement."""
+    hint = report.get("hint")
+    if not isinstance(hint, str) or not hint.strip():
+        return None
+    return "Status note: %s" % hint
+
+
 def quota_window(window_id, label, percent, reset, observed, period_minutes=None,
                  state="available", used_amount=None, limit_amount=None, currency=None):
     if state not in ("available", "unavailable", "unlimited"):

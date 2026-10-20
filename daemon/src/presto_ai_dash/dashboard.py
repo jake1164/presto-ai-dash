@@ -5,8 +5,14 @@ from .models import Card, iso, now_utc, overall_status, severity
 from .quotas import (QUOTA_SCHEMA_VERSION, age_label, compact_age, compact_tokens,
                      estimated_weekly_reset, present_quota, present_snapshot, timestamp)
 
+# The device draws at most six detail lines and truncates a line that is
+# longer than this many characters (presto/ui.py DETAIL_MAX). The daemon keeps
+# its own lines inside the same budget so nothing is cut on the screen.
+DETAIL_LINE_COUNT = 6
+DETAIL_LINE_CHARS = 34
 
-def _short_label(value, limit=8):
+
+def _short_label(value, limit=10):
     """Bound provider labels so a reset detail keeps its complete timestamp."""
     value = str(value)
     if len(value) <= limit:
@@ -20,15 +26,16 @@ def _short_label(value, limit=8):
 
 
 def _trail_lines(report, now):
-    """Detail lines about the observation trail: estimates, use, data age, collector.
+    """Detail lines about the observation trail: estimates, use, quota age, collector.
 
     They follow the per-window reset lines and the six-line cap drops them
     bottom-first, so a full reset list always keeps every reset line. With
     the Phase 5 local activity reader working, its estimated weekly reset,
     last-used line and token totals come first and "Last used" replaces
     "Last reply"; while the reader's cold scan is unfinished the totals are
-    lower bounds, so the line says "scanning" instead of numbers. "Data age"
-    needs a measured window: a placeholder window has no age to show.
+    lower bounds, so the line says "scanning" instead of numbers. "Quota age"
+    needs a measured window: a placeholder window has no age to show. Every
+    line says where its number comes from.
     """
     def ago(moment):
         return "%s ago" % age_label((now - timestamp(moment)).total_seconds())
@@ -49,16 +56,22 @@ def _trail_lines(report, now):
         else:
             lines.append("Last used: unavailable")
         if activity.get("complete", True):
-            lines.append("Tokens 5h/7d: %s/%s" % (compact_tokens(activity["tokens_5h"]),
-                                                  compact_tokens(activity["tokens_7d"])))
+            five = compact_tokens(activity.get("tokens_5h"))
+            seven = compact_tokens(activity.get("tokens_7d"))
+            if five is None or seven is None:
+                lines.append("Log tokens 5h/7d: unknown")
+            else:
+                # The label says where the numbers come from: the local logs.
+                lines.append("Log tokens 5h/7d: %s/%s" % (five, seven))
         else:
             # The cold scan is still reading the week: the totals are lower
             # bounds, and lower bounds are not shown as measurements.
-            lines.append("Tokens 5h/7d: scanning")
+            lines.append("Log tokens 5h/7d: scanning")
     ages = [timestamp(window["observed_at"]) for window in report["windows"]
             if window.get("used_percent") is not None]
     if ages:
-        lines.append("Data age: %s" % age_label((now - max(ages)).total_seconds()))
+        # The age of the quota reading, not of the account.
+        lines.append("Quota age: %s" % age_label((now - max(ages)).total_seconds()))
     if not reading:
         replied = report.get("last_progress_at")
         lines.append("Last reply: %s" % ("unavailable" if replied is None else ago(replied)))
@@ -70,6 +83,52 @@ def _trail_lines(report, now):
         host = _short_label(report.get("collector_host") or "unknown",
                             max(1, 30 - len("Reports: ") - 1 - len(age)))
         lines.append("Reports: %s %s" % (host, age))
+    return lines
+
+
+def _expiry_age(moment, now):
+    """The time left until an expiry, spelled out unless the line would not fit."""
+    seconds = (moment - now).total_seconds()
+    spelled = age_label(seconds)
+    when = moment.strftime("%m-%d %H:%MZ")
+    if len("Next exp: %s (%s)" % (when, spelled)) <= DETAIL_LINE_CHARS:
+        return spelled
+    return compact_age(seconds)
+
+
+def _reset_credit_lines(report, now):
+    """Banked reset credits, the credit balance, and where they came from.
+
+    A provider that reports no count says nothing: an unknown count is never
+    shown as a count of zero. The window lines always come first; these lines
+    are the ones that go when the six-line card is full.
+    """
+    lines = []
+    credits = report.get("reset_credits")
+    if isinstance(credits, dict):
+        available = credits.get("available")
+        if type(available) is int:
+            lines.append("Resets avail: %d" % available)
+            expiries = credits.get("expires_at")
+            moments = []
+            if isinstance(expiries, list):
+                for value in expiries:
+                    try:
+                        moments.append(timestamp(value))
+                    except (TypeError, ValueError):
+                        continue
+            if moments:
+                earliest = min(moments)
+                lines.append("Next exp: %s (%s)" % (earliest.strftime("%m-%d %H:%MZ"),
+                                                    _expiry_age(earliest, now)))
+    balance = report.get("credits")
+    if isinstance(balance, dict):
+        if balance.get("unlimited") is True:
+            lines.append("Credits: unlimited")
+        elif isinstance(balance.get("balance"), str):
+            lines.append("Credits: %s" % balance["balance"])
+    if lines:
+        lines.append("Source: local %s app-server" % (report.get("product") or "Codex"))
     return lines
 
 
@@ -256,8 +315,11 @@ def _account_card(row, snapshot, now=None):
                           activity["input_tokens"] + activity["output_tokens"])
             details += ["Activity: " + activity["state"],
                         "Period: " + activity["from"][:10] + " - " + activity["until"][:10]]
-        if report.get("error"):
-            details.append(report["error"])
+        extra = _reset_credit_lines(report, now)
+        errors = [report["error"]] if report.get("error") else []
+        # The window lines are never dropped; the new lines go first.
+        room = max(0, DETAIL_LINE_COUNT - len(details) - len(errors))
+        details = details + extra[:room] + errors
         return Card(row["id"], row["name"], snapshot.status, primary, secondary, details)
     if row["type"] in ("ollama", "litellm"):
         template = build_status_payload({row["type"]: snapshot})["cards"][

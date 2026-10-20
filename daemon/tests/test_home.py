@@ -13,7 +13,7 @@ from home import (DEMO_QUOTAS, HomeScroll, binding_window, quota_label, quota_wi
                   scroll_limit, source_rows)
 from net import embedded_payload
 from test_ui import Display
-from ui import PANEL, DAILY, WEEKLY, Palette, draw_home, draw_sources
+from ui import (AMBER, PANEL, DAILY, WEEKLY, INK_DIM, Palette, draw_home, draw_sources)
 
 
 HOME_NOW = datetime(2026, 10, 18, 12, tzinfo=timezone.utc)
@@ -327,6 +327,111 @@ class HomeHintTests(unittest.TestCase):
         texts = self.drawn(row)
         self.assertTrue(texts[0].endswith("~"))  # the hint wins; the name clips
         self.assertIn("No report 6d - run claude", texts)
+
+
+class HomeResetBadgeTests(unittest.TestCase):
+    """Phase 9: a small badge counts the banked resets on the Home row."""
+
+    def payload(self, reset_credits, name="Codex", hint=None, windows=None):
+        if windows is None:
+            windows = [{"label": "Weekly", "period_minutes": 10080, "used_percent": 14,
+                        "state": "available",
+                        "resets_at": (HOME_NOW + timedelta(days=7)).isoformat(),
+                        "observed_at": iso_past(minutes=5)}]
+        quota = {"windows": windows, "hint": hint}
+        if reset_credits is not None:
+            quota["reset_credits"] = reset_credits
+        return {"updated_at": HOME_NOW.isoformat(), "card_order": "accounts",
+                "sources": [{"id": "c", "type": "codex", "name": name,
+                             "status": "ok", "quota": quota}]}
+
+    def row(self, *args, **kwargs):
+        return source_rows(self.payload(*args, **kwargs))[0]
+
+    def drawn(self, row):
+        display = Display()
+        draw_sources(display, Palette(display), [row], 0, 3, status="ok")
+        HomeLayoutTests().assert_layout(display)
+        return display
+
+    def badge_row(self, display):
+        found = [index for index, entry in enumerate(display.rows)
+                 if entry[0].startswith("R") and entry[0][1:2].isdigit()]
+        self.assertEqual(len(found), 1, display.rows)
+        return found[0]
+
+    def test_no_badge_when_the_count_is_not_reported(self):
+        self.assertIsNone(self.row({"available": None, "expires_at": []})["reset_badge"])
+        self.assertIsNone(self.row(None)["reset_badge"])
+
+    def test_no_badge_for_zero_resets(self):
+        self.assertIsNone(self.row({"available": 0, "expires_at": []})["reset_badge"])
+
+    def test_a_dim_badge_counts_the_resets(self):
+        badge = self.row({"available": 3, "expires_at": []})["reset_badge"]
+        self.assertEqual(badge["text"], "R3")
+        self.assertFalse(badge["amber"])
+
+    def test_amber_within_seventy_two_hours(self):
+        expiry = (HOME_NOW + timedelta(hours=72)).isoformat()
+        badge = self.row({"available": 3, "expires_at": [expiry]})["reset_badge"]
+        self.assertEqual(badge["text"], "R3 3d")
+        self.assertTrue(badge["amber"])
+
+    def test_dim_beyond_seventy_two_hours(self):
+        expiry = (HOME_NOW + timedelta(hours=73)).isoformat()
+        badge = self.row({"available": 3, "expires_at": [expiry]})["reset_badge"]
+        self.assertEqual(badge["text"], "R3")
+        self.assertFalse(badge["amber"])
+
+    def test_the_time_left_uses_the_home_units(self):
+        expiry = (HOME_NOW + timedelta(hours=5)).isoformat()
+        badge = self.row({"available": 2, "expires_at": [expiry]})["reset_badge"]
+        self.assertEqual(badge["text"], "R2 5h")
+        expiry = (HOME_NOW + timedelta(days=2)).isoformat()
+        badge = self.row({"available": 2, "expires_at": [expiry]})["reset_badge"]
+        self.assertEqual(badge["text"], "R2 2d")
+
+    def test_the_earliest_expiry_decides(self):
+        expiry = (HOME_NOW + timedelta(days=4)).isoformat()
+        soon = (HOME_NOW + timedelta(hours=10)).isoformat()
+        badge = self.row({"available": 3, "expires_at": [expiry, soon]})["reset_badge"]
+        self.assertEqual(badge["text"], "R3 10h")
+        self.assertTrue(badge["amber"])
+
+    def test_the_badge_is_drawn_dim_when_nothing_expires_soon(self):
+        display = self.drawn(self.row({"available": 3, "expires_at": []}))
+        index = self.badge_row(display)
+        self.assertEqual(display.rows[index][0], "R3")
+        self.assertEqual(display.text_pens[index], INK_DIM)
+
+    def test_the_badge_is_amber_within_seventy_two_hours(self):
+        expiry = (HOME_NOW + timedelta(hours=40)).isoformat()
+        display = self.drawn(self.row({"available": 3, "expires_at": [expiry]}))
+        index = self.badge_row(display)
+        self.assertEqual(display.rows[index][0], "R3 40h")
+        self.assertEqual(display.text_pens[index], AMBER)
+
+    def test_no_badge_is_drawn_for_zero_or_unknown(self):
+        for credits in ({"available": 0, "expires_at": []},
+                         {"available": None, "expires_at": []}):
+            with self.subTest(credits=credits):
+                display = self.drawn(self.row(credits))
+                self.assertFalse(any(entry[0].startswith("R") for entry in display.rows))
+
+    def test_the_badge_is_skipped_when_the_name_fills_the_row(self):
+        row = self.row({"available": 3, "expires_at": []},
+                       name="A very long Codex account name here")
+        display = self.drawn(row)
+        self.assertFalse(any(entry[0].startswith("R3") for entry in display.rows))
+
+    def test_the_hint_keeps_the_space(self):
+        row = self.row({"available": 3, "expires_at": []}, name="Codex personal",
+                       hint="No report 6d - run claude")
+        display = self.drawn(row)
+        texts = [entry[0] for entry in display.rows]
+        self.assertIn("No report 6d - run claude", texts)
+        self.assertFalse(any(entry[0].startswith("R3") for entry in display.rows))
 
 
 class HomeScrollTests(unittest.TestCase):

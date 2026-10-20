@@ -371,8 +371,12 @@
           const meter = document.createElement("div"); meter.className = "quota " + quota.state;
           const text = document.createElement("p");
           const percentage = typeof quota.used_percent === "number" ? quota.used_percent.toFixed(1) + "%" : "";
-          text.textContent = quota.label + " · " + (quota.state === "available" ? percentage :
-            quota.state === "stale" ? percentage + " (stale)" : quota.state);
+          // A passed reset means the value is the last known one, not a reading.
+          const passed = quota.reset_passed === true;
+          const state = quota.state === "available" ? percentage :
+            quota.state === "stale" ? percentage + (passed ? " (stale, last known)" : " (stale)") :
+            quota.state;
+          text.textContent = quota.label + " · " + state;
           if (quota.currency && typeof quota.used_amount === "number") {
             text.textContent += " · $" + quota.used_amount.toFixed(2);
             if (typeof quota.limit_amount === "number") text.textContent += " / $" + quota.limit_amount.toFixed(2);
@@ -384,7 +388,9 @@
           }
           if (quota.resets_at) {
             const reset = document.createElement("p"); reset.className = "note";
-            reset.textContent = "Reset: " + new Date(quota.resets_at).toLocaleString(); meter.append(reset);
+            reset.textContent = "Reset: " + new Date(quota.resets_at).toLocaleString() +
+              (passed ? " (passed)" : "");
+            meter.append(reset);
           }
           row.append(meter);
         }
@@ -404,6 +410,15 @@
         if (source.quota.note) {
           const note = document.createElement("p"); note.className = "note";
           note.textContent = source.quota.note; row.append(note);
+        }
+      }
+      if (source.provenance) {
+        // Labelled lines: each one says where its number comes from.
+        for (const key of ["quota", "activity", "status_note"]) {
+          const line = source.provenance[key];
+          if (!line) continue;
+          const paragraph = document.createElement("p"); paragraph.className = "note";
+          paragraph.textContent = line; row.append(paragraph);
         }
       }
       list.append(row);

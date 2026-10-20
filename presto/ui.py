@@ -26,7 +26,7 @@ FOOTER_Y = 222
 TITLE_MAX = 22
 PRIMARY_MAX = 26
 SECONDARY_MAX = 30
-DETAIL_MAX = 30
+DETAIL_MAX = 34
 FOOTER_MAX = 30
 
 # Colours, created once per display instance.
@@ -36,7 +36,8 @@ BACKGROUND = (16, 18, 22)
 PANEL = (28, 31, 38)
 DAILY = (65, 225, 255)
 WEEKLY = (135, 62, 210)
-MONTHLY = (255, 169, 56)
+AMBER = (255, 169, 56)
+MONTHLY = AMBER
 LIMIT = (255, 64, 64)
 
 # Live Home rows: a name line, then a bars/reset line.
@@ -211,8 +212,20 @@ def _draw_quota_row(display, palette, row, y, row_width, stale):
     display.set_font("bitmap8")
     # Firmware wraps at the exact width, so leave slack after the note.
     note_w = display.measure_text(note, 1) + 2 if note else 0
-    _text(display, palette, row["name"], 14 + MARKER + 4, y, INK, scale=1,
-          max_width=max(0, row_width - MARKER - 4 - note_w - 8))
+    name_x = 14 + MARKER + 4
+    space = max(0, row_width - MARKER - 4 - note_w - 8)
+    badge = row.get("reset_badge")
+    badge_text = badge.get("text") if isinstance(badge, dict) else None
+    badge_w = display.measure_text(badge_text, 1) + 4 if badge_text else 0
+    name_w = display.measure_text(row["name"], 1)
+    # The badge is drawn only when it fits between the name and the note.
+    # A hint or a reset note always wins the space.
+    draw_badge = bool(badge_text) and name_w + badge_w <= space
+    _text(display, palette, row["name"], name_x, y, INK, scale=1,
+          max_width=space - badge_w if draw_badge else space)
+    if draw_badge:
+        _text(display, palette, badge_text, name_x + name_w + 4, y,
+              AMBER if badge.get("amber") else INK_DIM, scale=1)
     if note:
         _text(display, palette, note, right - note_w, y, note_rgb, scale=1)
 

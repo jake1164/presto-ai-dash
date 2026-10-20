@@ -14,7 +14,7 @@ from .credentials import load_cipher
 from .dashboard import build_instance_payload
 from .sources import source_catalog, source_type
 from .models import SourceSnapshot
-from .quotas import present_quota, present_snapshot
+from .quotas import claude_provenance, mark_passed_resets, present_quota, present_snapshot
 from .storage import ConfigurationConflict
 
 # The snippet URL is deliberately a placeholder: the user edits the address.
@@ -112,7 +112,12 @@ class SourceConfiguration:
             public["status"] = snapshot.status if snapshot else "waiting"
             public["updated_at"] = snapshot.to_dict()["updated_at"] if snapshot else None
             if snapshot and snapshot.metrics.get("quota"):
-                public["quota"] = present_quota(snapshot.metrics["quota"])
+                public["quota"] = mark_passed_resets(present_quota(snapshot.metrics["quota"]))
+            if record["type"] == "claude":
+                # Every Claude number says where it came from: the terminal
+                # export, the local session logs, or the freshness hint.
+                public["provenance"] = claude_provenance(public.get("quota"),
+                                                         record.get("config"))
             sources.append(public)
         return {"types": source_catalog(), "sources": sources}
 

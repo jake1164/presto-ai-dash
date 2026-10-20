@@ -2,12 +2,23 @@
 
 from copy import deepcopy
 from datetime import datetime, timezone
+import decimal
 import time
 
-from ..models import now_utc
+from ..models import iso, now_utc
 from ..quotas import quota_report, quota_window
 from . import Source, register
 from ._codex_rpc import CodexReportingError, find_executable, read_subscription
+
+# Banked reset credits (Phase 9). The provider's count is authoritative; the
+# rows only supply expiries. Missing or malformed data means "not reported".
+MAX_RESET_COUNT = 99
+MAX_RESET_EXPIRIES = 8
+# A Unix timestamp outside this range is not a real expiry.
+EARLIEST_EXPIRY = 1000000000  # 2001-09-09
+LATEST_EXPIRY = 4102444800    # 2100-01-01
+# The credit balance is a short decimal string on the detail card.
+MAX_BALANCE_CHARS = 16
 
 
 def period_label(minutes):
@@ -22,6 +33,82 @@ def period_label(minutes):
     if minutes % 60 == 0:
         return "%dh" % (minutes // 60)
     return "%dm" % minutes
+
+
+def _balance(value):
+    """A credit balance as a plain decimal string, or None when unusable.
+
+    The provider reports it in exponent notation ("0E-10"), which must never
+    reach the screen: Decimal turns it into "0". At most 16 characters.
+    """
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        amount = decimal.Decimal(text)
+    except (decimal.InvalidOperation, ValueError, ArithmeticError):
+        return None
+    if not amount.is_finite():
+        return None
+    if amount == 0:
+        return "0"
+    try:
+        amount = amount.normalize()
+        if amount.as_tuple().exponent > 0:
+            amount = amount.quantize(decimal.Decimal(1))
+    except (decimal.InvalidOperation, ArithmeticError):
+        return None
+    result = format(amount, "f")
+    if len(result) > MAX_BALANCE_CHARS:
+        return None
+    return result
+
+
+def _reset_credits(summary):
+    """The banked reset credits: a count and the expiries of the available ones.
+
+    ``available`` is the provider's own count when it is a real integer in
+    range, and None otherwise: an unknown count is never shown as zero. Only
+    rows whose status is exactly "available" supply an expiry.
+    """
+    available, expiries = None, []
+    if isinstance(summary, dict):
+        count = summary.get("availableCount")
+        if type(count) is int and 0 <= count <= MAX_RESET_COUNT:
+            available = count
+        rows = summary.get("credits")
+        if isinstance(rows, list):
+            seen = set()
+            for row in rows:
+                if not isinstance(row, dict) or row.get("status") != "available":
+                    continue
+                expires = row.get("expiresAt")
+                if type(expires) is not int:
+                    continue
+                if expires < EARLIEST_EXPIRY or expires > LATEST_EXPIRY:
+                    continue
+                moment = iso(datetime.fromtimestamp(expires, timezone.utc))
+                if moment in seen:
+                    continue
+                seen.add(moment)
+                expiries.append(moment)
+            expiries.sort()
+            expiries = expiries[:MAX_RESET_EXPIRIES]
+    return {"available": available, "expires_at": expiries}
+
+
+def _credits(bucket):
+    """The bucket's credit balance, or None when the provider reports none."""
+    balance, unlimited = None, None
+    if isinstance(bucket, dict):
+        reported = bucket.get("credits")
+        if isinstance(reported, dict):
+            balance = _balance(reported.get("balance"))
+            if type(reported.get("unlimited")) is bool:
+                unlimited = reported["unlimited"]
+    return {"balance": balance, "unlimited": unlimited}
 
 
 @register
@@ -48,6 +135,7 @@ class CodexSource(Source):
     def parse(self, data, observed):
         if not isinstance(data, dict):
             raise ValueError("invalid reporting response")
+        legacy_bucket = None
         if "rateLimitsByLimitId" in data and data["rateLimitsByLimitId"] is not None:
             buckets = data["rateLimitsByLimitId"]
             if not isinstance(buckets, dict) or not buckets:
@@ -56,6 +144,7 @@ class CodexSource(Source):
             legacy = data.get("rateLimits")
             if not isinstance(legacy, dict):
                 raise ValueError("no quota buckets reported")
+            legacy_bucket = legacy
             buckets = {legacy.get("limitId") or "codex": legacy}
         if len(buckets) > 32:
             raise ValueError("too many quota buckets")
@@ -84,8 +173,16 @@ class CodexSource(Source):
                                             observed, minutes))
                 limited = limited or (percent is not None and percent >= 100)
             limited = limited or bucket.get("rateLimitReachedType") is not None
-        return quota_report("openai", "Codex", windows,
-                            max(180, self.config.get("refresh_seconds", 60) * 3)), limited
+        report = quota_report("openai", "Codex", windows,
+                               max(180, self.config.get("refresh_seconds", 60) * 3))
+        # Banked reset credits and the credit balance come from the same
+        # read-only call; no extra request is made and nothing is redeemed.
+        report["reset_credits"] = _reset_credits(data.get("rateLimitResetCredits"))
+        credit_bucket = buckets.get("codex") if isinstance(buckets, dict) else None
+        if credit_bucket is None:
+            credit_bucket = legacy_bucket
+        report["credits"] = _credits(credit_bucket)
+        return report, limited
 
     def collect(self):
         now = time.monotonic()

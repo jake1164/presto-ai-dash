@@ -72,6 +72,52 @@ def reset_label(seconds):
     return "%dd" % days if days >= 10 else "%dd%dh" % (days, hours % 24)
 
 
+def compact_left(seconds):
+    """The time left in short units: 45m, 5h, 2d."""
+    if seconds is None:
+        return ""
+    seconds = max(0, int(seconds))
+    minutes = seconds // 60
+    if minutes < 60:
+        return "%dm" % minutes
+    hours = seconds // 3600
+    if hours < 48:
+        return "%dh" % hours
+    return "%dd" % (seconds // 86400)
+
+
+# A banked reset that expires within this many hours is worth a warning.
+RESET_WARNING_SECONDS = 72 * 3600
+
+
+def reset_badge(reset_credits, now):
+    """A small badge for banked resets: "R3", amber with the time left.
+
+    Nothing is drawn when the count is unknown or zero: an unknown count is
+    never shown as a count of zero, and "R0" is never drawn.
+    """
+    if not isinstance(reset_credits, dict):
+        return None
+    available = reset_credits.get("available")
+    if not isinstance(available, int) or isinstance(available, bool) or available <= 0:
+        return None
+    text = "R%d" % available
+    expiries = reset_credits.get("expires_at")
+    if not isinstance(expiries, list) or now is None:
+        return {"text": text, "amber": False}
+    moments = []
+    for value in expiries:
+        moment = iso_seconds(value)
+        if moment is not None:
+            moments.append(moment)
+    if not moments:
+        return {"text": text, "amber": False}
+    left = min(moments) - now
+    if left > RESET_WARNING_SECONDS:
+        return {"text": text, "amber": False}
+    return {"text": "%s %s" % (text, compact_left(left)), "amber": True}
+
+
 def binding_window(windows):
     """The window most likely to stop work: highest use, then longest period."""
     best = None
@@ -175,6 +221,7 @@ def source_rows(payload):
                              "name": str(source.get("name") or "Cloud account"),
                              "status": normalise_status(source.get("status")), "usage": text,
                              "windows": windows, "activity": text, "hint": hint,
+                             "reset_badge": reset_badge(quota.get("reset_credits"), now),
                              "binding": binding_window(windows)})
                 continue
         metrics = source.get("metrics")

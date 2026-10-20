@@ -1,7 +1,7 @@
 # Plan: optional observation ingest (local and remote collectors)
 
-Status (2026-10-19): **Phases 1-5 are implemented; Phases 1-4 are committed.**
-The database schema is v7. Next: Phase 9, then 7. Phases 5b, 5c, 6 and 8 are
+Status (2026-10-20): **Phases 1-5 and 9 are implemented; Phases 1-5 are
+committed.** The database schema is v7. Next: 7. Phases 5b, 5c, 6 and 8 are
 optional. Written for an implementing agent. Read
 `AGENTS.md`, `docs/claude.md`, `docs/sources.md` and `docs/quotas.md` first. Do
 not start a phase until the previous one passes its tests.
@@ -16,7 +16,7 @@ not start a phase until the previous one passes its tests.
 | 6 | Codex over push | Optional |
 | 7 | "Adding a source" guide and template | Not started (an earlier attempt was discarded) |
 | 8 | OpenTelemetry activity detail | Optional, only if asked |
-| 9 | Banked reset credits (Codex) | **Next** |
+| 9 | Banked reset credits (Codex) | Done (2026-10-20) |
 
 ## Goal
 
@@ -546,9 +546,20 @@ service.
 
 ### Phase 9: banked reset credits (Codex now, others if they gain it)
 
-**Do this after Phase 4.** Added 2026-10-18, after Phases 1-3 were already
-being built. It is deliberately a separate phase and an additive change: do not
-rework the envelope or validator from Phases 1-3 in place.
+**Done 2026-10-20** (parse, card, Home badge, docs; the envelope part is
+deferred to Phase 6). Do this after Phase 4. Added 2026-10-18, after Phases
+1-3 were already being built. It is deliberately a separate phase and an
+additive change: do not rework the envelope or validator from Phases 1-3 in
+place.
+
+**Amendments (2026-10-20, decided before the work started).**
+
+- The ingest envelope and its validator are **not** changed now. No push
+  source needs `reset_credits` before Phase 6, and the validator rejects
+  unknown keys, so widening the protocol now would buy nothing.
+- Claude gets **no** `Resets: not reported` line. Its detail card is full and
+  the rule is to remove nothing. Only reports that carry `reset_credits`
+  (Codex) show reset lines.
 
 Verified facts (Codex CLI 0.162.0-alpha.17.2, schema generated offline with
 `codex app-server generate-json-schema`; no login, no requests): the
@@ -560,8 +571,7 @@ count is known. It also carries `credits { balance, hasCredits, unlimited }`
 and `planType`. All are nullable; confirm against a live response before
 relying on them, and treat any absent or malformed field as "not reported".
 Claude has no documented source for its banked reset (the figure exists only
-on the claude.ai usage page); do not scrape it. Its detail card says
-`Resets: not reported`.
+on the claude.ai usage page); do not scrape it.
 
 - **Normalization.** `quota_report` gains an optional
   `reset_credits: {"available": <int 0..99 or null>, "expires_at":
@@ -572,7 +582,8 @@ on the claude.ai usage page); do not scrape it. Its detail card says
   shape and caps. The validator currently rejects unknown keys, so this must
   be added there explicitly. Optional `credits_balance` (string, at most 16
   characters) and `credits_unlimited` (bool) may follow the same path; they
-  feed one detail line only.
+  feed one detail line only. **Deferred to Phase 6** by the 2026-10-20
+  amendment above: the envelope and the validator are untouched.
 - **Codex source.** In `CodexSource.parse` read the fields from the response
   already fetched; no extra call. Never call the consume method.
 - **Daemon.** Expose the object in the Codex account's quota report so it
@@ -594,6 +605,23 @@ on the claude.ai usage page); do not scrape it. Its detail card says
   not fit). Check in PSL with fixtures for each state, then sync and verify the
   device per `AGENTS.md`.
 
+**What was built (2026-10-20).** `CodexSource.parse` reads
+`rateLimitResetCredits` and the bucket's `credits` from the response it
+already has: `reset_credits` (the provider's `availableCount` when it is a
+real integer in 0..99, plus the expiries of the rows whose status is exactly
+`available`, at most eight, earliest first) and `credits` (the balance
+normalised with `Decimal`, so `0E-10` becomes `0` and `12.50` becomes `12.5`,
+plus `unlimited` only when it is a real boolean). Missing or malformed data
+means "not reported", never zero. The Codex detail card adds `Resets avail: N`,
+`Next exp: MM-DD HH:MMZ (<age>)` and `Credits: <balance>` when reported, and
+ends with `Source: local Codex app-server`; the window lines are never
+dropped. The Presto Home row draws the `R3` badge, amber with the time left
+within 72 hours, computed against the payload's `updated_at`. The
+admin-page provenance work (the "Provenance and no loss of detail" rule)
+labels the same numbers on the account row. The envelope and validator are
+untouched, as the amendment requires.
+
+
 ## Not covered (needs its own decision)
 
 - **Admin page in Docker.** It binds `127.0.0.1` and checks the `Host`
@@ -603,6 +631,39 @@ on the claude.ai usage page); do not scrape it. Its detail card says
   usable for this project until that is decided.
 - No Dockerfile exists yet (planned for v0.1).
 - TLS termination inside the daemon: out of scope; use a reverse proxy.
+
+## Backlog and priority (set by the author, 2026-10-20)
+
+In order, after Phase 9 and the provenance fixes land:
+
+1. **M12 alert polish.** Needs decisions first (LED colour for "in use" versus
+   a warning, default thresholds, whether a stale reading may ever alert,
+   sounds and quiet hours).
+2. **Small changes (all):**
+   - **Home follows the saved account order.** The swipe cards already do.
+     Home currently groups cloud rows first and puts local services in a
+     bottom strip, which overrides the order. Fix: rows in the saved order;
+     a local service is a compact one-line row at its own position (marker,
+     name, status or usage), with scrolling that handles mixed row heights.
+     Runs after Phase 9 because both change `presto/home.py` and `ui.py`.
+   - Lock the ingest rate limiter (two lines).
+   - Make `handler_class` keyword-only in `ApiServer`.
+   - Decide the weekly-reset estimate across the Nov 1 clock change (ignore
+     it, or add a timezone setting; a container defaults to UTC).
+   - Re-check the one intermittent `test_management` failure seen once.
+3. **Phase 7**, the source guide and template (pull sources now; add a
+   "Running in Docker" section after the Docker work).
+4. **Phase 8**, OpenTelemetry, as extra detail (cost, duration, errors). First
+   verify with a throwaway local listener that the VS Code panel emits it.
+5. **M8 acceptance**: sign-in, cancel and sign-out accepted live; expired-login
+   recovery; second account or profile if one exists (else mark untested);
+   other buckets via fixtures; a contract test that regenerates Codex's
+   schema and checks every field read still exists.
+6. **Docker**, everything: admin bind address and allowed hosts, Dockerfile,
+   compose file and container test, encryption key by environment variable
+   (the Windows protected key file cannot be used in a container), Phases 5c
+   and 6, TLS or reverse-proxy guidance, a real collector on a second machine.
+7. **M13 demo release**, last.
 
 ## Known leftovers (from reviews of Phases 1-3)
 

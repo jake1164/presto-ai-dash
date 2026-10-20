@@ -51,6 +51,37 @@ credentials into source settings.
   visibly stale, with a fixed diagnostic; subsequent success clears the error.
   Crossing a reset never fabricates a new zero reading.
 
+## Reset credits
+
+Codex reports **banked resets** - extra early resets the subscription has
+banked - in the same read-only `account/rateLimits/read` response the daemon
+already calls. No extra request is made, and **the project never redeems a
+reset credit**: there is no code path that spends one, and the provider's
+redeem method is deliberately not wired up.
+
+What is shown:
+
+- The Codex detail card adds `Resets avail: 3` (the provider's own count of
+  banked resets), `Next exp: 10-24 12:00Z (4 days)` (the earliest expiry of
+  the credits the provider lists as available) and `Credits: 0` (the credit
+  balance) when the provider reports them. The last line names the source:
+  `Source: local Codex app-server`.
+- A count the provider does not report shows no line at all. An unknown count
+  is never shown as a count of zero, and `R0` is never drawn.
+- The Presto Home row carries a small `R3` badge after the account name while
+  resets are banked. It turns amber and adds the time left (`R3 2d`) when the
+  earliest expiry is 72 hours away or less, counted against the payload's
+  `updated_at` rather than the device clock. The badge is skipped when it
+  does not fit between the name and the note; the detail card is the source
+  of truth.
+- The credit balance is normalised: the provider's `0E-10` is shown as `0`,
+  never in exponent notation.
+
+The count is the provider's `availableCount`; only rows whose status is
+`available` supply an expiry, and at most eight expiries are kept, earliest
+first. Missing or malformed data means "not reported", never a count of zero.
+The numbers reach the status payload unchanged.
+
 ## Verification and remaining M8 work
 
 On 2026-10-11, the installed CLI `0.162.0-alpha.17.2` returned a live weekly

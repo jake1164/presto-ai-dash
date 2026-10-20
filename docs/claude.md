@@ -67,7 +67,7 @@ export accounts.
 - Detail cards for reports that carry a collector trail add three lines after
   the per-window reset lines, within the existing six-line budget (reset lines
   are never dropped; the lowest-priority line goes first when a line must go):
-  `Data age: <age>`, `Last reply: <age> ago` (or `Last reply: unavailable`
+  `Quota age: <age>` (the age of the quota reading), `Last reply: <age> ago` (or `Last reply: unavailable`
   without a response-progress time), and `Reports: <host> <age> ago` (or
   `Reports: never`). Reset times stay UTC; other providers' cards are
   unchanged.
@@ -140,7 +140,7 @@ cannot read all of it at once. The daemon reads it in bounded chunks across
 the following polls (at most 64 MB per poll), and the reader says so: its
 `complete` flag is false until every file inside the eight-day window has been
 read to the end. Until then the token totals are lower bounds and the detail
-card shows `Tokens 5h/7d: scanning` instead of numbers. The last use is
+card shows `Log tokens 5h/7d: scanning` instead of numbers. The last use is
 never delayed: the newest files are read from their end first, so
 `Last used: <age> ago (<surface>)` and the `active` marker are right on the
 first refresh. Later refreshes only read what was appended and stay cheap.
@@ -158,7 +158,7 @@ newer than the active window, with the hint `In use - quota 6d old` (or
 reader works, stale quota alone never raises a yellow warning (the text says
 what's stale instead). Recently used: `Used 3h ago - quota expired`. After a
 quiet day the Phase 4 hints apply unchanged. The detail card adds
-`Last used: <age> ago (<surface>)`, `Tokens 5h/7d: 120k/2.1M`, and an
+`Last used: <age> ago (<surface>)`, `Log tokens 5h/7d: 120k/2.1M` (the "Log" says the numbers come from the local session logs), and an
 `Wk reset ~4 days (est)` line when the weekly reset has passed: the weekly
 cycle is fixed, so the next reset is the newest real one plus whole weeks —
 an estimate, never presented as a provider reading. The 5h window is not

@@ -10,7 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from presto_ai_dash.claude_export import build_envelope
-from presto_ai_dash.dashboard import _account_card, build_instance_payload
+from presto_ai_dash.dashboard import (DETAIL_LINE_CHARS, _account_card, build_instance_payload)
 from presto_ai_dash.ingest import ingest
 from presto_ai_dash.management import ManagedCollector
 from presto_ai_dash.models import SourceSnapshot
@@ -282,14 +282,14 @@ class ClaudeDetailCardTests(unittest.TestCase):
     def test_reset_lines_stay_first_then_data_age_reply_and_reports(self):
         card = self.card(self.fresh_windows(), seen=NOW - timedelta(minutes=10))
         self.assertEqual(len(card.detail), 5)
-        self.assertEqual(card.detail[2], "Data age: 5 min")
+        self.assertEqual(card.detail[2], "Quota age: 5 min")
         self.assertEqual(card.detail[3], "Last reply: 1 h ago")
         self.assertEqual(card.detail[4], "Reports: laptop 10 min ago")
         self.assertEqual(card.primary, "5h: 12%")
 
     def test_missing_progress_and_collector_are_honest_not_zero(self):
         card = self.card(self.fresh_windows(), seen=None, progress=None)
-        self.assertEqual(card.detail[2], "Data age: 5 min")
+        self.assertEqual(card.detail[2], "Quota age: 5 min")
         self.assertEqual(card.detail[3], "Last reply: unavailable")
         self.assertEqual(card.detail[4], "Reports: never")
 
@@ -300,7 +300,7 @@ class ClaudeDetailCardTests(unittest.TestCase):
         card = self.card(windows)
         self.assertEqual(len(card.detail), 6)
         self.assertTrue(all(line.startswith("W") for line in card.detail[:5]))
-        self.assertEqual(card.detail[5], "Data age: 5 min")
+        self.assertEqual(card.detail[5], "Quota age: 5 min")
         self.assertNotIn("Last reply: unavailable", card.detail)
         self.assertNotIn("Reports: never", card.detail)
 
@@ -311,7 +311,7 @@ class ClaudeDetailCardTests(unittest.TestCase):
             card = _account_card({"id": "c", "name": "Go", "type": "opencode_go"}, snapshot)
         self.assertEqual(len(card.detail), 2)
         self.assertTrue(all(line.endswith("Z") for line in card.detail))
-        self.assertFalse(any(line.startswith("Data age") for line in card.detail))
+        self.assertFalse(any(line.startswith("Quota age") for line in card.detail))
 
     def test_every_detail_line_fits_firmware_bitmap_font_for_edge_fixtures(self):
         preview_dir = Path(__file__).resolve().parents[2] / "tools" / "presto_preview"
@@ -358,6 +358,12 @@ class ClaudeDetailCardTests(unittest.TestCase):
                     activity(last_request_at=NOW - 6 * DAY + timedelta(minutes=5),
                              surface="12345678", requests=99,
                              tokens_5h=999999, tokens_7d=299999999))))
+        # The worst case for the token line: 999k in five hours and 999.9M in
+        # seven days. The line must still fit, label included.
+        fixtures.append(("worst-token-totals", with_activity(
+            trail_report(fresh, seen=NOW - timedelta(minutes=5)),
+            activity(last_request_at=NOW - timedelta(minutes=5),
+                     tokens_5h=999999, tokens_7d=999900000))))
         display = Framebuffer()
         display.set_font("bitmap6")
         available_width = display.width - (8 + 6) - 8  # draw_card x and right margin
@@ -372,11 +378,13 @@ class ClaudeDetailCardTests(unittest.TestCase):
                     self.assertLessEqual(display.measure_text(line, 1), available_width, line)
                     # draw_card applies this limit before drawing, so a fitting
                     # detail must retain its complete reset timestamp too.
-                    self.assertLessEqual(len(line), 30, line)
+                    self.assertLessEqual(len(line), DETAIL_LINE_CHARS, line)
                 if name == "both-resets-passed":
                     self.assertTrue(any(line.endswith("16:00Z") for line in lines), lines)
                 if name == "long-window-label":
                     self.assertTrue(any(line.endswith("16:00Z") for line in lines), lines)
+                if name == "worst-token-totals":
+                    self.assertIn("Log tokens 5h/7d: 999k/999.9M", lines)
 
 
 def activity(available=True, last_request_at=NOW, model="claude-test", surface="VS Code",
@@ -549,8 +557,8 @@ class ActivityDetailCardTests(unittest.TestCase):
         self.assertTrue(detail[1].startswith("Weekly passed"))
         self.assertEqual(detail[2], "Wk reset ~6 days (est)")
         self.assertEqual(detail[3], "Last used: 3h ago (VS Code)")
-        self.assertEqual(detail[4], "Tokens 5h/7d: 120k/2.1M")
-        self.assertEqual(detail[5], "Data age: 5 min")  # Reports dropped: bottom first
+        self.assertEqual(detail[4], "Log tokens 5h/7d: 120k/2.1M")
+        self.assertEqual(detail[5], "Quota age: 5 min")  # Reports dropped: bottom first
         self.assertNotIn("Last reply: 10 min ago", detail)
 
     def test_a_future_real_reset_is_shown_as_today_not_estimated(self):
@@ -563,8 +571,8 @@ class ActivityDetailCardTests(unittest.TestCase):
         detail = self.card(report).detail
         self.assertFalse(any("(est)" in line for line in detail), detail)
         self.assertEqual(detail[2:6], ["Last used: 3h ago (VS Code)",
-                                       "Tokens 5h/7d: 120k/2.1M",
-                                       "Data age: 5 min",
+                                       "Log tokens 5h/7d: 120k/2.1M",
+                                       "Quota age: 5 min",
                                        "Reports: laptop 10 min ago"])
 
     def test_last_used_replaces_last_reply_only_when_the_reader_works(self):
@@ -582,7 +590,7 @@ class ActivityDetailCardTests(unittest.TestCase):
                                         tokens_5h=0, tokens_7d=0))
         detail = self.card(report).detail
         self.assertIn("Last used: unavailable", detail)
-        self.assertIn("Tokens 5h/7d: 0/0", detail)
+        self.assertIn("Log tokens 5h/7d: 0/0", detail)
 
     def test_reset_lines_survive_the_six_line_cap_with_activity(self):
         windows = [window("w%d" % index, "W%d" % index, index * 10, NOW - timedelta(minutes=5),
@@ -592,8 +600,14 @@ class ActivityDetailCardTests(unittest.TestCase):
         self.assertEqual(len(detail), 6)
         self.assertTrue(all(line.startswith("W") for line in detail[:5]))
         self.assertEqual(detail[5], "Last used: 0m ago (VS Code)")  # activity NOW anchor
-        for dropped in ("Tokens", "Data age", "Reports"):
+        for dropped in ("Log tokens", "Quota age", "Reports"):
             self.assertFalse(any(line.startswith(dropped) for line in detail), detail)
+
+    def test_the_worst_token_totals_still_fit_the_labelled_line(self):
+        report = with_activity(trail_report(measured(24), seen=NOW - 6 * DAY),
+                               activity(tokens_5h=999999, tokens_7d=999900000))
+        detail = self.card(report).detail
+        self.assertIn("Log tokens 5h/7d: 999k/999.9M", detail)
 
 
 class ScanningTokensTests(unittest.TestCase):
@@ -610,12 +624,12 @@ class ScanningTokensTests(unittest.TestCase):
 
     def test_scanning_line_while_the_cold_scan_is_incomplete(self):
         detail = self.card(self.report(False)).detail
-        self.assertIn("Tokens 5h/7d: scanning", detail)
-        self.assertFalse(any(line.startswith("Tokens 5h/7d: 120") for line in detail), detail)
+        self.assertIn("Log tokens 5h/7d: scanning", detail)
+        self.assertFalse(any(line.startswith("Log tokens 5h/7d: 120") for line in detail), detail)
 
     def test_the_numbers_appear_once_the_scan_is_complete(self):
         detail = self.card(self.report(True)).detail
-        self.assertIn("Tokens 5h/7d: 120k/2.1M", detail)
+        self.assertIn("Log tokens 5h/7d: 120k/2.1M", detail)
         self.assertFalse(any("scanning" in line for line in detail), detail)
 
     def test_the_scanning_line_fits_the_detail_limit(self):
@@ -627,18 +641,18 @@ class ScanningTokensTests(unittest.TestCase):
         available_width = display.width - (8 + 6) - 8
         for line in self.card(self.report(False)).detail:
             with self.subTest(line=line):
-                self.assertLessEqual(len(line), 30, line)
+                self.assertLessEqual(len(line), DETAIL_LINE_CHARS, line)
                 self.assertLessEqual(display.measure_text(line, 1), available_width, line)
 
     def test_an_unavailable_reader_keeps_the_phase_4_lines(self):
         report = with_activity(trail_report(measured(24), seen=NOW - 6 * DAY),
                                activity(available=False))
         detail = self.card(report).detail
-        self.assertFalse(any("Tokens" in line for line in detail), detail)
+        self.assertFalse(any("Log tokens" in line for line in detail), detail)
 
 
-class DataAgeLineTests(unittest.TestCase):
-    """"Data age" needs a measured reading; a placeholder window has no age."""
+class QuotaAgeLineTests(unittest.TestCase):
+    """"Quota age" needs a measured reading; a placeholder window has no age."""
 
     def card(self, report):
         snapshot = SourceSnapshot("c", "ok", NOW, {"quota": report})
@@ -646,25 +660,25 @@ class DataAgeLineTests(unittest.TestCase):
 
     def test_no_measured_window_omits_the_data_age_line(self):
         detail = self.card(trail_report(unmeasured(), seen=None)).detail
-        self.assertFalse(any(line.startswith("Data age") for line in detail), detail)
+        self.assertFalse(any(line.startswith("Quota age") for line in detail), detail)
         self.assertTrue(any(line.startswith("Last reply") for line in detail), detail)
 
     def test_one_measured_window_shows_the_real_age(self):
         detail = self.card(trail_report(measured(6 * 24), seen=NOW - 6 * DAY)).detail
-        self.assertIn("Data age: 6 days", detail)
+        self.assertIn("Quota age: 6 days", detail)
 
     def test_the_reader_on_variant_also_omits_the_fabricated_age(self):
         report = with_activity(trail_report(unmeasured(), seen=None),
                                activity(last_request_at=NOW - timedelta(hours=3)))
         detail = self.card(report).detail
-        self.assertFalse(any(line.startswith("Data age") for line in detail), detail)
+        self.assertFalse(any(line.startswith("Quota age") for line in detail), detail)
         self.assertIn("Last used: 3h ago (VS Code)", detail)
 
     def test_the_reader_on_variant_shows_the_age_of_a_measured_window(self):
         report = with_activity(trail_report(measured(6 * 24), seen=NOW - 6 * DAY),
                                activity(last_request_at=NOW - timedelta(hours=3)))
         detail = self.card(report).detail
-        self.assertIn("Data age: 6 days", detail)
+        self.assertIn("Quota age: 6 days", detail)
 
 
 if __name__ == "__main__":

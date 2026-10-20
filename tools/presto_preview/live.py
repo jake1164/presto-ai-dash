@@ -257,12 +257,16 @@ def make_handler(runner):
             self._send(200, json.dumps(data).encode(), "application/json")
 
         def _send(self, status, body, content_type):
-            self.send_response(status)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(body)))
-            self.send_header("Cache-Control", "no-store")
-            self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.send_response(status)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.end_headers()
+                self.wfile.write(body)
+            except (ConnectionError, TimeoutError):
+                # The browser closed or refreshed mid-response; nothing to do.
+                pass
 
         def log_message(self, *args):
             pass

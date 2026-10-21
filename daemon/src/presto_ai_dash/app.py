@@ -12,8 +12,9 @@ from . import __version__
 from .api import ApiServer
 from .admin import AdminServer
 from .clients import ClientRegistry
-from .config import (ConfigError, configure_logging, ingest_enabled, load_config,
-                     resolve_shared_token, resolve_admin_token)
+from .config import (ConfigError, admin_bind_error, configure_logging,
+                     ingest_enabled, load_config, resolve_shared_token,
+                     resolve_admin_token)
 from .management import SourceConfiguration, ManagedCollector
 from .models import now_utc
 from .problems import ProblemBuffer
@@ -84,6 +85,13 @@ class Daemon:
 
     def setup(self):
         try:
+            # A non-loopback admin address needs an explicit token and the list
+            # of names the page is reached by. Without them the admin page
+            # does not start, and the daemon says why instead of listening.
+            if self.config["admin"]["enabled"]:
+                problem = admin_bind_error(self.config)
+                if problem:
+                    raise ConfigError(problem)
             managed = (self.config["admin"]["enabled"] or
                        self.storage.configuration_marker() is not None or
                        bool(self.storage.source_instances()))
@@ -121,7 +129,9 @@ class Daemon:
             if self.config["admin"]["enabled"]:
                 token = resolve_admin_token(self.config, self.shared_token)
                 self.admin = AdminServer(self.config["admin"]["port"],
-                                         self.source_configuration, token)
+                                         self.source_configuration, token,
+                                         host=self.config["admin"]["host"],
+                                         allowed_hosts=self.config["admin"]["allowed_hosts"])
             return self
         except Exception:
             self.stop()
@@ -154,7 +164,8 @@ class Daemon:
             self.api.start()
             if self.admin is not None:
                 self.admin.start()
-                log.info("configuration page: http://127.0.0.1:%d", self.admin.actual_port)
+                log.info("configuration page: http://%s:%d", self.admin.host,
+                         self.admin.actual_port)
             return self
         except Exception:
             self.stop()

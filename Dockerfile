@@ -1,0 +1,63 @@
+# The daemon and its admin page, in a container.
+#
+#   docker build -t presto-ai-dash .
+#   docker compose up -d
+#
+# Nothing private is copied into the image: the configuration file, the
+# database and the encryption key file all live in the /data volume, which
+# survives an upgrade of the image.
+#
+# The base image is pinned to one digest, so a rebuild uses the same Python
+# and the same system libraries every time.
+
+FROM python:3.13-alpine3.21@sha256:e77011e08668411a8db356ec6bae7d39cdb0ff531db49bf1de9d5a64d8f75a6a AS builder
+
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /build
+COPY daemon/pyproject.toml daemon/README.md ./daemon/
+COPY daemon/src ./daemon/src
+
+# The daemon and its one dependency, into a virtual environment the final
+# image copies. A wheel exists for this platform, so no compiler is needed,
+# and pip itself is thrown away afterwards.
+RUN python -m venv /opt/venv \
+ && /opt/venv/bin/pip install --no-cache-dir ./daemon \
+ && rm -rf /opt/venv/lib/python3.13/site-packages/pip* /opt/venv/bin/pip*
+
+
+FROM python:3.13-alpine3.21@sha256:e77011e08668411a8db356ec6bae7d39cdb0ff531db49bf1de9d5a64d8f75a6a
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/opt/venv/bin:$PATH" \
+    DASH_DATABASE=/data/dash.db \
+    DASH_HOST=0.0.0.0
+
+# A non-root user owns the data directory. The daemon never needs to be root.
+RUN addgroup -g 10001 dash \
+ && adduser -D -u 10001 -G dash dash \
+ && mkdir -p /data \
+ && chown dash:dash /data
+
+COPY --from=builder /opt/venv /opt/venv
+
+USER dash
+WORKDIR /data
+
+# The database and the encryption key file live here. A named volume keeps
+# them across upgrades of the image.
+VOLUME ["/data"]
+
+# The device port and the admin page.
+EXPOSE 8787 8788
+
+# The health check asks one question: is the daemon alive? The answer is
+# {"ok": true} and nothing else, and it needs no token.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/healthz', timeout=3).read()"]
+
+# The admin page listens on the loopback address unless DASH_ADMIN_HOST says
+# otherwise. See docs/docker.md.
+CMD ["python", "-m", "presto_ai_dash.app", "--admin"]

@@ -24,9 +24,29 @@ log in again; other browsers have independent sessions. The expiry is absolute,
 not extended by activity. Sessions survive only when reusing the same database.
 
 Use the same browser address and port each time: `localhost` and `127.0.0.1`
-have separate cookies. The admin listener always
-binds to loopback; for a remote headless server, use an SSH port forward to its
-admin port. The status listener remains on `daemon.host`.
+have separate cookies. The admin listener binds to loopback by default; for a
+remote headless server, use an SSH port forward to its admin port. A
+container may bind it to another address, but then it needs an explicit
+admin token and the list of names it answers to; see [Docker](docker.md).
+The status listener remains on `daemon.host`.
+
+### The admin bind address and the names it answers to
+
+`admin.host` is the address the admin page listens on (`127.0.0.1` by
+default) and `admin.allowed_hosts` is the list of names it answers to. The
+environment variables are `DASH_ADMIN_HOST` and `DASH_ADMIN_ALLOWED_HOSTS`,
+the latter a comma-separated list.
+
+The page always answers to `127.0.0.1` and `localhost` on its own port. A
+name in the list answers too, with or without a port, and over HTTP or
+HTTPS, which is what a reverse proxy that terminates TLS needs. Any other
+`Host` header is refused, exactly as before, and a change still needs the
+session's own CSRF token.
+
+A bind address that is not loopback makes the page reachable from other
+machines, so it takes two deliberate choices: an admin token you set
+(`admin.token` or `DASH_ADMIN_TOKEN`), and a non-empty allowed-hosts list.
+Without both, the daemon refuses to start the admin page and says why.
 
 ## The three tabs
 

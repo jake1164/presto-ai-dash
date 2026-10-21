@@ -19,6 +19,8 @@ venv/
 *.key
 dash.toml
 .local-backups/
+# The container's tokens (see .env.example)
+.env
 
 # Presto device files (never commit credentials)
 presto/secrets.py

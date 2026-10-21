@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
+from envutil import clean_env
 from presto_ai_dash.alert_policy import (DEFAULT_CRITICAL_PERCENT, DEFAULT_WARNING_PERCENT,
                                    RESET_GRACE_SECONDS, apply_threshold, is_quiet,
                                    level_for_percent, parse_clock, threshold_status,
@@ -218,6 +219,16 @@ class QuietHoursTests(unittest.TestCase):
 
     def test_an_unusable_window_is_never_quiet(self):
         self.assertFalse(is_quiet(datetime(2026, 10, 20, 23, 0), "nonsense", "07:00"))
+
+    def test_the_quiet_hours_follow_the_time_zone_variable(self):
+        # A container runs in UTC unless it is told otherwise, and the quiet
+        # hours are the local time of the machine the daemon runs on.
+        moment = datetime(2026, 10, 20, 21, 0, tzinfo=timezone.utc)
+        with clean_env(TZ="UTC+05:30"):
+            # 21:00 UTC is 02:30 the next day there: inside the quiet window.
+            self.assertTrue(is_quiet(moment, "22:00", "07:00"))
+        with clean_env(TZ="UTC"):
+            self.assertFalse(is_quiet(moment, "22:00", "07:00"))
 
 
 if __name__ == "__main__":

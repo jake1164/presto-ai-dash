@@ -18,10 +18,10 @@ Every value carries its origin:
 
 import os
 import time
-from datetime import datetime, timezone
 
 from .config import (alert_settings, ingest_enabled, overflow_rows,
                      read_config_file)
+from .localzone import zone_label
 
 ENVIRONMENT = "environment"
 FILE = "dash.toml"
@@ -36,6 +36,8 @@ ENVIRONMENT_VARIABLES = {
     "log_level": "DASH_LOG_LEVEL",
     "overflow_rows": "DASH_OVERFLOW_ROWS",
     "ingest_enabled": "DASH_INGEST_ENABLED",
+    "admin_host": "DASH_ADMIN_HOST",
+    "admin_allowed_hosts": "DASH_ADMIN_ALLOWED_HOSTS",
 }
 
 
@@ -47,21 +49,9 @@ def _file_value(file_values, section, key):
     return table.get(key)
 
 
-def _timezone_label(now=None):
+def _timezone_label(now=None, environ=None):
     """The timezone the process runs in, as a short readable label."""
-    moment = now or datetime.now(timezone.utc)
-    try:
-        local = moment.astimezone()
-    except (OSError, ValueError):  # pragma: no cover - defensive
-        return "unknown"
-    offset = local.utcoffset()
-    if offset is None:
-        return local.tzname() or "unknown"
-    minutes = int(offset.total_seconds() // 60)
-    sign = "+" if minutes >= 0 else "-"
-    minutes = abs(minutes)
-    return "%s (UTC%s%02d:%02d)" % (local.tzname() or "unknown", sign,
-                                    minutes // 60, minutes % 60)
+    return zone_label(now, environ)
 
 
 def effective_settings(config, storage=None, config_path=None, environ=None, now=None):
@@ -103,6 +93,11 @@ def effective_settings(config, storage=None, config_path=None, environ=None, now
     add("Daemon port", daemon.get("port"), origin_for("port", "daemon"))
     add("Admin port", admin.get("port"),
         FILE if _file_value(file_values, "admin", "port") is not None else DEFAULT)
+    add("Admin bind address", admin.get("host"),
+        origin_for("admin_host", "admin", "host"))
+    allowed_hosts = admin.get("allowed_hosts") or []
+    add("Admin allowed hosts", ", ".join(allowed_hosts) if allowed_hosts else "none",
+        origin_for("admin_allowed_hosts", "admin", "allowed_hosts"))
     add("Log level", logging_section.get("level"), origin_for("log_level", "logging"))
     # Never the token itself: only whether it lasts across restarts.
     if admin.get("token_generated"):
@@ -112,7 +107,7 @@ def effective_settings(config, storage=None, config_path=None, environ=None, now
         add("Admin token", "set", ENVIRONMENT)
     elif admin.get("enabled") or admin.get("token"):
         add("Admin token", "set", FILE)
-    add("Timezone", _timezone_label(now), ENVIRONMENT)
+    add("Timezone", _timezone_label(now, names), ENVIRONMENT)
 
     stored_overflow = storage.overflow_rows_setting() if storage is not None else None
     add("Home overflow strip lines",

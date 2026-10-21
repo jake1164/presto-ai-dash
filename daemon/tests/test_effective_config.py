@@ -81,6 +81,15 @@ class EffectiveSettingsTests(ManagementBase):
         self.assertIn("UTC", settings["Timezone"]["value"])
         self.assertEqual(settings["Timezone"]["origin"], ENVIRONMENT)
 
+    def test_the_timezone_row_reflects_the_tz_variable(self):
+        # A container runs in UTC unless TZ says otherwise, and the row has
+        # to show the zone the quiet hours and the reset times use.
+        settings = self.settings(environ={"TZ": "UTC+05:30"})
+        self.assertIn("UTC+05:30", settings["Timezone"]["value"])
+        self.assertEqual(settings["Timezone"]["origin"], ENVIRONMENT)
+        settings = self.settings(environ={"TZ": "UTC"})
+        self.assertIn("UTC", settings["Timezone"]["value"])
+
     def test_no_token_is_ever_published(self):
         settings = self.settings("[daemon]\nshared_token = \"secret-token\"\n")
         for entry in settings.values():

@@ -723,7 +723,14 @@ untouched, as the amendment requires.
   configurable bind address plus an explicit allowed-host list, or document
   `docker exec` and the environment variable for every setting. Docker is not
   usable for this project until that is decided.
+  **Decided and built 2026-10-20** (backlog item 6): the admin page has a
+  bind address (`admin.host`, `DASH_ADMIN_HOST`, loopback by default) and an
+  allowed-host list (`admin.allowed_hosts`, `DASH_ADMIN_ALLOWED_HOSTS`). A
+  non-loopback bind needs an explicit admin token and a non-empty list, or
+  the daemon refuses to start the admin page. See `docs/docker.md`.
 - No Dockerfile exists yet (planned for v0.1).
+  **Built 2026-10-20**: `Dockerfile`, `compose.yaml` and `.dockerignore`,
+  with the container tests. See `docs/docker.md`.
 - TLS termination inside the daemon: out of scope; use a reverse proxy.
 
 ## Backlog and priority (set by the author, 2026-10-20)
@@ -1264,6 +1271,21 @@ In order (item 0 is an urgent defect and goes first):
    compose file and container test, encryption key by environment variable
    (the Windows protected key file cannot be used in a container), Phases 5c
    and 6, TLS or reverse-proxy guidance, a real collector on a second machine.
+   **Partly done 2026-10-20**: the admin bind address and the allowed-hosts
+   list (`admin.host`, `admin.allowed_hosts`, `DASH_ADMIN_HOST`,
+   `DASH_ADMIN_ALLOWED_HOSTS`; a non-loopback bind needs an explicit admin
+   token *and* a non-empty list, or the daemon refuses to start the admin
+   page and says why), the `Dockerfile` (pinned slim base, non-root user, a
+   `/data` volume, no secrets in the image), `compose.yaml` (device port on
+   the LAN, admin port on 127.0.0.1, named volume, restart policy, `TZ`),
+   `.dockerignore` with a test that fails if a private name is missing, the
+   unauthenticated `GET /healthz` (it answers `{"ok": true}` and nothing
+   else), the time zone (`TZ` and the effective-configuration row), and the
+   documentation in `docs/docker.md`. The image was built and run: 94 MB,
+   non-root, the data in a volume, the health check and the token routes
+   verified. **Still open**: Phases 5c and 6 (the activity and usage-cache
+   readers over push, and Codex over push), and a real collector on a
+   second machine.
 7. **M13 demo release**, last.
 
 ## Known leftovers (from reviews of Phases 1-3)
@@ -1283,6 +1305,8 @@ In order (item 0 is an urgent defect and goes first):
 - The VS Code panel almost certainly does not run the Claude status line, so
   panel users get no quota from it (Phase 5 adds activity, not quota).
 - The admin page cannot be reached inside a container (see above).
+  **Fixed 2026-10-20**: it takes a bind address and an allowed-host list
+  now, so a container can publish it on 127.0.0.1 of the host.
 - Ollama Cloud reports activity totals only, no allowance; nothing to fix
   with its current API.
 

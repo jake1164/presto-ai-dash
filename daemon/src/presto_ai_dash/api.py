@@ -18,6 +18,9 @@ from .ingest import ingest as store_observation
 log = logging.getLogger(__name__)
 STATUS_PATH = "/api/v1/status"
 INGEST_PATH = "/api/v1/ingest"
+# The container's health check. It says one thing and nothing else: that the
+# daemon is alive. No token, no data, no version, no source names.
+HEALTH_PATH = "/healthz"
 INGEST_BODY_LIMIT = 16384
 # The device's only write: one service's alerts on or off. It sets a
 # state, so a double tap or a retry is harmless.
@@ -138,6 +141,11 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
         def do_GET(self):
             parsed = urlparse(self.path)
             path = parsed.path
+            if path == HEALTH_PATH:
+                # The only unauthenticated route: a container checks that the
+                # daemon is alive. It answers {"ok": true} and nothing else.
+                self._send_json(200, {"ok": True})
+                return
             if ALERTS_PATH.match(path):
                 # The route takes a body: only POST may be used here.
                 self._send_json(405, {"error": "method_not_allowed"},

@@ -1,0 +1,51 @@
+# The build context of the container image.
+#
+# Nothing private may reach the image or the daemon that builds it: no
+# configuration file, no database, no encryption key, no device secrets.
+# The daemon/tests/test_docker.py test fails when one of these names is
+# missing from this file.
+
+# The repository's own history and working files
+.git
+.gitignore
+.github
+.vscode
+.ai_docs
+
+# Python environments and build output
+.venv
+.venv-docs
+build
+dist
+*.egg-info
+__pycache__
+*.py[cod]
+
+# Preview and tool output
+.preview
+.playwright-mcp
+.local-backups
+
+# The container's own tokens
+.env
+
+# The private runtime files
+dash.toml
+dash.db
+dash.db.key
+dash.db-journal
+dash.db-wal
+dash.db-shm
+*.db
+*.key
+
+# The device's credentials and settings
+presto/config.py
+presto/secrets.py
+
+# Test data and the tests themselves
+daemon/tests
+daemon/templates
+docs
+tools
+examples

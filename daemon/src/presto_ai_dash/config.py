@@ -19,7 +19,8 @@ DEFAULTS = {
                "retention_hours": 72, "cleanup_interval": 300,
                "ingest_enabled": False},
     "logging": {"level": "INFO"},
-    "admin": {"enabled": False, "port": 8788, "token": "", "key_file": ""},
+    "admin": {"enabled": False, "port": 8788, "token": "", "key_file": "",
+              "host": "127.0.0.1", "allowed_hosts": []},
     "display": {"overflow_rows": 1},
     "alerts": {"enabled": True,
                "warning_percent": 80, "critical_percent": 95,
@@ -42,7 +43,15 @@ ENV_OVERRIDES = {
     "DASH_LOG_LEVEL": ("logging", "level"),
     "DASH_ADMIN_TOKEN": ("admin", "token"),
     "DASH_KEY_FILE": ("admin", "key_file"),
+    "DASH_ADMIN_HOST": ("admin", "host"),
 }
+
+# The names the admin page answers to, when it does not answer to the
+# loopback names alone. A comma-separated list in the environment.
+ADMIN_ALLOWED_HOSTS_ENV = "DASH_ADMIN_ALLOWED_HOSTS"
+# The bind addresses that keep the admin page on this machine.
+LOOPBACK_HOSTS = frozenset(("127.0.0.1", "::1", "localhost"))
+MAX_ALLOWED_HOSTS = 32
 
 
 class ConfigError(ValueError):
@@ -79,6 +88,78 @@ def parse_overflow_rows(value):
     if number < OVERFLOW_MIN or number > OVERFLOW_MAX:
         return None
     return number
+
+
+def parse_allowed_hosts(value):
+    """The names the admin page answers to, as a list of lowercase names.
+
+    A list comes from ``dash.toml``; a comma-separated string comes from the
+    environment. Every entry is one name, optionally with a port, such as
+    ``localhost:8788`` or ``dash.example.com``. An empty entry is ignored.
+    """
+    if value is None:
+        return []
+    if isinstance(value, str):
+        parts = [part.strip() for part in value.split(",")]
+    elif isinstance(value, (list, tuple)):
+        parts = []
+        for part in value:
+            if not isinstance(part, str):
+                raise ConfigError("admin.allowed_hosts must be a list of names")
+            parts.append(part.strip())
+    else:
+        raise ConfigError("admin.allowed_hosts must be a list of names")
+    names = []
+    for part in parts:
+        if not part:
+            continue
+        if len(part) > 255 or not part.isascii() or any(char.isspace() for char in part):
+            raise ConfigError("admin.allowed_hosts entries must be short ASCII names "
+                              "without spaces")
+        if "://" in part or "/" in part:
+            raise ConfigError("admin.allowed_hosts entries are names, not addresses "
+                              "with a path")
+        names.append(part.lower())
+    if len(names) > MAX_ALLOWED_HOSTS:
+        raise ConfigError("admin.allowed_hosts may hold at most %d names" %
+                          MAX_ALLOWED_HOSTS)
+    unique = []
+    for name in names:
+        if name not in unique:
+            unique.append(name)
+    return unique
+
+
+def is_loopback_host(host):
+    """Whether a bind address keeps the listener on this machine."""
+    return (host or "").strip().lower() in LOOPBACK_HOSTS
+
+
+def admin_bind_error(config):
+    """Why the admin page may not listen on this bind address, or None.
+
+    A bind address that is not loopback makes the admin page reachable from
+    other machines, so it takes two deliberate choices: an admin token the
+    operator set (a token generated at every start would be printed in the
+    log of every start), and the list of names the page is reached by.
+    Without both, the daemon refuses to start the admin page and says why.
+    """
+    admin = config.get("admin") if isinstance(config, dict) else None
+    admin = admin if isinstance(admin, dict) else {}
+    host = (admin.get("host") or "").strip()
+    if not host or is_loopback_host(host):
+        return None
+    if not (admin.get("token") or "").strip():
+        return ("the admin page would listen on %s, which is not a loopback "
+                "address; set an explicit admin token (admin.token in dash.toml "
+                "or DASH_ADMIN_TOKEN) before listening on a non-loopback address"
+                % host)
+    if not admin.get("allowed_hosts"):
+        return ("the admin page would listen on %s, which is not a loopback "
+                "address; list the names it is reached by (admin.allowed_hosts "
+                "in dash.toml or DASH_ADMIN_ALLOWED_HOSTS) before listening on "
+                "a non-loopback address" % host)
+    return None
 
 
 def overflow_rows(config, stored=None, environ=None):
@@ -234,6 +315,12 @@ def load_config(path=None):
             raise ConfigError("%s must be an integer in range %d..%d" %
                               (OVERFLOW_ENV, OVERFLOW_MIN, OVERFLOW_MAX))
         config["display"]["overflow_rows"] = overflow
+    if ADMIN_ALLOWED_HOSTS_ENV in os.environ:
+        config["admin"]["allowed_hosts"] = parse_allowed_hosts(
+            os.environ[ADMIN_ALLOWED_HOSTS_ENV])
+    else:
+        config["admin"]["allowed_hosts"] = parse_allowed_hosts(
+            config["admin"].get("allowed_hosts"))
     for section, key, minimum, maximum in (
         (config["daemon"], "port", 1, 65535),
         (config["daemon"], "poll_interval", 1, None),
@@ -279,6 +366,12 @@ def load_config(path=None):
     for key in ("token", "key_file"):
         if not isinstance(config["admin"][key], str):
             raise ConfigError("admin.%s must be a string" % key)
+    admin_host = config["admin"].get("host")
+    if not isinstance(admin_host, str) or not admin_host.strip():
+        raise ConfigError("admin.host must be a bind address")
+    if len(admin_host) > 255 or not admin_host.isascii() or \
+            any(char.isspace() for char in admin_host):
+        raise ConfigError("admin.host must be a short ASCII bind address without spaces")
     admin_token = config["admin"]["token"]
     if admin_token and (not admin_token.isascii() or any(char.isspace() for char in admin_token)):
         raise ConfigError("admin.token must be ASCII without whitespace")

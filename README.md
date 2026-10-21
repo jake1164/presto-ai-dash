@@ -98,8 +98,9 @@ execution checks have been on Windows.
 
 The planned command is `presto-ai-dash-daemon`; the **current** installed
 command is `presto-ai-dash` (or `python -m presto_ai_dash.app`). The future
-`presto-ai-dash-tray` wrapper must leave headless use first-class. Docker,
-tray support, pipx validation, and binary packaging are not implemented yet.
+`presto-ai-dash-tray` wrapper must leave headless use first-class. Tray
+support, pipx validation, and binary packaging are not implemented yet; the
+Docker image and the compose file are (see [Docker](docs/docker.md)).
 
 ## v0 in one paragraph
 
@@ -145,6 +146,12 @@ python -m presto_ai_dash.app --config dash.toml
 # See docs/setup.md for the source-to-device file mapping; no Wi-Fi is needed.
 ```
 
+Or in a container:
+
+```bash
+docker compose up -d      # see docs/docker.md
+```
+
 Full instructions: [`docs/setup.md`](docs/setup.md).
 
 ## Repository layout
@@ -156,6 +163,7 @@ presto-ai-dash/
   docs/
     architecture.md             how the pieces fit
     setup.md                    install and run
+    docker.md                   run the daemon in a container
     sources.md                  what each source measures, and how
     limitations.md              what is honestly not measurable
     future.md                   what is deliberately deferred
@@ -166,6 +174,8 @@ presto-ai-dash/
   daemon/
     pyproject.toml
     src/presto_ai_dash/        Python daemon with encrypted configuration
+  Dockerfile                   the container image (see docs/docker.md)
+  compose.yaml                 the daemon, its ports and its data volume
   presto/
     main.py                     MicroPython app (only file touching hardware)
     config.example.py
@@ -184,6 +194,7 @@ presto-ai-dash/
 | `docs/architecture.md` | you want to know how the parts fit together |
 | `docs/setup.md` | you are installing or running it |
 | `docs/configuration.md` | you want to manage source instances and encrypted keys |
+| `docs/docker.md` | you want to run the daemon in a container |
 | `docs/sources.md` | you are adding or debugging a source |
 | `docs/limitations.md` | a number looks wrong or missing |
 | `docs/future.md` | you are wondering why feature X is absent |

@@ -20,8 +20,7 @@ The per-source metric thresholds and the trend arrows live in the older
 ``alerts`` module; this one is about quota windows and the alarm clock.
 """
 
-from datetime import datetime
-
+from .localzone import local_now, resolve_zone
 from .models import now_utc, severity
 from .quotas import timestamp
 
@@ -237,15 +236,16 @@ def is_quiet(now=None, start=DEFAULT_QUIET_START, end=DEFAULT_QUIET_END):
     """True when the daemon's local time is inside the quiet window.
 
     The window may wrap around midnight: 22:00 to 07:00 is quiet from ten
-    in the evening until seven in the morning.
+    in the evening until seven in the morning. The local time is the
+    process's own zone, which a container sets with ``TZ``.
     """
     start_minutes = parse_clock(start)
     end_minutes = parse_clock(end)
     if start_minutes is None or end_minutes is None:
         return False
-    moment = now or datetime.now()
+    moment = now if now is not None else local_now()
     if moment.tzinfo is not None:
-        moment = moment.astimezone()
+        moment = moment.astimezone(resolve_zone())
     current = moment.hour * 60 + moment.minute
     if start_minutes <= end_minutes:
         return start_minutes <= current < end_minutes

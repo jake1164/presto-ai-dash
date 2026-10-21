@@ -1,0 +1,62 @@
+# The daemon and its admin page.
+#
+#   cp .env.example .env      (fill in the tokens)
+#   docker compose up -d
+#
+# The device port (8787) is published on the LAN, so the Presto can poll it.
+# The admin page is published on 127.0.0.1 only: it is reachable from this
+# machine and from nowhere else. See docs/docker.md.
+
+services:
+  dash:
+    build: .
+    image: presto-ai-dash:local
+    container_name: presto-ai-dash
+    restart: unless-stopped
+    environment:
+      # The device port. The Presto polls this one.
+      DASH_HOST: "0.0.0.0"
+      DASH_PORT: "8787"
+      # The admin page. It needs a bind address, an explicit token and the
+      # names it is reached by before it may listen on anything but loopback.
+      DASH_ADMIN_HOST: "0.0.0.0"
+      DASH_ADMIN_PORT: "8788"
+      DASH_ADMIN_ALLOWED_HOSTS: "localhost:8788,127.0.0.1:8788"
+      DASH_ADMIN_TOKEN: "${DASH_ADMIN_TOKEN:?set DASH_ADMIN_TOKEN in .env}"
+      # The token the Presto device holds. The daemon prints a temporary one
+      # when this is empty.
+      DASH_SHARED_TOKEN: "${DASH_SHARED_TOKEN:-}"
+      # The database and its key file, in the volume below.
+      DASH_DATABASE: "/data/dash.db"
+      DASH_KEY_FILE: "/data/dash.db.key"
+      # The remote reports (push) switch, off unless the user turns it on.
+      DASH_INGEST_ENABLED: "${DASH_INGEST_ENABLED:-0}"
+      # The encryption master key. Leave empty to use the key file in the
+      # volume; set it to move the database to another machine.
+      DASH_ENCRYPTION_KEY: "${DASH_ENCRYPTION_KEY:-}"
+      DASH_LOG_LEVEL: "${DASH_LOG_LEVEL:-INFO}"
+      DASH_OVERFLOW_ROWS: "${DASH_OVERFLOW_ROWS:-1}"
+      # The time zone of the process. A container starts in UTC, and the
+      # quiet hours and the weekly reset estimate use the local time, so set
+      # TZ in .env to your own zone (for example America/New_York).
+      TZ: "${TZ:-UTC}"
+    volumes:
+      - dash-data:/data
+    ports:
+      # The device port, on the LAN so the Presto can reach it.
+      - "8787:8787"
+      # The admin page, on this machine only.
+      - "127.0.0.1:8788:8788"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/healthz', timeout=3).read()"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  dash-data:

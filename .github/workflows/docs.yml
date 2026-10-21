@@ -54,6 +54,11 @@ jobs:
         # deployment. Internal Markdown-to-Markdown links are already fully
         # validated by the strict MkDocs build above; this step's job is the
         # external links.
+        #
+        # The canonical site URL (excluded below) 404s until the Pages site is
+        # first deployed: the one link this check cannot verify before the
+        # deployment it belongs to. Keep comments out of the args block: in a
+        # folded YAML scalar a "#" line is passed to lychee as text.
         uses: lycheeverse/lychee-action@v2
         with:
           args: >
@@ -62,9 +67,6 @@ jobs:
             --max-retries 1
             --exclude-loopback
             --exclude '<host>'
-            # The canonical site URL 404s until the Pages site is first
-            # deployed. It is the one link this check cannot verify before
-            # the deployment it belongs to.
             --exclude 'jake1164\.github\.io/presto-ai-dash/$'
             'docs/user/**/*.md'
           token: ${{ secrets.GITHUB_TOKEN }}

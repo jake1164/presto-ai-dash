@@ -1295,8 +1295,42 @@ In order (item 0 is an urgent defect and goes first):
      Passive adoption signals that need nothing on the site: GitHub traffic,
      clones and referrers, release download counts, container image pulls,
      stars and forks.
-4. **Phase 8**, OpenTelemetry, as extra detail (cost, duration, errors). First
-   verify with a throwaway local listener that the VS Code panel emits it.
+4. **Phase 8, OpenTelemetry (researched 2026-10-21; gate pending).** Official and
+   documented (code.claude.com/docs/en/monitoring-usage): `CLAUDE_CODE_ENABLE_TELEMETRY=1`
+   plus `OTEL_*` variables; metrics `claude_code.cost.usage` (USD),
+   `claude_code.token.usage` (input, output, cacheRead, cacheCreation, by model),
+   `claude_code.active_time.total`, session, commit and lines-of-code counts; events
+   `api_request` (`cost_usd`, `duration_ms`, token counts, `model`), `api_error`,
+   `tool_result` and others. Protocols: gRPC, HTTP/JSON, HTTP/protobuf; there is no
+   default, so one must be set. What it would add to what exists: cost in USD
+   (notional on a subscription), request latency and API error counts. Quota percent
+   and token totals already come from the usage cache and the session logs, so the
+   gain is detail, not coverage.
+   - **Privacy (the real cost).** `user.email` is always attached to every metric and
+     event, with no switch to turn it off, plus `user.id`, `organization.id`,
+     `user.account_uuid` (switchable) and `workspace.host_paths`. Prompts, responses,
+     tool inputs and raw API bodies appear only when the user opts in. Any receiver
+     must keep an ALLOWLIST (metric and event names, model, token type, numeric
+     cost, duration, token and status fields) and drop everything else before
+     anything is stored, logged or returned; tests with hostile payloads (email,
+     account ids, prompts, paths) must prove nothing else survives. Telemetry goes
+     only where `OTEL_EXPORTER_OTLP_ENDPOINT` points; the daemon would only listen
+     on an opt-in port.
+   - **Setup is the user's own act** (shell environment or `~/.claude/settings.json`
+     `env`); the app never edits it. Project settings cannot set the exporter
+     variables, the values are read once at startup, and VS Code needs a restart.
+   - **Open question: does the VS Code panel emit at all?** Two GitHub reports say it
+     may not: anthropics/claude-code #35105 (the extension's pipe/stream-json mode
+     exports nothing) and #72261 (the extension stopped reading its environment
+     settings after 2.1.193, June 2026). Both were closed by a bot for inactivity,
+     not fixed or disproved, so nobody can say. `tools/otel_probe.py` (a loopback
+     listener that prints only names, counts, harmless values and PRESENT markers,
+     never the email, ids or prompts; `daemon/tests/test_otel_probe.py`) answers it.
+   - **Decision gate.** If the probe sees `claude_code.*` from the panel with
+     `app.entrypoint` = `claude-vscode`: design an HTTP/JSON receiver on an opt-in
+     port, allowlist first, summarised by hour and day, shown as labelled
+     "OpenTelemetry" detail. If nothing arrives: close Phase 8 for the panel (the
+     terminal CLI alone is not worth a receiver for a user who rarely runs it).
 5. **M8 acceptance**: sign-in, cancel and sign-out accepted live; expired-login
    recovery; second account or profile if one exists (else mark untested);
    other buckets via fixtures; a contract test that regenerates Codex's

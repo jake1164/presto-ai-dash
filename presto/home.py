@@ -531,8 +531,13 @@ def source_rows(payload):
         return None  # Older daemons still render their ordinary summary card.
     # Managed accounts follow the saved order on Home and in the carousel.
     if payload.get("card_order") != "accounts":
-        sources = sorted(sources, key=lambda source: 0 if isinstance(source, dict) and
-                         isinstance(source.get("quota"), dict) else 1)
+        # Quota accounts first, each group in its own order. Partition instead
+        # of sorting: MicroPython's sort is not stable (see cards.parse_cards).
+        quota = [source for source in sources if isinstance(source, dict) and
+                 isinstance(source.get("quota"), dict)]
+        other = [source for source in sources if not (isinstance(source, dict) and
+                 isinstance(source.get("quota"), dict))]
+        sources = quota + other
     rows = []
     # Daemon time, so resets read right on a device without a synced clock.
     now = iso_seconds(payload.get("updated_at"))

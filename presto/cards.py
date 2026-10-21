@@ -339,17 +339,23 @@ def parse_cards(payload):
 
     cards = [Card.from_dict(item) for item in raw]
 
+    # MicroPython's list.sort() is NOT stable (verified on a Presto: sorting
+    # seven cards by a key that is the same for six of them scrambled those
+    # six). Never sort with a key that can tie: the saved account order would
+    # be lost on the device while the PC preview, whose sort is stable, looked
+    # right. tests/test_card_order.py guards every sort in presto/.
     if payload.get("card_order") == "accounts":
         # Keep configured account order, with Home first even after an edit.
-        cards.sort(key=lambda card: 0 if card.id == "dash" else 1)
-        return cards, None
+        home = [card for card in cards if card.id == "dash"]
+        rest = [card for card in cards if card.id != "dash"]
+        return home + rest, None
 
-    # Older/static payloads retain their original order.
-    def sort_key(card):
+    # Older/static payloads: the known order first; anything else keeps its
+    # position. The position is part of the key, so no two keys are equal.
+    def sort_key(position):
         try:
-            return (0, CARD_ORDER.index(card.id))
+            return (0, CARD_ORDER.index(cards[position].id), position)
         except ValueError:
-            return (1, 0)
+            return (1, 0, position)
 
-    cards.sort(key=sort_key)
-    return cards, None
+    return [cards[position] for position in sorted(range(len(cards)), key=sort_key)], None

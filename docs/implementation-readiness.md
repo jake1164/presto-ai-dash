@@ -54,15 +54,15 @@ cross-platform acceptance still needs macOS/Linux execution.
 v0 targets normal Python source run or pip/pipx installation. The planned
 command is `presto-ai-dash-daemon`; today's command is `presto-ai-dash` or
 `python -m presto_ai_dash.app`. Optional targets: v0.1 Docker (especially on
-`toontown-int-srv1`), v0.2 separate `presto-ai-dash-tray`, v1 binaries/installers
+`home-server`), v0.2 separate `presto-ai-dash-tray`, v1 binaries/installers
 if useful. No packaging changes are made by this planning update.
 
 ## Topology and Telemetry Limits
 
 ```text
-toontown-int-srv1 -> LiteLLM -> jake-desktop -> Ollama
-jake-desktop -> Ollama directly
-Presto -> HTTP daemon on toontown-int-srv1
+home-server -> LiteLLM -> desktop-pc -> Ollama
+desktop-pc -> Ollama directly
+Presto -> HTTP daemon on home-server
 ```
 
 LiteLLM sees only routed traffic. Full direct Ollama measurement requires a

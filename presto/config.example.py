@@ -7,7 +7,7 @@
 # --- Daemon ----------------------------------------------------------------
 # False polls the daemon; True keeps the offline static quota design preview.
 STATIC_DEMO = True
-DAEMON_HOST = "toontown-int-srv1"
+DAEMON_HOST = "home-server"
 DAEMON_PORT = 8787
 
 # Must match `daemon.shared_token` in the daemon config.

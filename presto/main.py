@@ -112,7 +112,7 @@ class App(object):
         self.retry_interval = max(1, int(getattr(config, "RETRY_INTERVAL", 12)))
         self.wifi_timeout = max(1, int(getattr(config, "WIFI_TIMEOUT", 10)))
         self.client = StatusClient(
-            getattr(config, "DAEMON_HOST", "toontown-int-srv1"),
+            getattr(config, "DAEMON_HOST", "home-server"),
             int(getattr(config, "DAEMON_PORT", 8787)),
             getattr(config, "SHARED_TOKEN", ""),
             timeout=max(1, int(getattr(config, "HTTP_TIMEOUT", 8))),

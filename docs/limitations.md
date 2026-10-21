@@ -40,8 +40,8 @@ duration. The collector is future work without a release assignment.
 
 ## LiteLLM sees only routed traffic
 
-The target topology is `toontown-int-srv1 -> LiteLLM -> jake-desktop -> Ollama`,
-with direct `jake-desktop -> Ollama` calls as well. LiteLLM usage totals cover
+The target topology is `home-server -> LiteLLM -> desktop-pc -> Ollama`,
+with direct `desktop-pc -> Ollama` calls as well. LiteLLM usage totals cover
 only the first path. They must never be presented as complete desktop usage.
 
 ## LiteLLM spend may be permanently unavailable

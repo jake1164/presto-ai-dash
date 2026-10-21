@@ -173,15 +173,15 @@ See [Future Features](future.md) for the tray boundary.
 ## Topology and Telemetry Limits
 
 ```text
-toontown-int-srv1 -> LiteLLM -> jake-desktop -> Ollama
-jake-desktop -> Ollama directly
-Presto -> HTTP daemon on toontown-int-srv1
+home-server -> LiteLLM -> desktop-pc -> Ollama
+desktop-pc -> Ollama directly
+Presto -> HTTP daemon on home-server
 ```
 
 LiteLLM measures only traffic routed through it. Full direct Ollama usage
 needs a future desktop collector, shim, wrapper, or voluntary reporting;
 polling health cannot reconstruct request history. An optional future
-`jake-desktop` helper reports those samples to the server daemon.
+`desktop-pc` helper reports those samples to the server daemon.
 
 ## Scope / Non-goals
 

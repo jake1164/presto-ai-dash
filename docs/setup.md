@@ -262,7 +262,7 @@ static cloud quota design preview.
 
 Local `presto/config.py` and `presto/secrets.py` are ignored by Git. Never put
 provider API keys on the device. For this Windows workspace, the private
-device config points to `192.168.1.240:8787`, and the shared token has been saved
+device config points to `192.168.1.50:8787`, and the shared token has been saved
 in both local configs. If the computer's address changes, update `DAEMON_HOST`.
 
 From the repository root, with `mpremote` installed in your active Python

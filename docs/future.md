@@ -15,7 +15,7 @@ The deferred API billing and application features below are separate work.
 | Target | Direction |
 | --- | --- |
 | v0 | Normal Python daemon: source run or pip/pipx; target command `presto-ai-dash-daemon` |
-| v0.1 | Optional Docker image for server/headless use, especially `toontown-int-srv1` |
+| v0.1 | Optional Docker image for server/headless use, especially `home-server` |
 | v0.2 | Optional separate `presto-ai-dash-tray` runner/wrapper |
 | v1 | Packaged binaries/installers if the project proves useful |
 

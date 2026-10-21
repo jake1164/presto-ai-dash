@@ -117,9 +117,9 @@ All Ollama durations are in **nanoseconds**.
 
 **Purpose:** routed AI usage through the gateway.
 
-LiteLLM only sees traffic routed through LiteLLM; direct `jake-desktop` calls
+LiteLLM only sees traffic routed through LiteLLM; direct `desktop-pc` calls
 to Ollama are outside those usage totals. The v0 daemon is intended to run on
-`toontown-int-srv1`; desktop direct-usage reporting is a future helper.
+`home-server`; desktop direct-usage reporting is a future helper.
 
 Endpoints used by the implemented source:
 

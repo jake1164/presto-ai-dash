@@ -254,7 +254,7 @@ tests and the on-device clipped-layout/navigation checks pass.
   firmware `/main.py` untouched. Real-font checks pass for all three cards and
   a five-instance scrolling Home. The bounded live loop handles missing Wi-Fi
   without exiting to the carousel.
-- The local daemon serves authenticated fake data at `192.168.1.240:8787`.
+- The local daemon serves authenticated fake data at `192.168.1.50:8787`.
   Its shared token is persisted in ignored `dash.toml` and `presto/config.py`.
   User-provided Wi-Fi settings were deployed privately to root `/secrets.py`;
   the Presto joined the LAN and fetched the daemon's fake source over HTTP.

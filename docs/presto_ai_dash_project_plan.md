@@ -67,8 +67,8 @@ The device should show this through:
 Current usage pattern:
 
 ```text
-Other devices -> toontown-int-srv1 -> LiteLLM -> jake-desktop -> Ollama
-jake-desktop -> Ollama directly
+Other devices -> home-server -> LiteLLM -> desktop-pc -> Ollama
+desktop-pc -> Ollama directly
 ```
 
 Recommended v0 deployment:
@@ -76,18 +76,18 @@ Recommended v0 deployment:
 ```text
 Pimoroni Presto
     ↓ polls HTTP
-Presto AI Dash daemon on toontown-int-srv1
+Presto AI Dash daemon on home-server
     ↓ reads
-LiteLLM on toontown-int-srv1
+LiteLLM on home-server
     ↓ routes to
-Ollama on jake-desktop
+Ollama on desktop-pc
 
 Optional future:
-jake-desktop collector/shim -> reports direct Ollama samples -> daemon
+desktop-pc collector/shim -> reports direct Ollama samples -> daemon
 ```
 
 LiteLLM only sees requests routed through LiteLLM. Direct calls from
-`jake-desktop` to Ollama require a collector, shim, wrapper, or voluntary
+`desktop-pc` to Ollama require a collector, shim, wrapper, or voluntary
 metrics reporting to measure full usage. Health/model polling alone cannot
 reconstruct request or token history. The desktop reporting path is not v0.
 
@@ -325,7 +325,7 @@ wrappers; neither systemd nor Windows services are assumed.
 | Release target | Deployment direction |
 | --- | --- |
 | v0 | Direct Python / pip / pipx; target command `presto-ai-dash-daemon` |
-| v0.1 | Optional Docker image for server/headless use, particularly `toontown-int-srv1` |
+| v0.1 | Optional Docker image for server/headless use, particularly `home-server` |
 | v0.2 | Optional separate `presto-ai-dash-tray` runner/wrapper |
 | v1 | Packaged binaries/installers if the project proves useful |
 

@@ -73,11 +73,11 @@ app is one example; the design is independent of any single app or provider.
 ## Topology and Telemetry Limits
 
 ```text
-toontown-int-srv1 -> LiteLLM -> jake-desktop -> Ollama
-jake-desktop -> Ollama directly
+home-server -> LiteLLM -> desktop-pc -> Ollama
+desktop-pc -> Ollama directly
 ```
 
-For v0, run the daemon on `toontown-int-srv1` and have the Presto poll it over
+For v0, run the daemon on `home-server` and have the Presto poll it over
 HTTP. LiteLLM sees only traffic routed through it. Direct desktop Ollama usage
 requires a future collector, shim, wrapper, or voluntary metrics reporting;
 health polling cannot reconstruct token history.
@@ -92,7 +92,7 @@ execution checks have been on Windows.
 | Release target | Deployment direction |
 | --- | --- |
 | v0 | Direct Python or pip/pipx installation |
-| v0.1 | Optional Docker image, especially for `toontown-int-srv1` |
+| v0.1 | Optional Docker image, especially for `home-server` |
 | v0.2 | Optional separate desktop tray runner |
 | v1 | Small binaries/installers if the project proves useful |
 

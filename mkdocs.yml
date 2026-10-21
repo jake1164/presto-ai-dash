@@ -72,6 +72,7 @@ nav:
   - Getting Started:
       - What Presto AI Dash Does: getting-started/what-it-does.md
       - Install the Daemon: getting-started/install-the-daemon.md
+      - Install with Docker: getting-started/install-with-docker.md
       - Set Up the Presto: getting-started/set-up-the-presto.md
       - Add the First Source: getting-started/add-the-first-source.md
   - Core Concepts:

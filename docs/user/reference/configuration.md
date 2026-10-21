@@ -65,7 +65,9 @@ scenario_interval = 20
 | Key | Default | What it does |
 | --- | --- | --- |
 | `enabled` | `false` | Whether the configuration page is served. `--admin` also turns it on |
-| `port` | `8788` | The admin port. It always binds to `127.0.0.1` |
+| `host` | `127.0.0.1` | The address the admin page listens on. A non-loopback address needs an explicit `token` and `allowed_hosts`, or the daemon will not start the page |
+| `port` | `8788` | The admin port |
+| `allowed_hosts` | `[]` | The names the page is reached by (for example `admin.example.lan:8788`), checked against the `Host` and `Origin` headers. The loopback names on the admin port always work |
 | `token` | `""` | The admin token. Empty means a fresh one at every start, printed once |
 | `key_file` | `""` | Where the encryption master key lives. Empty means `<database>.key` |
 
@@ -105,6 +107,8 @@ Every variable below overrides the matching configuration key.
 | `DASH_DATABASE` | `daemon.database` | |
 | `DASH_LOG_LEVEL` | `logging.level` | |
 | `DASH_ADMIN_TOKEN` | `admin.token` | Not printed when it is set |
+| `DASH_ADMIN_HOST` | `admin.host` | The admin listen address; see the Docker guide |
+| `DASH_ADMIN_ALLOWED_HOSTS` | `admin.allowed_hosts` | Comma-separated names |
 | `DASH_KEY_FILE` | `admin.key_file` | |
 | `DASH_ENCRYPTION_KEY` | The encryption master key | A Fernet key. Use it when the key file cannot be protected, such as in a container |
 | `DASH_INGEST_ENABLED` | `daemon.ingest_enabled` and the stored switch | Accepts `1/true/yes/on` and `0/false/no/off`, case-insensitively. An invalid value fails closed: the route stays off |

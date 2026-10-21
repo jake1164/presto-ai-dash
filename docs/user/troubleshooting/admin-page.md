@@ -66,14 +66,19 @@ immediately.
 | The page loads but the account list is empty | The first admin start has not happened yet, so nothing has been imported into the database |
 | A save returns 409 | The account was edited in another browser. Reload the page |
 | The page is blank | The browser blocked a mixed-content or cross-origin request. Open it on `127.0.0.1` rather than through a proxy |
-| The page cannot be reached from a container | The admin listener binds to loopback inside the container. Use `docker exec` or an SSH forward |
+| The page cannot be reached from a container | The compose file publishes it on `127.0.0.1:8788` of the host only. Open it on that machine, or see [Install with Docker](../getting-started/install-with-docker.md) to reach it by another name |
+| The container exits at start with a message about the admin page | A non-loopback admin address needs an explicit `DASH_ADMIN_TOKEN` and a non-empty `DASH_ADMIN_ALLOWED_HOSTS` |
 
 ## A note on containers
 
-The admin page is not reachable from outside a container, because the
-listener binds to `127.0.0.1` and checks the `Host` header. That is a known
-limit, not a misconfiguration on your side. Until the daemon can be told to
-bind elsewhere, use a port forward.
+In the compose file the admin page listens on `0.0.0.0` inside the container
+but is published on `127.0.0.1` of the host only, so it is reachable from the
+machine that runs Docker and from nowhere else. To use it from another
+computer, or through a reverse proxy, list the names you will use in
+`DASH_ADMIN_ALLOWED_HOSTS`. The page checks the `Host` and `Origin` headers
+against that list, and the daemon refuses to start the admin page on a
+non-loopback address without an explicit admin token and that list. See
+[Install with Docker](../getting-started/install-with-docker.md).
 
 ## See also
 

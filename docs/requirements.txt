@@ -1,0 +1,5 @@
+# Pinned versions for building the documentation site.
+# Used by the docs CI workflow and by a local .venv-docs environment.
+# Bump deliberately, not silently.
+mkdocs==1.6.1
+mkdocs-material==9.7.7

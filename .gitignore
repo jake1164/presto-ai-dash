@@ -6,6 +6,8 @@ build/
 dist/
 .venv/
 venv/
+# Documentation site environment (mkdocs and the Material theme).
+.venv-docs/
 
 # Daemon runtime state
 *.db

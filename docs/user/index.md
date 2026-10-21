@@ -1,0 +1,86 @@
+# Presto AI Dash
+
+A tiny AI usage dashboard for a [Pimoroni Presto](https://shop.pimoroni.com/products/presto).
+The Presto is a 240x240 touchscreen with seven LEDs and a buzzer, and it is
+sitting on your desk collecting dust. Presto AI Dash turns it into a glanceable
+panel: how much of your Claude, Codex and OpenCode Go allowance is gone, when
+it resets, whether your local Ollama is up, and whether anything is broken.
+
+![The Presto Home screen with quota bars for several accounts](images/home.png)
+
+Everything runs on your own machines. There is no account to create, nothing
+is sent to a server we do not control, and the dashboard never spends, resets
+or changes anything on a provider account. See [Privacy](privacy/index.md).
+
+## What it does
+
+- **Shows subscription quotas** with the real period labels the providers
+  use: Claude's 5-hour and weekly windows, Codex's allowance buckets, and
+  OpenCode Go's 5-hour, weekly and monthly windows.
+- **Shows local services**: whether Ollama is reachable and which model is
+  loaded, and the requests, tokens and spend LiteLLM routed today.
+- **Shows local Claude Code activity**: when you last used Claude, from which
+  surface, and how many tokens the local session logs account for.
+- **Tells you why a number is missing or old** instead of showing a confident
+  zero. Every number says where it came from.
+- **Alerts you**: the LED and a short sound when a service gets worse, with
+  per-service thresholds and quiet hours.
+
+## How it works
+
+Two pieces, on your LAN:
+
+```text
+Pimoroni Presto  --polls every ~15 s-->  Presto AI Dash daemon (Python)
+                                               |  reads
+                                               v
+                                        your providers
+```
+
+The **daemon** runs on a computer you control, collects from the services you
+configure, keeps a short local history in SQLite and serves one JSON
+endpoint. The **Presto** holds no provider secrets, makes no provider calls
+and only displays what the daemon sends it.
+
+The daemon is the only thing that talks to a provider, and it only ever
+*reads* documented usage and limit data. The one thing the Presto can write
+is a setting on your own daemon: whether one service's alerts are on or off.
+
+## Start here
+
+- [What Presto AI Dash does](getting-started/what-it-does.md) - a longer tour.
+- [Install the daemon](getting-started/install-the-daemon.md).
+- [Set up the Presto](getting-started/set-up-the-presto.md).
+- [Add the first source](getting-started/add-the-first-source.md).
+
+If something is already installed and broken, go straight to
+[Troubleshooting](troubleshooting/daemon-offline.md).
+
+## The sources it can read
+
+| Source | What you get |
+| --- | --- |
+| [Claude](guides/claude.md) | 5-hour and weekly quota, local activity, and the usage cache Claude Code writes |
+| [Codex](guides/codex.md) | Allowance buckets, percentages and resets, plus banked reset credits |
+| [OpenCode Go](guides/opencode-go.md) | 5-hour, weekly and monthly percentages and resets |
+| [Ollama Cloud](guides/ollama-cloud.md) | Dated activity totals: requests, tokens and spend |
+| [Ollama](guides/ollama.md) | Local server health, loaded model, measured speed |
+| [LiteLLM](guides/litellm.md) | Routed requests, tokens, spend, errors and top model |
+| Fake | Synthetic data, for demos and for checking the hardware |
+
+Every one of these is optional. Start with the Fake source and the hardware,
+then add the accounts you care about.
+
+## What it will never do
+
+- It will not spend, redeem, reset or change anything on a provider account.
+- It will not send a prompt or a model request to produce a number.
+- It will not send anything about you anywhere.
+- It will not show a missing reading as `0%`.
+
+The [Privacy page](privacy/index.md) says this in more detail, including
+what is read from your machine and what is stored.
+
+## Licence
+
+MIT. The repository also ships no provider logos, fonts or artwork.

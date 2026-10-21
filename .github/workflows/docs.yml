@@ -1,0 +1,99 @@
+name: Documentation Site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/user/**'
+      - 'mkdocs.yml'
+      - 'docs/requirements.txt'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docs/user/**'
+      - 'mkdocs.yml'
+      - 'docs/requirements.txt'
+      - '.github/workflows/docs.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
+
+      - name: Install docs dependencies
+        run: pip install -r docs/requirements.txt
+
+      - name: Build with MkDocs (strict)
+        # --strict turns a broken internal link, a missing navigation entry
+        # and a warning of any kind into a failed build.
+        run: mkdocs build --strict
+
+      - name: Check links
+        # Scans the Markdown sources, not the rendered HTML in
+        # build/docs/site/: the rendered output is full of Material-generated
+        # root-relative links that lychee cannot resolve without a real
+        # deployment. Internal Markdown-to-Markdown links are already fully
+        # validated by the strict MkDocs build above; this step's job is the
+        # external links.
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: >
+            --no-progress
+            --timeout 20
+            --max-retries 1
+            --exclude-loopback
+            --exclude '<host>'
+            # The canonical site URL 404s until the Pages site is first
+            # deployed. It is the one link this check cannot verify before
+            # the deployment it belongs to.
+            --exclude 'jake1164\.github\.io/presto-ai-dash/$'
+            'docs/user/**/*.md'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fail: true
+
+      - name: Upload PR preview artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: docs-preview
+          path: build/docs/site
+          retention-days: 7
+
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: build/docs/site
+
+  deploy:
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

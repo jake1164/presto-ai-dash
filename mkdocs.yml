@@ -1,0 +1,112 @@
+# Presto AI Dash documentation site.
+#
+# The published site is built from docs/user/ only. Everything else under
+# docs/ (the plan, the readiness notes, the milestones) stays in the
+# repository and is never published.
+#
+# Privacy: this site loads nothing from a third party. There is no analytics,
+# no external script and no CDN asset. The Material theme's Google Fonts
+# request is switched off with `font: false`, so the page uses the reader's
+# own fonts. Mermaid is deliberately not enabled: Material loads the mermaid
+# library from a CDN.
+
+site_name: Presto AI Dash
+site_description: >-
+  A tiny AI usage dashboard for a Pimoroni Presto: subscription quotas and
+  local service health on a 240x240 touchscreen, collected by a small
+  read-only Python daemon on your own LAN.
+site_url: https://jake1164.github.io/presto-ai-dash/
+repo_url: https://github.com/jake1164/presto-ai-dash
+repo_name: jake1164/presto-ai-dash
+edit_uri: edit/main/docs/user/
+
+docs_dir: docs/user
+site_dir: build/docs/site
+
+theme:
+  name: material
+  # No web fonts: the site must not ask a third party for anything.
+  font: false
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+
+markdown_extensions:
+  - admonition
+  - tables
+  - attr_list
+  - def_list
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - What Presto AI Dash Does: getting-started/what-it-does.md
+      - Install the Daemon: getting-started/install-the-daemon.md
+      - Set Up the Presto: getting-started/set-up-the-presto.md
+      - Add the First Source: getting-started/add-the-first-source.md
+  - Core Concepts:
+      - Sources: concepts/sources.md
+      - Quotas and Where Numbers Come From: concepts/quotas-and-provenance.md
+      - Stale Readings: concepts/stale-readings.md
+      - Alert Statuses and Thresholds: concepts/alerts.md
+      - Remote Reports: concepts/remote-reports.md
+  - Guides:
+      - Claude: guides/claude.md
+      - Codex: guides/codex.md
+      - OpenCode Go: guides/opencode-go.md
+      - Ollama Cloud: guides/ollama-cloud.md
+      - Ollama: guides/ollama.md
+      - LiteLLM: guides/litellm.md
+      - The Admin Page: guides/admin-page.md
+      - Home Display and the Overflow Strip: guides/home-display.md
+      - Alerts and the Card Bell: guides/alerts-and-the-bell.md
+      - Tapping Rows and Dots: guides/tapping.md
+      - Remote Collectors: guides/remote-collectors.md
+  - Troubleshooting:
+      - Daemon Offline and Wi-Fi Drops: troubleshooting/daemon-offline.md
+      - No Claude Data: troubleshooting/no-claude-data.md
+      - The VS Code Panel: troubleshooting/vs-code-panel.md
+      - Stale Readings: troubleshooting/stale-readings.md
+      - The Admin Page Will Not Open: troubleshooting/admin-page.md
+  - Reference:
+      - Configuration Keys and Environment Variables: reference/configuration.md
+      - Ports and Endpoints: reference/ports-and-endpoints.md
+      - The Status Payload and Its Size Budget: reference/status-payload.md
+  - Privacy: privacy/index.md
+  - Developers:
+      - Architecture Overview: developers/architecture.md
+      - Running the Tests: developers/running-the-tests.md
+      - The Preview and the Device Sync: developers/preview-and-device.md
+      - How a Source Works: developers/how-a-source-works.md
+      - Writing a Collector: developers/writing-a-collector.md
+      - Worked Example: developers/worked-example.md

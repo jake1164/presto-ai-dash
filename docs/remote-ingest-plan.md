@@ -15,7 +15,7 @@ not start a phase until the previous one passes its tests.
 | 5 | Claude activity from local session logs (VS Code panel and CLI); 5b Stop hook and 5c remote push optional | Done (2026-10-19) |
 | 5d | Claude usage cache reader: quota for VS Code panel users from `~/.claude.json` | Done (2026-10-20) |
 | 6 | Codex over push | Optional |
-| 7 | Documentation site on GitHub Pages (7a site and user docs, 7b developer docs and the adding-a-source guide and template, 7c in-app help links) | Not started (an earlier source-guide attempt was discarded) |
+| 7 | Documentation site on GitHub Pages (7a site and user docs, 7b developer docs and the adding-a-source guide and template, 7c in-app help links) | 7a and 7b done (2026-10-20); 7c not started |
 | 8 | OpenTelemetry activity detail | Optional, only if asked |
 | 9 | Banked reset credits (Codex) | Done (2026-10-20) |
 
@@ -1191,7 +1191,9 @@ In order (item 0 is an urgent defect and goes first):
      socket with an unread body is what makes Windows reset the connection
      (the same quirk the 413 path already works around). That is a
      hypothesis, not a confirmed cause.
-3. **Phase 7, the documentation site (expanded 2026-10-20).** User and developer
+3. **Phase 7, the documentation site (expanded 2026-10-20). 7a and 7b done
+   2026-10-20 (site, user docs, developer docs, source template); 7c not
+   started.** User and developer
    documentation as a website on GitHub Pages, built from Markdown, with the
    adding-a-source guide and template as part of it, and help links from the
    admin page into it. It copies the stack the author already runs for

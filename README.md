@@ -2,6 +2,18 @@
 
 A tiny AI usage dashboard for Pimoroni Presto with support for local and cloud AI providers.
 
+<p align="center">
+  <img src="docs/user/images/device-home.jpg" width="420" alt="The Presto showing the Home list: OpenCode Go, Codex and Claude with their quota percentages and bars, then Ollama Cloud, Ollama and LiteLLM">
+</p>
+
+<p align="center">
+  <img src="docs/user/images/device-claude.jpg" width="200" alt="The Claude card in a near-limit state: 5-hour and weekly bars, last use, token totals and included credit">
+  <img src="docs/user/images/device-codex.jpg" width="200" alt="The Codex card: the weekly window at 36 percent, reset countdown, banked reset credits and the next expiry">
+  <img src="docs/user/images/device-litellm.jpg" width="200" alt="The LiteLLM card: requests, tokens, spend, errors and the top model for today">
+</p>
+
+Documentation: <https://jake1164.github.io/presto-ai-dash/>
+
 Repository: `presto-ai-dash`. The daemon supports fake, local Ollama, LiteLLM,
 OpenCode Go and Codex subscription quotas, and Ollama Cloud activity. Manage accounts,
 keys, and refresh settings in the local UI; they are saved in SQLite, with keys

@@ -11,7 +11,7 @@ every gesture and what it does.
 | Swipe right | The previous card |
 | Drag up or down | Scroll the Home list |
 | Tap | Open the thing under your finger |
-| Long press | Mute or unmute the sound |
+| Long press | Mute the sound, or unmute it at once |
 
 A swipe over a control is never a tap, and a tap is only a tap when it was
 short and stayed within the drag slop. That is why a scroll never opens a
@@ -52,12 +52,16 @@ still opens the detail view. See
 
 ## Long press
 
-A long press anywhere toggles the mute state. The MUTED indicator appears in
-the Home title bar while the sound is off. Press and hold again to bring it
-back.
+A long press anywhere mutes the sound. The mute does not last for ever: it
+ends by itself after a few hours (four by default), and a `MUTED` chip in the
+bottom-right corner of the screen says how long is left - `MUTED 3H`,
+`MUTED 45M`, or `MUTED` alone when the mute lasts until you press again.
+The chip is on the Home screen and on every card, and it disappears when the
+mute ends. Press and hold again to unmute at once.
 
 Muting turns the chirp off. It does not change the LED colour, and it does
-not change any number.
+not change any number. The length is set in the admin page, under
+**Settings -> Alerts**.
 
 ## When a tap does nothing
 

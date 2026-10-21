@@ -45,6 +45,33 @@ DEFAULT_QUIET_END = "07:00"
 # The master switch: alerts are on unless the user turns them off.
 DEFAULT_MASTER_ENABLED = True
 
+# How long a long-press mute on the device lasts, in hours. Zero means it
+# lasts until the user presses again. The device counts the time with its
+# own tick counter, so the daemon only sends the number.
+DEFAULT_MUTE_HOURS = 4
+MUTE_HOURS_MIN = 0
+MUTE_HOURS_MAX = 48
+
+
+def validate_mute_hours(value):
+    """Raise ValueError unless this can be used as a mute length.
+
+    The length is a whole number of hours, from none (0: until the user
+    presses again) to two days.
+    """
+    if type(value) is not int or value < MUTE_HOURS_MIN or value > MUTE_HOURS_MAX:
+        raise ValueError("mute_hours must be an integer in range %d..%d" %
+                         (MUTE_HOURS_MIN, MUTE_HOURS_MAX))
+    return value
+
+
+def usable_mute_hours(value):
+    """The mute length to use, or the default when the value is unusable."""
+    try:
+        return validate_mute_hours(value)
+    except ValueError:
+        return DEFAULT_MUTE_HOURS
+
 
 def validate_thresholds(warning_percent, critical_percent):
     """Raise ValueError unless the two percentages can be used.

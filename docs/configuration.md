@@ -244,22 +244,24 @@ The alert settings apply to every service. They live in the admin page's
 | `enabled` | The master switch: alerts on or off for every service | on |
 | `warning_percent` | A window that has used this much of its allowance makes the service *near limit*: yellow. 1..100 | 80 |
 | `critical_percent` | A window that has used this much makes the service *critical*: red. 1..100, and above the warning percent | 95 |
-| `sound` | Sound a short cue when a service gets worse | on |
+| `sound` | Sound a short cue when a service gets worse | off |
 | `quiet_hours` | Be silent and dim the light during the quiet window | off |
 | `quiet_start` | When the quiet window starts, `HH:MM` in the daemon's local time | `22:00` |
 | `quiet_end` | When the quiet window ends, `HH:MM` in the daemon's local time | `07:00` |
 | `pop_to_top` | Let Home scroll to a service that has just got worse | on |
+| `mute_hours` | How long a long-press mute on the Presto lasts, in hours. 0..48; 0 means it lasts until you press again | 4 |
 
 ```toml
 [alerts]
 enabled = true
 warning_percent = 80
 critical_percent = 95
-sound = true
+sound = false
 quiet_hours = false
 quiet_start = "22:00"
 quiet_end = "07:00"
 pop_to_top = true
+mute_hours = 4
 ```
 
 Where a value comes from, in this order:
@@ -272,6 +274,22 @@ There is no environment variable for these: they are the user's own choices.
 A value the admin page puts back to the value in `dash.toml` stops
 overriding the file, so the effective configuration still says where each
 value came from.
+
+**The sound is off until you turn it on.** A desk device must not beep
+unannounced, so `sound` defaults to off and the admin page's **Alerts**
+section shows the *Sound on a new warning* box unticked. Turn it on there, or
+set `sound = true` in `[alerts]` in `dash.toml`; the admin page's stored
+value wins over the file. Nothing else changes when you turn the sound on:
+the alert thresholds, the LED and the pop-to-top are separate settings.
+
+A value you already stored (in the database, or as `sound = true` in
+`dash.toml`) is respected unchanged: only the unset default is off, and
+there is no migration.
+
+The device has its own hardware permission, `SOUND_ENABLED` in the Presto's
+`config.py`. The audible result is the AND of the two: the Presto chirps
+only when the daemon says the sound is on *and* the device's own setting
+allows it.
 
 The daemon reads them afresh for every status payload, so a change applies on
 the next poll without restarting the daemon.
@@ -326,7 +344,20 @@ so a second service that gets worse still speaks while another one is
 already critical: one chirp for a new warning, two for a critical,
 rate-limited or offline service. A warning that persists does not chirp
 again, a recovery is silent, and the first reading after boot is a silent
-baseline. Long-pressing the Presto mutes the sound until you press again.
+baseline.
+
+**The mute that expires.** A long press on the Presto mutes the sound. The
+mute ends by itself after `mute_hours` hours (four by default; 0 means it
+lasts until you press again), and the screen shows a `MUTED` chip with the
+time left - `MUTED 3H`, `MUTED 45M`, or `MUTED` alone when the mute has no
+end. A long press while muted unmutes at once. The mute is not stored
+anywhere: a restart clears it. Changing `mute_hours` while a mute is running
+applies to the next mute, not to the running one.
+
+The device has no wall clock, so it counts the length with its own tick
+counter, which wraps; the daemon only sends the number. The mute ends
+silently: the statuses were tracked while it was on, so the device does not
+chirp for an alarm that began during the mute.
 
 The LED shows the worst service, not only the account on the open card: red
 for critical, rate limited and offline, yellow for a warning, blue for a

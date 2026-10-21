@@ -30,11 +30,12 @@ overflow_rows = 1
 enabled = true
 warning_percent = 80
 critical_percent = 95
-sound = true
+sound = false
 quiet_hours = false
 quiet_start = "22:00"
 quiet_end = "07:00"
 pop_to_top = true
+mute_hours = 4
 
 [sources.fake]
 enabled = true
@@ -87,13 +88,20 @@ them.
 | `enabled` | `true` | The master switch for alerts |
 | `warning_percent` | `80` | A window at this percentage makes the service *near limit*. 1 to 100 |
 | `critical_percent` | `95` | A window at this percentage makes the service *critical*. 1 to 100, and above the warning percent |
-| `sound` | `true` | Whether a service getting worse makes a noise |
+| `sound` | `false` | Whether a service getting worse makes a noise. Off until you turn it on |
 | `quiet_hours` | `false` | Whether there is a quiet window |
 | `quiet_start` | `22:00` | When the quiet window starts, `HH:MM`, in the daemon's local time |
 | `quiet_end` | `07:00` | When the quiet window ends |
 | `pop_to_top` | `true` | Whether Home may scroll to a service that just got worse |
+| `mute_hours` | `4` | How long a long-press mute on the Presto lasts, in hours. 0 to 48; 0 means it lasts until you press again |
 
 There is no environment variable for these: they are your own choices.
+
+The sound is off until you turn it on: a desk device must not beep
+unannounced. Tick *Sound on a new warning* in the admin page's **Alerts**
+section, or set `sound = true` here; the admin page's stored value wins
+over the file. A value you already stored is respected: only the unset
+default is off.
 
 ## Environment variables
 

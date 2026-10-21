@@ -125,7 +125,8 @@ class App(object):
             swipe_min_px=self.swipe_min_px,
             debounce_ms=self.tap_debounce_ms,
         )
-        self.alerts = AlertTracker()
+        self.alerts = AlertTracker(clock=lambda: _now_ms(),
+                                   ticks_diff=lambda a, b: _ticks_diff(a, b))
         # The alarm pop-to-top: Home scrolls to a service that got worse.
         self.popup = PopToTop()
         # What the daemon says about alerts, and whether it is quiet now.
@@ -268,6 +269,9 @@ class App(object):
         self.alert_sound = settings["sound"]
         self.pop_to_top = settings["pop_to_top"]
         self.alerts_master = settings["enabled"]
+        # The mute length applies to the next mute: a mute that is running
+        # keeps the length it started with.
+        self.alerts.set_mute_hours(settings["mute_hours"])
         self.alerts.quiet = self.quiet
         statuses = {}
         alerting = {}
@@ -416,6 +420,10 @@ class App(object):
             if _ticks_diff(now, started) > ALERT_MESSAGE_MS:
                 self.alert_message = None
                 changed = True
+        # The mute lifts itself when its time is up. It says nothing: the
+        # statuses were tracked while it was on.
+        if self.alerts.mute_expired():
+            changed = True
         return changed
 
     async def poll_once(self):
@@ -659,6 +667,8 @@ class App(object):
                 else:
                     self._open_detail()
             elif gesture == LONG_PRESS:
+                # A long press while muted unmutes at once; otherwise it
+                # starts a mute that ends after the mute length.
                 muted = self.alerts.toggle_mute()
                 if muted:
                     self._close_detail()
@@ -738,13 +748,15 @@ class App(object):
             draw_home(self.display, self.palette, DEMO_QUOTAS,
                       self.index, len(self.cards), muted=self.alerts.muted,
                       width=self.width, height=self.height,
-                      scroll=self.home_scroll.offset)
+                      scroll=self.home_scroll.offset,
+                      mute_text=self.alerts.mute_label())
         elif card.id == "dash" and self.live_rows is not None:
             draw_sources(self.display, self.palette, self.live_rows,
                          self.index, len(self.cards), status=card.status,
                          muted=self.alerts.muted, width=self.width, height=self.height,
                          scroll=self.home_scroll.offset, stale=bool(self.connection_error),
-                         layout=self.home_layout)
+                         layout=self.home_layout,
+                         mute_text=self.alerts.mute_label())
         else:
             row = self.card_rows.get(card.id)
             detail = self.card_details.get(card.id)
@@ -763,6 +775,7 @@ class App(object):
                 loading=(card.id in self.card_pending),
                 failed=(card.id in self.card_failed),
                 detail_open=self.detail_open,
+                mute_text=self.alerts.mute_label(),
             )
 
         self.presto.update()

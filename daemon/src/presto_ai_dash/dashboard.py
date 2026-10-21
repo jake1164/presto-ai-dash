@@ -560,7 +560,7 @@ DEVICE_DETAIL_KEYS = ("id", "tiles", "lines")
 DEVICE_TILE_KEYS = ("label", "value", "tone")
 # The top-level keys the device reads, and the keys inside "alerts".
 DEVICE_TOP_KEYS = ("sources", "card_order", "updated_at", "display", "alerts")
-DEVICE_ALERT_KEYS = ("quiet", "sound", "pop_to_top", "enabled")
+DEVICE_ALERT_KEYS = ("quiet", "sound", "pop_to_top", "enabled", "mute_hours")
 
 
 def _pick(value, keys):

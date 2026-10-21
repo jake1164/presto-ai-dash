@@ -8,9 +8,11 @@ import secrets
 import tomllib
 from urllib.parse import urlsplit
 
-from .alert_policy import (DEFAULT_CRITICAL_PERCENT, DEFAULT_QUIET_END,
-                           DEFAULT_QUIET_START, DEFAULT_WARNING_PERCENT,
-                           is_quiet, parse_clock, validate_thresholds)
+from .alert_policy import (DEFAULT_CRITICAL_PERCENT, DEFAULT_MUTE_HOURS,
+                           DEFAULT_QUIET_END, DEFAULT_QUIET_START,
+                           DEFAULT_WARNING_PERCENT, is_quiet, parse_clock,
+                           usable_mute_hours, validate_mute_hours,
+                           validate_thresholds)
 
 log = logging.getLogger(__name__)
 DEFAULTS = {
@@ -22,11 +24,14 @@ DEFAULTS = {
     "admin": {"enabled": False, "port": 8788, "token": "", "key_file": "",
               "host": "127.0.0.1", "allowed_hosts": []},
     "display": {"overflow_rows": 1},
+    # The sound is off until the user turns it on: a desk device must never
+    # beep unannounced. A value the user already stored (in the database or
+    # in dash.toml) is respected; only the unset default is off.
     "alerts": {"enabled": True,
                "warning_percent": 80, "critical_percent": 95,
-               "sound": True, "quiet_hours": False,
+               "sound": False, "quiet_hours": False,
                "quiet_start": "22:00", "quiet_end": "07:00",
-               "pop_to_top": True},
+               "pop_to_top": True, "mute_hours": DEFAULT_MUTE_HOURS},
     "sources": {
         "fake": {"enabled": True, "scenario_interval": 20},
         "ollama": {"enabled": False, "base_url": "http://localhost:11434",
@@ -213,7 +218,8 @@ def ingest_enabled(config, stored=None, environ=None):
 
 # The alert settings the admin page can change, and the file can set.
 ALERT_KEYS = ("enabled", "warning_percent", "critical_percent", "sound",
-              "quiet_hours", "quiet_start", "quiet_end", "pop_to_top")
+              "quiet_hours", "quiet_start", "quiet_end", "pop_to_top",
+              "mute_hours")
 
 
 def alert_base_settings(config):
@@ -255,6 +261,7 @@ def alert_settings(config, stored=None, now=None):
     for key in ("enabled", "sound", "quiet_hours", "pop_to_top"):
         if type(values[key]) is not bool:
             values[key] = DEFAULTS["alerts"][key]
+    values["mute_hours"] = usable_mute_hours(values["mute_hours"])
     for key in ("quiet_start", "quiet_end"):
         if parse_clock(values[key]) is None:
             values[key] = DEFAULTS["alerts"][key]
@@ -358,6 +365,10 @@ def load_config(path=None):
     for key in ("quiet_start", "quiet_end"):
         if parse_clock(alerts.get(key)) is None:
             raise ConfigError("alerts.%s must be a time of day as HH:MM" % key)
+    try:
+        validate_mute_hours(alerts.get("mute_hours"))
+    except ValueError as exc:
+        raise ConfigError("alerts: %s" % exc) from exc
     token = config["daemon"]["shared_token"]
     if token and (not token.isascii() or any(char.isspace() for char in token)):
         raise ConfigError("daemon.shared_token must be ASCII without whitespace")

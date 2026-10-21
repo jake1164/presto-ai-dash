@@ -23,8 +23,9 @@ or changes anything on a provider account. See [Privacy](privacy/index.md).
   surface, and how many tokens the local session logs account for.
 - **Tells you why a number is missing or old** instead of showing a confident
   zero. Every number says where it came from.
-- **Alerts you**: the LED and a short sound when a service gets worse, with
-  per-service thresholds and quiet hours.
+- **Alerts you**: the LED, and a short sound when a service gets worse, with
+  per-service thresholds and quiet hours. The sound is off until you turn it
+  on.
 
 ## How it works
 

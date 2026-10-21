@@ -85,9 +85,11 @@ documented in [configuration](configuration.md#alerts).
 
 The device payload carries two more top-level objects: `display`, which holds
 the Home overflow strip setting, and `alerts`, which holds `quiet` (the
-daemon's own quiet-hours flag), `sound` and `pop_to_top`. The device trusts
-only a real boolean and falls back to sound on, quiet off and pop-to-top on
-for anything else.
+daemon's own quiet-hours flag), `sound`, `pop_to_top`, `enabled` and
+`mute_hours` (how long a long-press mute lasts, in hours). The device trusts
+only a real boolean and a whole number of hours, and falls back to sound
+off, quiet off, pop-to-top on and a four-hour mute for anything else: a
+broken payload can never make the device chirp.
 
 The Presto Home renderer puts quota accounts first and groups their reported
 windows under one account heading, with separate stacked bars and actual period

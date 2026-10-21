@@ -107,7 +107,7 @@ services*.
 | --- | --- |
 | Home display | The overflow strip setting |
 | Remote reports | The ingest switch, the collector download, the plain-HTTP warning |
-| Alerts | The master switch, the thresholds, the sound switch, quiet hours, pop to top |
+| Alerts | The master switch, the thresholds, the sound switch (off until you turn it on), quiet hours, pop to top, the mute length |
 | Effective daemon configuration | Read-only: every value and where it came from |
 | About and help | What the sources are, the order note, where the logs and the diagnostics commands are |
 
@@ -155,6 +155,22 @@ never run from a poll and never run from a remote request.
 Every value that comes from the daemon is written with `textContent`, so a
 report can never become markup. The page loads nothing from a third party:
 no fonts, no scripts, no analytics.
+
+## The help links
+
+A small **?** beside each tab, each section and each notable setting opens
+the documentation site in a new tab, at the page and the heading that
+explain that part of the page.
+
+The links are plain anchors, so they work with the keyboard and without
+JavaScript. They carry nothing identifying: the URL has no query string, no
+install id, no host, no token and no account, and the page's own address is
+never sent as a Referer. The links point at the public documentation site,
+so nothing about your installation leaves the machine.
+
+Everything the page explains is still written on the page: the help links
+are an extra, not a replacement. The **Settings -> About and help** section
+says so too.
 
 ## See also
 

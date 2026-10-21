@@ -138,6 +138,10 @@ def effective_settings(config, storage=None, config_path=None, environ=None, now
     add("Alert critical percent", settings["critical_percent"],
         alert_origin("critical_percent"))
     add("Alert sound", "on" if settings["sound"] else "off", alert_origin("sound"))
+    add("Mute length (hours)",
+        "%d (until pressed again)" % settings["mute_hours"]
+        if settings["mute_hours"] == 0 else settings["mute_hours"],
+        alert_origin("mute_hours"))
     add("Quiet hours",
         ("on %s-%s" % (settings["quiet_start"], settings["quiet_end"])
          if settings["quiet_hours"] else "off"),

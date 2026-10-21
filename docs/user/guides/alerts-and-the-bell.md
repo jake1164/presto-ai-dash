@@ -78,6 +78,17 @@ pop to top live in the admin page, under **Settings -> Alerts**. Each
 service can override the master and the thresholds in its own card on the
 **Services** tab.
 
+**The sound is off until you turn it on.** The *Sound on a new warning* box
+is unticked by default, so a new install is silent and the bell still works.
+Tick the box (or set `sound = true` in `dash.toml`) to let the Presto chirp.
+A value you already stored is respected: only the unset default is off.
+
+**The mute ends by itself.** A long press on the Presto mutes the sound for
+`mute_hours` hours (four by default, and 0 means "until you press again").
+A chip in the bottom-right corner says how long is left: `MUTED 3H`,
+`MUTED 45M`, or `MUTED` alone. The mute ends silently, a restart clears it,
+and changing the length applies to the next mute.
+
 See [Alert statuses and thresholds](../concepts/alerts.md) for what raises
 an alert in the first place, and
 [Configuration keys](../reference/configuration.md) for the file and

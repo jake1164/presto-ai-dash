@@ -47,6 +47,10 @@ LED_DIM_WHEN_MUTED = True
 
 # --- Sound -----------------------------------------------------------------
 # Piezo on GPIO 43. Sound is quiet by design.
+# This is the hardware permission only: the Presto also chirps only when the
+# daemon's alert settings say so (the admin page's "Sound on a new warning",
+# which is off until it is turned on). The audible result is the AND of the
+# two: both must be on.
 SOUND_ENABLED = True
 SOUND_VOLUME = 0.15          # duty cycle 0.0-1.0
 CHIRP_HZ = 880               # short chirp: new warning

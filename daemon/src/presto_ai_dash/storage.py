@@ -14,7 +14,8 @@ from .sources import source_type
 # The alert settings the admin page can store. Each one is stored under
 # its own name in configuration_meta.
 ALERT_SETTING_KEYS = ("enabled", "warning_percent", "critical_percent", "sound",
-                      "quiet_hours", "quiet_start", "quiet_end", "pop_to_top")
+                      "quiet_hours", "quiet_start", "quiet_end", "pop_to_top",
+                      "mute_hours")
 
 # The per-service alert settings live in configuration_meta too, under
 # "alerts.service.<instance id>". They are not source configuration fields:
@@ -438,6 +439,14 @@ class Storage:
                     values[key] = int(text)
                 except ValueError:
                     continue
+            elif key == "mute_hours":
+                try:
+                    hours = int(text)
+                except ValueError:
+                    continue
+                if hours < 0 or hours > 48:
+                    continue
+                values[key] = hours
             elif key in ("enabled", "sound", "quiet_hours", "pop_to_top"):
                 if text not in ("1", "0"):
                     continue

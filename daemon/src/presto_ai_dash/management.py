@@ -11,7 +11,8 @@ from uuid import uuid4
 
 from . import __version__
 from .alert_policy import (apply_threshold, parse_clock, resolve_alert_settings,
-                           threshold_status, validate_thresholds)
+                           threshold_status, validate_mute_hours,
+                           validate_thresholds)
 from .clients import ClientRegistry
 from .codex_login import CodexLoginManager
 from .collectors import claude_statusline
@@ -287,6 +288,10 @@ class SourceConfiguration:
         for key in ("quiet_start", "quiet_end"):
             if parse_clock(data[key]) is None:
                 raise ValueError("alerts.%s must be a time of day as HH:MM" % key)
+        try:
+            validate_mute_hours(data["mute_hours"])
+        except ValueError as exc:
+            raise ValueError("alerts.mute_hours must be an integer in range 0..48") from exc
         base = alert_base_settings(self.config)
         changed = {}
         for key in ALERT_KEYS:
@@ -582,7 +587,8 @@ class SourceConfiguration:
         # alerts are on at all.
         payload["alerts"] = {"quiet": settings["quiet"], "sound": settings["sound"],
                              "pop_to_top": settings["pop_to_top"],
-                             "enabled": settings["enabled"]}
+                             "enabled": settings["enabled"],
+                             "mute_hours": settings["mute_hours"]}
         return payload
 
     def card_detail(self, card_id):

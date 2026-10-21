@@ -28,6 +28,70 @@
   // list does not collapse under the reader.
   const expanded = new Set();
 
+  // -- help links ------------------------------------------------------------
+
+  // The documentation site. One base URL and one map: every help link is
+  // built from these two, so there is nowhere else to change a link and no
+  // URL anywhere else in the page.
+  const DOCS_BASE = "https://jake1164.github.io/presto-ai-dash/";
+  const HELP = {
+    "tab-services": {page: "guides/admin-page.md", anchor: "services"},
+    "tab-status": {page: "guides/admin-page.md", anchor: "status"},
+    "tab-settings": {page: "guides/admin-page.md", anchor: "settings"},
+    "services": {page: "guides/admin-page.md", anchor: "adding-and-editing-an-account"},
+    "add-source": {page: "guides/admin-page.md", anchor: "adding-and-editing-an-account"},
+    "account": {page: "guides/admin-page.md", anchor: "the-accounts-own-actions"},
+    "status": {page: "troubleshooting/daemon-offline.md", anchor: "7-the-daemons-own-view"},
+    "settings-panel": {page: "guides/admin-page.md", anchor: "settings"},
+    "home-display": {page: "guides/home-display.md", anchor: "the-setting"},
+    "remote-reports": {page: "concepts/remote-reports.md", anchor: "turning-it-on"},
+    "remote-token": {page: "guides/remote-collectors.md", anchor: "rotating-and-revoking"},
+    "alerts": {page: "guides/alerts-and-the-bell.md", anchor: "the-settings-behind-it"},
+    "alert-thresholds": {page: "concepts/alerts.md", anchor: "what-raises-an-alert"},
+    "alert-sound": {page: "concepts/alerts.md", anchor: "the-sound"},
+    "alert-mute": {page: "concepts/alerts.md", anchor: "the-mute-that-expires"},
+    "effective-config": {page: "reference/configuration.md", anchor: "where-each-value-comes-from"},
+    "about": {page: "getting-started/what-it-does.md", anchor: "what-it-collects"},
+    "claude-export": {page: "guides/claude.md", anchor: "the-terminal-status-line"},
+    "source-claude": {page: "guides/claude.md", anchor: "the-terminal-status-line"},
+    "source-codex": {page: "guides/codex.md", anchor: "set-it-up"},
+    "source-opencode-go": {page: "guides/opencode-go.md", anchor: "set-it-up"},
+    "source-ollama-cloud": {page: "guides/ollama-cloud.md", anchor: "set-it-up"},
+    "source-ollama": {page: "guides/ollama.md", anchor: "set-it-up"},
+    "source-litellm": {page: "guides/litellm.md", anchor: "set-it-up"},
+    "source-fake": {page: "getting-started/add-the-first-source.md",
+                     anchor: "the-first-source-pick-something-local"},
+  };
+
+  function helpLink(key, label) {
+    // A plain anchor: it works with JavaScript, with the keyboard and with
+    // a middle click. Nothing identifying goes into the URL - no query
+    // string, no install id, no host, no token, no account - and the page's
+    // own address is never sent as a Referer.
+    const entry = HELP[key];
+    if (!entry) return null;
+    const link = document.createElement("a");
+    link.className = "help-link";
+    link.href = DOCS_BASE + entry.page.replace(/\.md$/, "/") + "#" + entry.anchor;
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+    link.referrerPolicy = "no-referrer";
+    link.textContent = "?";
+    link.setAttribute("aria-label", "Help: " + label);
+    link.title = "Help: " + label;
+    return link;
+  }
+
+  function mountHelp() {
+    // Every placeholder in the page gets its link. The parts the page
+    // builds itself call helpLink directly.
+    for (const slot of document.querySelectorAll("[data-help]")) {
+      const label = slot.dataset.helpLabel || slot.dataset.help;
+      const link = helpLink(slot.dataset.help, label);
+      if (link) slot.append(link);
+    }
+  }
+
   // -- small helpers --------------------------------------------------------
 
   function el(tag, className, text) {
@@ -205,7 +269,8 @@
     element("alert-master").checked = masterOn;
     element("alert-warning").value = String(state.warning_percent ?? 80);
     element("alert-critical").value = String(state.critical_percent ?? 95);
-    element("alert-sound").checked = state.sound !== false;
+    element("alert-sound").checked = state.sound === true;
+    element("alert-mute-hours").value = String(state.mute_hours ?? 4);
     element("alert-quiet").checked = !!state.quiet_hours;
     element("alert-quiet-start").value = state.quiet_start ?? "22:00";
     element("alert-quiet-end").value = state.quiet_end ?? "07:00";
@@ -252,6 +317,15 @@
     const value = Number(raw);
     return Number.isFinite(value) ? value : fallback;
   }
+  function muteHoursValue() {
+    // The mute length is a whole number of hours, from 0 (until the user
+    // presses again) to 48. Anything else is refused in words.
+    const raw = String(element("alert-mute-hours").value || "").trim();
+    if (raw === "") return null;
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < 0 || value > 48) return undefined;
+    return value;
+  }
   function alertValues() {
     return {
       enabled: element("alert-master").checked,
@@ -262,11 +336,21 @@
       quiet_start: element("alert-quiet-start").value || "00:00",
       quiet_end: element("alert-quiet-end").value || "00:00",
       pop_to_top: element("alert-pop").checked,
+      mute_hours: muteHoursValue(),
     };
   }
   async function saveAlerts() {
     if (busy) { renderAlerts(); return; }
     const wanted = alertValues();
+    if (wanted.mute_hours === null) {
+      message("The mute length must be a whole number of hours between 0 and 48.", true);
+      renderAlerts();
+      return;
+    }
+    if (wanted.mute_hours === undefined) {
+      message("The mute length must be a whole number of hours between 0 and 48.", true);
+      return;
+    }
     const wasOn = masterOn;
     busy = true;
     try {
@@ -480,6 +564,12 @@
       type?.id === "codex" ? "Reads Codex subscription quotas using your ChatGPT login in Codex. Leave both paths blank for automatic discovery and the default profile. Separate accounts need separate Codex profile directories. OAuth stays with Codex; no pay-per-use API key is needed. Browser and device-code sign-in, cancellation, and logout are available through the Codex login controls." :
       type?.id === "claude" ? "Claude Code exports 5h/weekly subscription quotas after normal terminal responses. Save this source, then set up its exporter below. Readings go straight to the database; existing status-line output is preserved. No API key is needed. Idle readings become stale; the VS Code panel does not run the status line, but the optional usage cache reader reads the numbers Claude Code caches on disk for its /usage dialog." :
       type?.id === "fake" ? "Synthetic demo/test data. Disable it before enabling a live source." : "";
+    // The guide for the source type, beside the type chooser.
+    const guide = element("source-type-help");
+    guide.replaceChildren();
+    const guideLink = helpLink("source-" + (type?.id || "fake"),
+                               "The guide for " + (type?.name || "this source"));
+    if (guideLink) guide.append(guideLink);
     if (!type) return;
     for (const field of type.fields) {
       const label = document.createElement("label");
@@ -841,6 +931,9 @@
     const button = document.createElement("button"); button.textContent = "Edit";
     button.dataset.action = "edit";
     button.addEventListener("click", () => { if (!busy) openEditor(source); });
+    // The help for this account's own actions.
+    const cardHelp = helpLink("account", "Account actions");
+    if (cardHelp) head.append(cardHelp);
     head.append(toggle, handle, enabledLabel, ordering, button);
 
     const detail = document.createElement("div");
@@ -878,6 +971,9 @@
         finally { busy = false; setup.disabled = false; }
       });
       detail.append(setup);
+      // The guide for the Claude export, beside the button that sets it up.
+      const exportHelp = helpLink("claude-export", "The Claude export");
+      if (exportHelp) detail.append(exportHelp);
     }
     if (source.ingest) {
       const reported = document.createElement("p"); reported.className = "note";
@@ -918,6 +1014,9 @@
         controls.append(revoke);
       }
       detail.append(controls);
+      // The guide for the remote token, beside the buttons that manage it.
+      const tokenHelp = helpLink("remote-token", "Remote tokens");
+      if (tokenHelp) detail.append(tokenHelp);
       const reveal = revealToken(source);
       if (reveal) detail.append(reveal);
     }
@@ -1206,7 +1305,8 @@
     finally { busy = false; renderDisplay(); }
   });
   for (const id of ["alert-master", "alert-warning", "alert-critical", "alert-sound",
-    "alert-quiet", "alert-quiet-start", "alert-quiet-end", "alert-pop"]) {
+    "alert-quiet", "alert-quiet-start", "alert-quiet-end", "alert-pop",
+    "alert-mute-hours"]) {
     element(id).addEventListener("change", saveAlerts);
   }
   element("add-source").addEventListener("click", () => { if (!busy) { openEditor(); message(""); } });  element("close-editor").addEventListener("click", () => { if (!busy) closeEditor(); });
@@ -1275,4 +1375,5 @@
     } finally { busy = false; element("unlock").disabled = false; }
   }
   restoreLogin();
+  mountHelp();
 })();

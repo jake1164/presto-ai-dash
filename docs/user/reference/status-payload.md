@@ -16,7 +16,8 @@ the host-side preview and anything else you point at it.
   "cards": [ ... ],
   "sources": [ ... ],
   "display": {"overflow_rows": 1},
-  "alerts": {"quiet": false, "sound": true, "pop_to_top": true, "enabled": true}
+  "alerts": {"quiet": false, "sound": false, "pop_to_top": true, "enabled": true,
+             "mute_hours": 4}
 }
 ```
 
@@ -30,7 +31,7 @@ the host-side preview and anything else you point at it.
 | `cards` | The Home card, then one card per enabled account |
 | `sources` | One entry per enabled account, with its own measurements |
 | `display` | The Home display settings |
-| `alerts` | The quiet flag, the sound switch, the pop-to-top switch and the master switch |
+| `alerts` | The quiet flag, the sound switch, the pop-to-top switch, the master switch and the mute length in hours |
 
 ## One card
 

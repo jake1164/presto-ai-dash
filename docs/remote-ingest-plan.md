@@ -15,7 +15,7 @@ not start a phase until the previous one passes its tests.
 | 5 | Claude activity from local session logs (VS Code panel and CLI); 5b Stop hook and 5c remote push optional | Done (2026-10-19) |
 | 5d | Claude usage cache reader: quota for VS Code panel users from `~/.claude.json` | Done (2026-10-20) |
 | 6 | Codex over push | Optional |
-| 7 | Documentation site on GitHub Pages (7a site and user docs, 7b developer docs and the adding-a-source guide and template, 7c in-app help links) | 7a and 7b done (2026-10-20); 7c not started |
+| 7 | Documentation site on GitHub Pages (7a site and user docs, 7b developer docs and the adding-a-source guide and template, 7c in-app help links) | 7a, 7b and 7c done (2026-10-21) |
 | 8 | OpenTelemetry activity detail | Optional, only if asked |
 | 9 | Banked reset credits (Codex) | Done (2026-10-20) |
 
@@ -951,11 +951,25 @@ In order (item 0 is an urgent defect and goes first):
      cannot last. The expiry is the daemon's or the device's, decided when it
      is built (the device has no wall clock, so a duration from the moment of
      muting is simplest).
+     **Done 2026-10-21.** The device counts the mute: the daemon sends
+     `mute_hours` (0..48, default 4, admin-stored > dash.toml > default) and
+     the device measures it with its own tick counter, wrap-safe, so the
+     expiry is the device's. A long press starts the mute, a long press while
+     muted unmutes at once, the expiry lifts it silently (the statuses were
+     tracked while it was on, so nothing chirps for an alarm that began
+     during the mute), a restart clears it, and changing `mute_hours` while a
+     mute runs applies to the next mute. The indicator is a small chip in the
+     bottom-right corner of Home and of every card - `MUTED 3H`, `MUTED 45M`,
+     or `MUTED` alone when the mute has no end - in a fixed slot that never
+     covers the title, the bell, the status chips, the STALE line or the
+     dots. The dimmed accent stays.
    - **Only if needed: per-window-kind thresholds.** One pair per service
      applies to all of its windows. If a short window (Claude's 5 hours) at 80%
      is routine and keeps alerting, add a separate pair for short and long
      windows rather than muting the service.
    **Done 2026-10-20 (the base M12; the follow-ons above are still open).**
+   (M12b, M12c and the mute that expires are done; only the optional
+   per-window-kind thresholds are still open.)
    The decisions are as taken: warning (status `near_limit`, yellow) at 80%,
    critical (status `critical`, red) at 95%, `rate_limited` at 100% as
    before, both thresholds settable in 1..100 with the warning below the
@@ -993,8 +1007,10 @@ In order (item 0 is an urgent defect and goes first):
    follow `overflow_rows`: the admin-stored value beats `dash.toml`
    `[alerts]`, which beats the default; there is no environment variable.
    The payload gained `"alerts": {"quiet": bool, "sound": bool,
-   "pop_to_top": bool}`, and the device validates every key and falls back
-   to sound on, quiet off and pop-to-top on.
+   "pop_to_top": bool, "mute_hours": int}`, and the device validates every key
+   and falls back to sound off, quiet off and pop-to-top on (the sound is off
+   until the user turns it on: a desk device must not beep unannounced, and
+   the mute length falls back to four hours).
 1a. **Home overflow strip (decided 2026-10-20, runs before Phase 5d).** The
    Home list shows full rows in the saved order until the space runs out. The
    rows that are not fully visible appear as names, each with a status marker,
@@ -1250,6 +1266,24 @@ In order (item 0 is an urgent defect and goes first):
      install id, names, hosts, tokens or accounts. A test fails if an admin
      help link points to a page or anchor that does not exist in
      `docs/user/`. The Settings tab says that Help opens the public docs site.
+     **Done 2026-10-21.** One base URL constant and one map (help key ->
+     page and anchor) in `web/admin.js`; every link is a plain anchor with
+     `target="_blank"`, `rel="noopener noreferrer"`, `referrerpolicy=
+     "no-referrer"`, an `aria-label` like "Help: Alerts", a visible focus
+     ring and a 24-pixel target. The links cover the three tabs, the
+     Services tab and its account cards, the per-source setup (the Claude
+     export, the remote token and the guide of every source type in the Add
+     source form), the Status tab and every Settings section, including the
+     sound and the mute. The URL carries nothing identifying: no query
+     string, no install id, no host, no token, no account. A test
+     (`daemon/tests/test_admin_help_links.py`) reads the map out of
+     `admin.js` and checks every page and anchor with a pure-Python slug
+     function; `tools/check_doc_anchors.py` checks the same anchors in the
+     built site. The page was checked in a real browser against a throwaway
+     admin server on a temporary database: every link opens the right target,
+     the keyboard reaches them, there is no horizontal overflow at 390
+     pixels, and the sound and the mute length behave. The in-page
+     explanations all stay.
    - **Parked (author, 2026-10-20): usage tracking.** Not part of this phase.
      Recorded for later: any analytics goes only on the website, never in the
      app or daemon, and a link marker such as `?app=true` (or `?ref=admin`)

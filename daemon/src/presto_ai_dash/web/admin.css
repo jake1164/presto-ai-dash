@@ -110,8 +110,22 @@ main > .panel { min-width: 0; }
 .problem { border-left: 2px solid #f87171; padding-left: 12px; }
 .problem strong { color: #ffb8c8; }
 
-/* Settings: one section open, the rest folded away. */
-.setting { border: 1px solid #2a3b53; border-radius: 10px; margin-top: 12px; background: #121c2e; }
+/* The help links: a small "?" that opens the documentation site in a new
+   tab. It is a plain anchor, at least 24 pixels tall so it can be tapped at
+   phone width, and it has a visible focus ring. */
+.help-slot { display: inline-flex; align-items: center; }
+.help-link { display: inline-flex; align-items: center; justify-content: center;
+  min-width: 24px; min-height: 24px; margin-left: 6px; padding: 0 4px;
+  border: 1px solid #3c5a78; border-radius: 12px; color: #9cc7f0;
+  text-decoration: none; font-size: .8rem; line-height: 1; }
+.help-link:hover { color: #e3edf8; border-color: #7ce6da; }
+.help-link:focus, .help-link:focus-visible { outline: 2px solid #7ce6da;
+  outline-offset: 3px; color: #e3edf8; }
+.title-actions { display: inline-flex; align-items: center; gap: 4px; }
+.field-with-help { display: flex; align-items: center; gap: 4px; }
+.field-with-help > label { flex: 1 1 auto; }
+
+/* Settings: one section open, the rest folded away. */.setting { border: 1px solid #2a3b53; border-radius: 10px; margin-top: 12px; background: #121c2e; }
 .setting > summary { cursor: pointer; padding: 14px 16px; display: flex; align-items: center;
   gap: 12px; flex-wrap: wrap; min-height: 48px; }
 .setting > summary::marker { color: #7ce6da; }

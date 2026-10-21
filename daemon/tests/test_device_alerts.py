@@ -73,6 +73,11 @@ class DeviceAlertTests(unittest.IsolatedAsyncioTestCase):
         self.app.client.fetch_async.return_value = payload
         await self.app.poll_once()
 
+    def loud(self, statuses=None):
+        """A payload with the sound on: the chirp tests need to hear it."""
+        return self.payload(statuses, alerts={"quiet": False, "sound": True,
+                                              "pop_to_top": True, "enabled": True})
+
     def led(self):
         self.leds = []
         self.app._update_leds()
@@ -90,25 +95,25 @@ class DeviceAlertTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.tones, [])
 
     async def test_a_service_that_gets_worse_chirps_once(self):
-        await self.poll(self.payload(["ok", "ok", "ok"]))
-        await self.poll(self.payload(["warning", "ok", "ok"]))
+        await self.poll(self.loud(["ok", "ok", "ok"]))
+        await self.poll(self.loud(["warning", "ok", "ok"]))
         self.assertEqual(self.chirps, 1)
         # The warning persists: no second chirp.
-        await self.poll(self.payload(["warning", "ok", "ok"]))
+        await self.poll(self.loud(["warning", "ok", "ok"]))
         self.assertEqual(self.chirps, 1)
 
     async def test_a_second_service_chirps_while_the_first_is_critical(self):
-        await self.poll(self.payload(["ok", "ok", "ok"]))
-        await self.poll(self.payload(["critical", "ok", "ok"]))
+        await self.poll(self.loud(["ok", "ok", "ok"]))
+        await self.poll(self.loud(["critical", "ok", "ok"]))
         # A critical service plays a double chirp: two tones.
         self.assertEqual(self.chirps, 2)
-        await self.poll(self.payload(["critical", "warning", "ok"]))
+        await self.poll(self.loud(["critical", "warning", "ok"]))
         self.assertEqual(self.chirps, 3)
 
     async def test_a_recovery_is_silent(self):
-        await self.poll(self.payload(["ok", "ok", "ok"]))
-        await self.poll(self.payload(["critical", "ok", "ok"]))
-        await self.poll(self.payload(["ok", "ok", "ok"]))
+        await self.poll(self.loud(["ok", "ok", "ok"]))
+        await self.poll(self.loud(["critical", "ok", "ok"]))
+        await self.poll(self.loud(["ok", "ok", "ok"]))
         self.assertEqual(self.chirps, 2)
 
     async def test_quiet_hours_silence_the_sound(self):
@@ -154,14 +159,45 @@ class DeviceAlertTests(unittest.IsolatedAsyncioTestCase):
     async def test_a_junk_alert_setting_is_ignored(self):
         await self.poll(self.payload(["ok", "ok", "ok"], alerts="nonsense"))
         self.assertFalse(self.app.quiet)
-        self.assertTrue(self.app.alert_sound)
+        self.assertFalse(self.app.alert_sound)
         self.assertTrue(self.app.pop_to_top)
 
     async def test_a_missing_alert_setting_keeps_the_defaults(self):
         await self.poll(self.payload(["ok", "ok", "ok"]))
         self.assertFalse(self.app.quiet)
-        self.assertTrue(self.app.alert_sound)
+        self.assertFalse(self.app.alert_sound)
         self.assertTrue(self.app.pop_to_top)
+
+    async def test_the_sound_is_off_until_the_daemon_says_otherwise(self):
+        """No payload, a junk payload or an old daemon: the device stays silent."""
+        await self.poll(self.payload(["ok", "ok", "ok"]))
+        self.assertFalse(self.app.alert_sound)
+        await self.poll(self.payload(["critical", "ok", "ok"],
+                                     alerts={"quiet": False, "sound": False,
+                                             "pop_to_top": True}))
+        self.assertEqual(self.tones, [], "a silent setting must not chirp")
+
+    async def test_the_cue_is_played_only_when_the_sound_is_on(self):
+        await self.poll(self.payload(["ok", "ok", "ok"],
+                                     alerts={"quiet": False, "sound": True,
+                                             "pop_to_top": True}))
+        await self.poll(self.payload(["warning", "ok", "ok"],
+                                     alerts={"quiet": False, "sound": True,
+                                             "pop_to_top": True}))
+        self.assertEqual(self.chirps, 1, "a warning chirps once")
+        await self.poll(self.payload(["critical", "ok", "ok"],
+                                     alerts={"quiet": False, "sound": True,
+                                             "pop_to_top": True}))
+        self.assertEqual(self.chirps, 3, "a critical chirps twice")
+
+    async def test_the_sound_being_turned_off_stops_the_cue(self):
+        await self.poll(self.payload(["ok", "ok", "ok"],
+                                     alerts={"quiet": False, "sound": True,
+                                             "pop_to_top": True}))
+        await self.poll(self.payload(["warning", "ok", "ok"],
+                                     alerts={"quiet": False, "sound": False,
+                                             "pop_to_top": True}))
+        self.assertEqual(self.tones, [])
 
     # -- the pop to the top -------------------------------------------------
 

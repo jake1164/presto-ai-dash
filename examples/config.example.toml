@@ -54,8 +54,10 @@ warning_percent = 80
 # A quota window at this percentage makes the service "critical" (red).
 # It must be above the warning percent. At 100% a service is rate limited.
 critical_percent = 95
-# Sound a short cue when a service gets worse.
-sound = true
+# Sound a short cue when a service gets worse. Off by default: a desk device
+# must not beep unannounced. Turn it on here, or in the admin page's Alerts
+# section, which wins over this file.
+sound = false
 # Be silent and dim the light during the quiet window. The times are the
 # local time of the machine the daemon runs on.
 quiet_hours = false
@@ -63,6 +65,10 @@ quiet_start = "22:00"
 quiet_end = "07:00"
 # Let the Presto's Home list scroll to a service that has just got worse.
 pop_to_top = true
+# How long a long-press mute on the Presto lasts, in hours. 0 means it
+# lasts until you press again. The screen shows a MUTED chip with the
+# time left.
+mute_hours = 4
 
 # --- Sources ---------------------------------------------------------------
 # Fake data is enabled by default. Disable it before enabling a live source so

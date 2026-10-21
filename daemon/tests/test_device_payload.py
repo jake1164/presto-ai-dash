@@ -174,8 +174,8 @@ class DevicePayloadTests(unittest.TestCase):
         """The display and alert settings travel with the payload."""
         payload = dict(self.slim)
         payload["display"] = {"overflow_rows": 1}
-        payload["alerts"] = {"quiet": False, "sound": True, "pop_to_top": True,
-                             "enabled": True}
+        payload["alerts"] = {"quiet": False, "sound": False, "pop_to_top": True,
+                             "enabled": True, "mute_hours": 4}
         self.assertLessEqual(size(payload), BUDGET_BYTES,
                              "device payload %d bytes" % size(payload))
         self.assertLessEqual(size(payload) / len(payload["sources"]), BUDGET_PER_SOURCE)
@@ -307,6 +307,7 @@ class WhitelistMatchesTheDeviceTests(unittest.TestCase):
                      ("source", "quota"), ("payload", "sources"), ("payload", "display"),
                      ("payload", "alerts"), ("alerts", "quiet"), ("alerts", "sound"),
                      ("alerts", "pop_to_top"), ("alerts", "enabled"),
+                     ("alerts", "mute_hours"),
                      ("source", "alerts"), ("source", "marks"),
                      ("data", "title"), ("data", "tiles"), ("detail", "tiles"),
                      ("detail", "lines"), ("item", "label"), ("item", "value"),
@@ -314,7 +315,7 @@ class WhitelistMatchesTheDeviceTests(unittest.TestCase):
             self.assertIn(pair, found)
 
     def test_the_alert_settings_are_on_the_whitelist(self):
-        for key in ("quiet", "sound", "pop_to_top", "enabled"):
+        for key in ("quiet", "sound", "pop_to_top", "enabled", "mute_hours"):
             self.assertIn(key, DEVICE_ALERT_KEYS)
         self.assertIn("alerts", DEVICE_TOP_KEYS)
         self.assertIn("alerts", DEVICE_SOURCE_KEYS)
@@ -366,8 +367,9 @@ class ManagerServesTheDeviceViewTests(unittest.TestCase):
         base.setUp()
         self.addCleanup(base.tearDown)
         payload = base.manager.status_payload()
-        self.assertEqual(payload["alerts"], {"quiet": False, "sound": True,
-                                              "pop_to_top": True, "enabled": True})
+        self.assertEqual(payload["alerts"], {"quiet": False, "sound": False,
+                                              "pop_to_top": True, "enabled": True,
+                                              "mute_hours": 4})
 
 
 if __name__ == "__main__":

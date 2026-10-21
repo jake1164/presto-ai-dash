@@ -26,15 +26,22 @@
     <div id="tablist" class="tablist" role="tablist" aria-label="Sections">
       <button type="button" role="tab" id="tab-services" data-tab="services"
         aria-controls="panel-services" aria-selected="true" tabindex="0">Services</button>
+      <span class="help-slot" data-help="tab-services" data-help-label="Services tab"></span>
       <button type="button" role="tab" id="tab-status" data-tab="status"
         aria-controls="panel-status" aria-selected="false" tabindex="-1">Status</button>
+      <span class="help-slot" data-help="tab-status" data-help-label="Status tab"></span>
       <button type="button" role="tab" id="tab-settings" data-tab="settings"
         aria-controls="panel-settings" aria-selected="false" tabindex="-1">Settings</button>
+      <span class="help-slot" data-help="tab-settings" data-help-label="Settings tab"></span>
     </div>
 
     <section class="panel" role="tabpanel" id="panel-services" aria-labelledby="tab-services" tabindex="0">
       <p id="services-alerts-banner" class="banner" hidden>Alerts are off for all services</p>
-      <div class="section-title"><h2>Your services</h2><button id="add-source">Add source</button></div>
+      <div class="section-title">
+        <h2>Your services <span class="help-slot" data-help="services" data-help-label="Your services"></span></h2>
+        <span class="title-actions"><button id="add-source">Add source</button>
+          <span class="help-slot" data-help="add-source" data-help-label="Adding a source"></span></span>
+      </div>
       <p>Manage accounts, keys, and refresh settings here. Changes are saved in the database.
         Disable demo data before enabling a live source.</p>
       <p class="note">Drag an account by its grip to change the order, or use the arrow buttons.
@@ -46,7 +53,7 @@
     </section>
 
     <section class="panel" role="tabpanel" id="panel-status" aria-labelledby="tab-status" tabindex="0" hidden>
-      <div class="section-title"><h2>Status</h2><p class="note" id="status-updated">Not loaded yet</p></div>
+      <div class="section-title"><h2>Status <span class="help-slot" data-help="status" data-help-label="The Status tab"></span></h2><p class="note" id="status-updated">Not loaded yet</p></div>
       <p class="note">Everything here is read-only. It refreshes every 10 seconds while this tab is open and the browser tab is in the foreground.</p>
       <h3>Daemon</h3>
       <dl id="status-daemon" class="facts"></dl>
@@ -67,11 +74,13 @@
     </section>
 
     <section class="panel" role="tabpanel" id="panel-settings" aria-labelledby="tab-settings" tabindex="0" hidden>
-      <div class="section-title"><h2>Settings</h2></div>
+      <div class="section-title"><h2>Settings <span class="help-slot" data-help="settings-panel" data-help-label="The Settings tab"></span></h2></div>
       <p class="note">These settings apply to every service. Each section is collapsed except the first one.</p>
 
       <details class="setting" open>
-        <summary><span class="setting-title">Home display</span><span class="scope-badge">Applies to all services</span></summary>
+        <summary><span class="setting-title">Home display</span>
+          <span class="help-slot" data-help="home-display" data-help-label="Home display"></span>
+          <span class="scope-badge">Applies to all services</span></summary>
         <div class="setting-body">
           <label for="overflow-rows">Overflow strip lines</label>
           <select id="overflow-rows">
@@ -87,7 +96,9 @@
       </details>
 
       <details class="setting">
-        <summary><span class="setting-title">Remote reports</span><span class="scope-badge">Applies to all services</span></summary>
+        <summary><span class="setting-title">Remote reports</span>
+          <span class="help-slot" data-help="remote-reports" data-help-label="Remote reports"></span>
+          <span class="scope-badge">Applies to all services</span></summary>
         <div class="setting-body">
           <label class="check" id="ingest-label"><input id="ingest-enabled" type="checkbox"> Accept remote reports</label>
           <p id="ingest-lock" class="note" hidden>The DASH_INGEST_ENABLED environment variable controls
@@ -103,24 +114,42 @@
       </details>
 
       <details class="setting" id="alerts-setting">
-        <summary><span class="setting-title">Alerts</span><span class="scope-badge">Applies to all services</span>
+        <summary><span class="setting-title">Alerts</span>
+          <span class="help-slot" data-help="alerts" data-help-label="Alerts"></span>
+          <span class="scope-badge">Applies to all services</span>
           <span class="scope-badge" id="alert-master-summary">Alerts on for every service</span></summary>
         <div class="setting-body">
           <p id="alerts-banner" class="banner" hidden>Alerts are off for all services</p>
           <label class="check"><input id="alert-master" type="checkbox"> Alerts on for all services</label>
           <p id="alert-master-reason" class="note" hidden>Alerts are off for all services: no service chirps,
             lights up or scrolls Home to an alarm. Turn the master switch on to use the settings below.</p>
-          <label for="alert-warning">Warning percent</label>
+          <div class="field-with-help">
+            <label for="alert-warning">Warning percent</label>
+            <span class="help-slot" data-help="alert-thresholds" data-help-label="Alert thresholds"></span>
+          </div>
           <input id="alert-warning" type="number" min="1" max="100" step="1" inputmode="numeric">
           <p class="note">A service that has used this much of an allowance turns yellow.</p>
           <label for="alert-critical">Critical percent</label>
           <input id="alert-critical" type="number" min="1" max="100" step="1" inputmode="numeric">
           <p class="note">A service that has used this much turns red. It must be above the warning percent.
             At 100% a service is rate limited, as it always was.</p>
-          <label class="check"><input id="alert-sound" type="checkbox"> Sound on a new warning</label>
-          <p class="note">One chirp for a warning, two for a critical or rate-limited service. A warning
-            that persists does not chirp again, and a recovery is silent. Long-pressing the Presto mutes
-            the sound until you press again.</p>
+          <div class="field-with-help">
+            <label class="check"><input id="alert-sound" type="checkbox"> Sound on a new warning</label>
+            <span class="help-slot" data-help="alert-sound" data-help-label="Sound"></span>
+          </div>
+          <p class="note">Sound is off until you turn it on here: a desk device must not beep
+            unannounced. Tick this box to let the Presto chirp. One chirp for a warning, two for a
+            critical or rate-limited service. A warning that persists does not chirp again, and a
+            recovery is silent. Long-pressing the Presto mutes the sound for a few hours; the
+            screen shows how long is left.</p>
+          <div class="field-with-help">
+            <label for="alert-mute-hours">A long-press mute lasts (hours; 0 = until you press again)</label>
+            <span class="help-slot" data-help="alert-mute" data-help-label="The mute length"></span>
+          </div>
+          <input id="alert-mute-hours" type="number" min="0" max="48" step="1" inputmode="numeric">
+          <p class="note">How long the Presto stays muted after a long press, from 0 to 48 hours.
+            Zero means it stays muted until you long-press again. The screen shows a MUTED chip
+            with the time left, so a mute cannot be forgotten. A restart clears the mute.</p>
           <label class="check"><input id="alert-quiet" type="checkbox"> Quiet hours</label>
           <label for="alert-quiet-start">Quiet from</label>
           <input id="alert-quiet-start" type="time" step="60">
@@ -137,7 +166,9 @@
       </details>
 
       <details class="setting">
-        <summary><span class="setting-title">Effective daemon configuration</span><span class="scope-badge">Applies to all services</span></summary>
+        <summary><span class="setting-title">Effective daemon configuration</span>
+          <span class="help-slot" data-help="effective-config" data-help-label="Effective configuration"></span>
+          <span class="scope-badge">Applies to all services</span></summary>
         <div class="setting-body">
           <p class="note">Read-only. These values need a daemon restart, so they are edited in dash.toml or in the environment, not on this page.</p>
           <div id="config-table"></div>
@@ -145,7 +176,9 @@
       </details>
 
       <details class="setting">
-        <summary><span class="setting-title">About and help</span><span class="scope-badge">Applies to all services</span></summary>
+        <summary><span class="setting-title">About and help</span>
+          <span class="help-slot" data-help="about" data-help-label="About and help"></span>
+          <span class="scope-badge">Applies to all services</span></summary>
         <div class="setting-body">
           <h4>Cloud and subscription sources</h4>
           <p class="note">Available subscription connectors show current allowance meters in your source list.
@@ -163,6 +196,9 @@
             (<code>python -m presto_ai_dash.app --config dash.toml --admin</code>). The Problems list on
             the Status tab shows the recent warnings and errors without reading the log file.
             The device prints its fetch diagnostics to the Presto's serial console.</p>
+          <h4>The help links</h4>
+          <p class="note">Help opens the public documentation site in a new tab. Nothing from this
+            page is sent with the link.</p>
         </div>
       </details>
     </section>
@@ -171,7 +207,10 @@
       <div class="modal-card panel">
         <div class="section-title"><h2 id="editor-title">Add source</h2><button id="close-editor" type="button">Close</button></div>
       <form id="source-form">
-        <label for="source-type">Source type</label>
+        <div class="field-with-help">
+          <label for="source-type">Source type</label>
+          <span class="help-slot" id="source-type-help"></span>
+        </div>
         <select id="source-type" required></select>
         <label for="source-name">Display name</label>
         <input id="source-name" maxlength="80" required autocomplete="off">

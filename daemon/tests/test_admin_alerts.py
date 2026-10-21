@@ -22,8 +22,8 @@ from envutil import clean_env
 from test_management import AdminServerBase
 
 DEFAULTS = {"enabled": True, "warning_percent": 80, "critical_percent": 95,
-            "sound": True, "quiet_hours": False, "quiet_start": "22:00",
-            "quiet_end": "07:00", "pop_to_top": True}
+            "sound": False, "quiet_hours": False, "quiet_start": "22:00",
+            "quiet_end": "07:00", "pop_to_top": True, "mute_hours": 4}
 
 
 def body(**changes):
@@ -53,6 +53,23 @@ class AlertPrecedenceTests(unittest.TestCase):
         settings = alert_settings(config)
         self.assertEqual(settings["warning_percent"], 70)
         self.assertEqual(settings["critical_percent"], 90)
+
+    def test_the_mute_length_comes_from_the_file_then_the_default(self):
+        config = self.config("[alerts]\nmute_hours = 6\n")
+        self.assertEqual(alert_settings(config)["mute_hours"], 6)
+        # The stored value beats the file.
+        self.assertEqual(alert_settings(config, {"mute_hours": 12})["mute_hours"], 12)
+        # An unusable stored value falls back to the default.
+        self.assertEqual(alert_settings(config, {"mute_hours": 99})["mute_hours"], 4)
+
+    def test_a_bad_mute_length_in_the_file_is_refused(self):
+        for text in ("[alerts]\nmute_hours = -1\n",
+                     "[alerts]\nmute_hours = 49\n",
+                     "[alerts]\nmute_hours = \"four\"\n",
+                     "[alerts]\nmute_hours = 4.5\n"):
+            with self.subTest(text=text):
+                with self.assertRaises(ConfigError):
+                    self.config(text)
 
     def test_the_stored_value_beats_the_file(self):
         config = self.config("[alerts]\nwarning_percent = 70\ncritical_percent = 90\n")
@@ -130,16 +147,37 @@ class AlertAdminTests(AdminServerBase):
         self.assertEqual(self.storage.alerts_settings(),
                          {"warning_percent": 75, "critical_percent": 92})
         payload = self.manager.status_payload()
-        self.assertEqual(payload["alerts"]["sound"], True)
+        self.assertEqual(payload["alerts"]["sound"], False)
         self.assertEqual(payload["alerts"]["pop_to_top"], True)
         self.assertEqual(payload["alerts"]["quiet"], False)
         self.assertEqual(payload["alerts"]["enabled"], True)
 
-    def test_the_sound_and_pop_to_top_switches_reach_the_payload(self):
-        self.request("/api/admin/alerts", "PUT", body(sound=False, pop_to_top=False))
+    def test_the_sound_is_off_until_the_user_turns_it_on(self):
+        """The default is silent: a desk device must not beep unannounced."""
+        status, _, state = self.request("/api/admin/alerts")
+        self.assertEqual(status, 200)
+        self.assertFalse(state["sound"])
         payload = self.manager.status_payload()
-        self.assertEqual(payload["alerts"], {"quiet": False, "sound": False,
-                                              "pop_to_top": False, "enabled": True})
+        self.assertFalse(payload["alerts"]["sound"])
+
+    def test_a_stored_sound_choice_is_respected(self):
+        """A value the user already stored stays: only the default flips."""
+        self.request("/api/admin/alerts", "PUT", body(sound=True))
+        self.assertEqual(self.storage.alerts_settings(), {"sound": True})
+        payload = self.manager.status_payload()
+        self.assertTrue(payload["alerts"]["sound"])
+        # And it can be turned off again.
+        self.request("/api/admin/alerts", "PUT", body(sound=False))
+        self.assertEqual(self.storage.alerts_settings(), {})
+        payload = self.manager.status_payload()
+        self.assertFalse(payload["alerts"]["sound"])
+
+    def test_the_sound_and_pop_to_top_switches_reach_the_payload(self):
+        self.request("/api/admin/alerts", "PUT", body(sound=True, pop_to_top=False))
+        payload = self.manager.status_payload()
+        self.assertEqual(payload["alerts"], {"quiet": False, "sound": True,
+                                              "pop_to_top": False, "enabled": True,
+                                              "mute_hours": 4})
 
     def test_the_quiet_flag_reaches_the_payload(self):
         self.request("/api/admin/alerts", "PUT",
@@ -201,7 +239,8 @@ class AlertAdminTests(AdminServerBase):
         rows = {entry["name"]: entry for entry in body_json["settings"]}
         self.assertEqual(rows["Alert warning percent"]["value"], 80)
         self.assertEqual(rows["Alert warning percent"]["origin"], "default")
-        self.assertEqual(rows["Alert sound"]["value"], "on")
+        self.assertEqual(rows["Alert sound"]["value"], "off")
+        self.assertEqual(rows["Alert sound"]["origin"], "default")
         self.assertEqual(rows["Quiet hours"]["value"], "off")
         self.assertEqual(rows["Pop to top on alarm"]["value"], "on")
         self.request("/api/admin/alerts", "PUT", body(warning_percent=75))
@@ -216,11 +255,51 @@ class AlertAdminTests(AdminServerBase):
         status, _, html = self.request("/")
         self.assertEqual(status, 200)
         for marker in (b"alert-warning", b"alert-critical", b"alert-sound",
-                       b"alert-quiet", b"alert-pop", b"Alerts"):
+                       b"alert-quiet", b"alert-pop", b"alert-mute-hours", b"Alerts"):
             self.assertIn(marker, html)
         self.assertIn(b"Applies to all services", html)
         _, _, script = self.request("/admin.js")
         self.assertIn(b"/api/admin/alerts", script)
+
+    def test_the_mute_length_is_saved_and_reaches_the_payload(self):
+        status, _, state = self.request("/api/admin/alerts", "PUT",
+                                        body(mute_hours=8))
+        self.assertEqual(status, 200)
+        self.assertEqual(state["mute_hours"], 8)
+        self.assertEqual(self.storage.alerts_settings(), {"mute_hours": 8})
+        payload = self.manager.status_payload()
+        self.assertEqual(payload["alerts"]["mute_hours"], 8)
+
+    def test_the_mute_length_is_refused_when_it_is_unusable(self):
+        cookie, session, _ = self.login()
+        headers = {"Cookie": cookie, "Origin": self.base_url,
+                   "X-CSRF-Token": session["csrf_token"]}
+        for value in (-1, 49, 100, "4", 4.5, True, None):
+            with self.subTest(value=value):
+                self.assertEqual(self.request("/api/admin/alerts", "PUT",
+                                              body(mute_hours=value),
+                                              token=None, headers=headers)[0], 400)
+        self.assertEqual(self.storage.alerts_settings(), {})
+
+    def test_the_mute_length_of_zero_is_allowed(self):
+        status, _, state = self.request("/api/admin/alerts", "PUT",
+                                        body(mute_hours=0))
+        self.assertEqual(status, 200)
+        self.assertEqual(state["mute_hours"], 0)
+        payload = self.manager.status_payload()
+        self.assertEqual(payload["alerts"]["mute_hours"], 0)
+
+    def test_the_mute_length_has_its_own_row_in_the_effective_configuration(self):
+        status, _, body_json = self.request("/api/admin/config")
+        self.assertEqual(status, 200)
+        rows = {entry["name"]: entry for entry in body_json["settings"]}
+        self.assertEqual(rows["Mute length (hours)"]["value"], 4)
+        self.assertEqual(rows["Mute length (hours)"]["origin"], "default")
+        self.request("/api/admin/alerts", "PUT", body(mute_hours=6))
+        _, _, body_json = self.request("/api/admin/config")
+        rows = {entry["name"]: entry for entry in body_json["settings"]}
+        self.assertEqual(rows["Mute length (hours)"]["value"], 6)
+        self.assertEqual(rows["Mute length (hours)"]["origin"], "database")
 
 
 if __name__ == "__main__":

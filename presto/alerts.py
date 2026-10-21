@@ -79,6 +79,38 @@ PRIORITY_ACCENT = {0: "green", 1: "blue", 2: "yellow", 3: "red"}
 # kept: a warning must still be visible, only less insistently.
 QUIET_LED_FACTOR = 0.4
 
+# The mute: how long a long-press mute lasts, in hours. Zero means it lasts
+# until the user presses again. The daemon sends the number; the device
+# counts the time with its own tick counter, because it has no wall clock.
+DEFAULT_MUTE_HOURS = 4
+MUTE_HOURS_MIN = 0
+MUTE_HOURS_MAX = 48
+MUTE_HOUR_MS = 60 * 60 * 1000
+
+
+def valid_mute_hours(value):
+    """Whether this can be used as a mute length, in hours."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return False
+    return MUTE_HOURS_MIN <= value <= MUTE_HOURS_MAX
+
+
+def mute_chip_text(remaining_ms):
+    """The chip text for a mute: "MUTED", "MUTED 45M" or "MUTED 3H".
+
+    The time left is rounded up, so a mute with half a minute left says
+    "MUTED 1M" and never "MUTED 0M". ``None`` means the mute has no end:
+    it lasts until the user presses again.
+    """
+    if remaining_ms is None:
+        return "MUTED"
+    minutes = (int(remaining_ms) + 59999) // 60000
+    if minutes <= 0:
+        return "MUTED"
+    if minutes < 60:
+        return "MUTED %dM" % minutes
+    return "MUTED %dH" % ((minutes + 59) // 60)
+
 
 def alert_rank(status):
     """The alert rank of a status. Higher is worse."""
@@ -174,14 +206,27 @@ class AlertTracker(object):
     ``muted`` suppresses all cues; long-press toggles it. ``quiet`` is the
     daemon's quiet-hours flag: it silences the sound and lets the caller
     dim the LED, without touching the user's own mute.
+
+    The mute has an end: it lasts ``mute_hours`` hours and then lifts
+    itself, silently. The device has no wall clock, so the length is
+    counted with the device's own tick counter, which wraps; the clock and
+    the tick difference are injected so the behaviour can be tested. A
+    tracker without a clock never expires a mute, and a mute length of zero
+    lasts until the user presses again.
     """
 
-    __slots__ = ("_statuses", "muted", "quiet")
+    __slots__ = ("_statuses", "muted", "quiet", "mute_hours", "_mute_started",
+                 "_mute_duration", "_clock", "_ticks_diff")
 
-    def __init__(self):
+    def __init__(self, clock=None, ticks_diff=None):
         self._statuses = {}
         self.muted = False
         self.quiet = False
+        self.mute_hours = DEFAULT_MUTE_HOURS
+        self._mute_started = None
+        self._mute_duration = None
+        self._clock = clock
+        self._ticks_diff = ticks_diff
 
     @property
     def statuses(self):
@@ -202,10 +247,111 @@ class AlertTracker(object):
         """True when nothing should sound: muted, or during quiet hours."""
         return self.muted or self.quiet
 
-    def toggle_mute(self):
-        """Flip the mute flag and return the new value."""
-        self.muted = not self.muted
-        return self.muted
+    def toggle_mute(self, now=None):
+        """Flip the mute flag and return the new value.
+
+        A long press while muted unmutes at once. A long press while the
+        sound is on starts a mute that ends ``mute_hours`` hours later; the
+        length is taken now, so changing the setting later applies to the
+        next mute, not to the running one.
+        """
+        if self.muted:
+            self.muted = False
+            self._mute_started = None
+            self._mute_duration = None
+            return False
+        self.muted = True
+        started = self._now(now)
+        self._mute_started = started
+        if started is None or self.mute_hours <= 0:
+            # No clock, or a mute that lasts until the user presses again.
+            self._mute_duration = None
+        else:
+            self._mute_duration = self.mute_hours * MUTE_HOUR_MS
+        return True
+
+    def set_mute_hours(self, hours):
+        """Set the mute length in hours; anything unusable is the default."""
+        self.mute_hours = hours if valid_mute_hours(hours) else DEFAULT_MUTE_HOURS
+        return self.mute_hours
+
+    def set_mute(self, muted, remaining_ms=None, now=None):
+        """Put the tracker in a known mute state.
+
+        The app itself only ever toggles the mute. This is here so that a
+        test or the preview can show the chip with a given time left:
+        ``remaining_ms`` is how much of the mute is left, and None means
+        the whole mute length is left.
+        """
+        if not muted:
+            self.muted = False
+            self._mute_started = None
+            self._mute_duration = None
+            return False
+        started = self._now(now)
+        self.muted = True
+        duration = self.mute_hours * MUTE_HOUR_MS
+        self._mute_duration = duration
+        if started is None:
+            self._mute_started = None
+        elif remaining_ms is None:
+            self._mute_started = started
+        else:
+            # The mute started that much earlier, so this much is left.
+            self._mute_started = started - (duration - remaining_ms)
+        return True
+
+    def _now(self, now=None):
+        """The tick counter's value, or None when there is no clock."""
+        if now is not None:
+            return now
+        if self._clock is None:
+            return None
+        return self._clock()
+
+    def _elapsed(self, now=None):
+        """Milliseconds since the mute started, or None when unknown."""
+        if self._mute_started is None:
+            return None
+        moment = self._now(now)
+        if moment is None:
+            return None
+        if self._ticks_diff is not None:
+            return self._ticks_diff(moment, self._mute_started)
+        return moment - self._mute_started
+
+    def mute_expired(self, now=None):
+        """Whether the mute has run out; it is then lifted, silently.
+
+        Lifting the mute says nothing: the statuses were tracked while it
+        was on, so the device resumes without chirping for an alarm that
+        began during the mute.
+        """
+        if not self.muted or not self._mute_duration:
+            return False
+        elapsed = self._elapsed(now)
+        if elapsed is None or elapsed < self._mute_duration:
+            return False
+        self.muted = False
+        self._mute_started = None
+        self._mute_duration = None
+        return True
+
+    def mute_remaining(self, now=None):
+        """Milliseconds the mute has left, or None when it has no end."""
+        if not self.muted or not self._mute_duration:
+            return None
+        elapsed = self._elapsed(now)
+        if elapsed is None:
+            return None
+        left = self._mute_duration - elapsed
+        return left if left > 0 else 0
+
+    def mute_label(self, now=None):
+        """The chip text for the mute, or None when the sound is not muted."""
+        if not self.muted:
+            return None
+        return mute_chip_text(self.mute_remaining(now))
 
     def reset(self):
         """Forget history, e.g. after a reconnect."""

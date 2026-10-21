@@ -28,6 +28,11 @@ Only a **fresh, available** window alerts:
 
 ## The sound
 
+**The sound is off until you turn it on.** A desk device must not beep
+unannounced, so the *Sound on a new warning* box in the **Alerts** section of
+the admin page is unticked until you tick it. The LED, the thresholds and the
+pop to top work with the sound off.
+
 The device tracks every service separately, so a second service getting worse
 still speaks while another one is already critical.
 
@@ -39,7 +44,38 @@ still speaks while another one is already critical.
 | A service recovers | nothing, recovery is silent |
 | The first reading after boot | nothing, it is a silent baseline |
 
-A long press on the Presto mutes the sound until you press again.
+A long press on the Presto mutes the sound. The mute ends by itself, and
+the screen says how long is left - see [the mute that expires](#the-mute-that-expires).
+
+## The mute that expires
+
+A long press on the Presto mutes the sound, so a desk device cannot chirp
+in the middle of a meeting. The mute is not forgotten: it ends by itself.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `mute_hours` | `4` | How long the mute lasts, in hours. 0 to 48. 0 means it lasts until you press again |
+
+While the sound is muted, a small chip says how long is left:
+
+| The chip | What it means |
+| --- | --- |
+| `MUTED 3H` | The mute ends in about three hours |
+| `MUTED 45M` | The mute ends in about three quarters of an hour |
+| `MUTED` | The mute has no end: it lasts until you press again |
+
+The chip is in the bottom-right corner of the Home screen and of every
+card, and it disappears when the mute ends.
+
+- A long press while the sound is muted unmutes it at once.
+- The mute ends **silently**. The statuses were tracked while it was on, so
+  the Presto does not chirp for an alarm that began during the mute.
+- A restart clears the mute: it is not stored anywhere.
+- Changing `mute_hours` while a mute is running applies to the *next*
+  mute, not to the running one.
+
+The Presto has no clock of its own, so it counts the time with its own tick
+counter. The daemon only sends the length.
 
 ## The LED
 

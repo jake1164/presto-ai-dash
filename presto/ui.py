@@ -94,6 +94,15 @@ BELL_SHAPE = (
     (9, 14, 2, 2),    # the clapper
 )
 
+# The mute chip: a small box in the bottom-right corner that says how long
+# the mute has left ("MUTED", "MUTED 45M", "MUTED 3H"). It sits in the
+# footer band, to the right of the page dots and below the STALE line, so
+# it never covers the title, the bell, the status chips or the dots.
+MUTE_CHIP_H = 12
+MUTE_CHIP_PAD = 4
+MUTE_CHIP_Y = 218
+MUTE_CHIP_FONT = "bitmap6"
+
 # The small mark on a Home row whose service has its alerts off: a dim
 # eight-pixel bell with a slash cut through it. It is never interactive.
 ALERT_MARK = 8
@@ -215,6 +224,34 @@ def bell_label(alerts):
     return BELL_ON if alerts.get("enabled") else BELL_OFF
 
 
+def mute_chip_rect(display, text, width=240):
+    """Where the mute chip is drawn: (x, y, w, h).
+
+    One fixed slot for every screen: the bottom-right corner, below the
+    STALE line and to the right of the page dots.
+    """
+    display.set_font(MUTE_CHIP_FONT)
+    box_width = display.measure_text(text, 1) + 2 * MUTE_CHIP_PAD
+    x = max(0, width - MARGIN - box_width)
+    return (x, MUTE_CHIP_Y, box_width, MUTE_CHIP_H)
+
+
+def _draw_mute_chip(display, palette, text, width=240):
+    """The mute chip: a small box that says how long the mute has left."""
+    if not text:
+        return None
+    x, y, box_width, box_height = mute_chip_rect(display, text, width)
+    display.set_pen(palette.pen(PANEL))
+    display.rectangle(x, y, box_width, box_height)
+    display.set_font(MUTE_CHIP_FONT)
+    # The firmware draws a line one pixel wider than it measures, and it
+    # wraps a word that does not fit: the text needs its own width plus one.
+    text_width = display.measure_text(text, 1)
+    _text(display, palette, text, x + MUTE_CHIP_PAD, y + 2, INK, scale=1,
+          max_width=text_width + 1)
+    return (x, y, box_width, box_height)
+
+
 def _draw_bell(display, palette, x, y, rgb, slashed=False, crossed=False):
     """A bell made of rectangles, with a slash or a cross when asked."""
     display.set_pen(palette.pen(rgb))
@@ -250,7 +287,7 @@ def _draw_alert_mark(display, palette, x, y):
 
 
 def draw_home(display, palette, quotas, index, total, muted=False,
-              width=240, height=240, scroll=0):
+              width=240, height=240, scroll=0, mute_text=None):
     """Scrollable demo quotas with a pinned title, legend, and footer."""
     from alerts import rgb_for_accent
     from home import (LIST_TOP, LIST_HEIGHT, ROW_HEIGHT, bar_fill, quota_label,
@@ -319,7 +356,7 @@ def draw_home(display, palette, quotas, index, total, muted=False,
           INK_DIM, scale=1)
     _draw_dots(display, palette, index, total, accent, width, height)
     if muted:
-        _text(display, palette, "MUTED", width - 58, FOOTER_Y, INK_DIM, scale=1)
+        _draw_mute_chip(display, palette, mute_text or "MUTED", width)
 
 
 def _window_hue(window):
@@ -580,7 +617,7 @@ def _draw_strip(display, palette, layout, scroll, stale):
 
 def draw_sources(display, palette, rows, index, total, status="offline",
                  muted=False, width=240, height=240, scroll=0, stale=False,
-                 layout=None):
+                 layout=None, mute_text=None):
     """Live Home: the accounts in the saved order, quota rows and local ones."""
     from alerts import rgb_for_accent
     from cards import accent_for
@@ -630,7 +667,7 @@ def draw_sources(display, palette, rows, index, total, status="offline",
         _text(display, palette, "FAKE DATA", 14, 210, INK_DIM, scale=1)
     _draw_dots(display, palette, index, total, accent, width, height)
     if muted:
-        _text(display, palette, "MUTED", width - 58, FOOTER_Y, INK_DIM, scale=1)
+        _draw_mute_chip(display, palette, mute_text or "MUTED", width)
 
 
 def _draw_chip(display, palette, text, right, y, background, foreground,
@@ -787,7 +824,7 @@ def _draw_tiles(display, palette, tiles, x, y, width):
 def draw_card(display, palette, card, index, total, muted=False,
               width=240, height=240, stale=False, alerts=None, message=None,
               quota=None, marks=None, detail=None, tiles=None, loading=False,
-              failed=False, detail_open=False):
+              failed=False, detail_open=False, mute_text=None):
     """Draw one card.
 
     ``index``/``total`` drive the page dots at the bottom. ``muted`` dims the
@@ -937,10 +974,9 @@ def draw_card(display, palette, card, index, total, muted=False,
         _text(display, palette, "STALE - retrying", MARGIN + 6, 208, INK_DIM, scale=1)
     _draw_dots(display, palette, index, total, accent_rgb, width, height)
 
-    # Mute indicator
+    # Mute indicator: the chip says how long the mute has left.
     if muted:
-        _text(display, palette, "MUTED", width - 58, FOOTER_Y, INK_DIM,
-              scale=1, max_chars=8)
+        _draw_mute_chip(display, palette, mute_text or "MUTED", width)
 
 
 DOT_SPACING = 12

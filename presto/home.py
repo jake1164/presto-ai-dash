@@ -93,18 +93,24 @@ def overflow_rows(payload):
 
 
 # The alert settings the daemon sends, and the device's own defaults for
-# anything the payload does not say.
-DEFAULT_ALERT_SETTINGS = {"quiet": False, "sound": True, "pop_to_top": True,
-                           "enabled": True}
+# anything the payload does not say. The sound is off by default: a desk
+# device must not chirp unless the user asked for it.
+DEFAULT_ALERT_SETTINGS = {"quiet": False, "sound": False, "pop_to_top": True,
+                           "enabled": True, "mute_hours": 4}
 
 
 def alert_settings(payload):
     """The daemon's alert settings, with anything untrusted replaced.
 
     A missing key, a payload that is not an object, a value that is not a
-    real boolean: the device falls back to its own defaults - sound on,
+    real boolean: the device falls back to its own defaults - sound off,
     quiet off, pop-to-top on, alerts on - so a broken payload can never
-    silence the device in a way the user did not ask for.
+    make the device chirp, and can never silence it in a way the user did
+    not ask for.
+
+    The mute length is a number of hours. A value that is not a whole
+    number in 0..48 is not used: the device keeps its own default of four
+    hours, so a broken setting can never mute the sound for ever.
     """
     result = dict(DEFAULT_ALERT_SETTINGS)
     alerts = payload.get("alerts") if isinstance(payload, dict) else None
@@ -114,6 +120,7 @@ def alert_settings(payload):
     sound = alerts.get("sound")
     pop_to_top = alerts.get("pop_to_top")
     enabled = alerts.get("enabled")
+    mute_hours = alerts.get("mute_hours")
     if type(quiet) is bool:
         result["quiet"] = quiet
     if type(sound) is bool:
@@ -122,6 +129,9 @@ def alert_settings(payload):
         result["pop_to_top"] = pop_to_top
     if type(enabled) is bool:
         result["enabled"] = enabled
+    if type(mute_hours) is int and not isinstance(mute_hours, bool) \
+            and 0 <= mute_hours <= 48:
+        result["mute_hours"] = mute_hours
     return result
 
 

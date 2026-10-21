@@ -752,15 +752,15 @@ class AlertSettingsTests(unittest.TestCase):
 
     def test_the_defaults_are_used_when_the_key_is_missing(self):
         self.assertEqual(alert_settings({}),
-                         {"quiet": False, "sound": True, "pop_to_top": True,
-                          "enabled": True})
+                         {"quiet": False, "sound": False, "pop_to_top": True,
+                          "enabled": True, "mute_hours": 4})
 
     def test_the_settings_are_read(self):
-        payload = {"alerts": {"quiet": True, "sound": False, "pop_to_top": False,
-                              "enabled": False}}
+        payload = {"alerts": {"quiet": True, "sound": True, "pop_to_top": False,
+                              "enabled": False, "mute_hours": 12}}
         self.assertEqual(alert_settings(payload),
-                         {"quiet": True, "sound": False, "pop_to_top": False,
-                          "enabled": False})
+                         {"quiet": True, "sound": True, "pop_to_top": False,
+                          "enabled": False, "mute_hours": 12})
 
     def test_junk_is_ignored(self):
         for payload in ({"alerts": "nonsense"}, {"alerts": None}, {"alerts": []},
@@ -769,5 +769,23 @@ class AlertSettingsTests(unittest.TestCase):
                         {"alerts": {"quiet": 1}}, "nonsense", None, 5):
             with self.subTest(payload=payload):
                 self.assertEqual(alert_settings(payload),
-                                 {"quiet": False, "sound": True, "pop_to_top": True,
-                                  "enabled": True})
+                                 {"quiet": False, "sound": False, "pop_to_top": True,
+                                  "enabled": True, "mute_hours": 4})
+
+    def test_the_sound_is_off_unless_the_daemon_says_otherwise(self):
+        """A missing, junk or old-daemon payload can never make the device chirp."""
+        for payload in ({}, {"alerts": {}}, {"alerts": {"sound": None}},
+                        {"alerts": {"sound": "yes"}}, {"alerts": {"sound": 1}}):
+            with self.subTest(payload=payload):
+                self.assertFalse(alert_settings(payload)["sound"])
+
+    def test_the_mute_length_is_only_used_when_it_can_be(self):
+        """A real whole number of hours, from 0 to 48; anything else is the default."""
+        for value in (0, 1, 4, 12, 48):
+            with self.subTest(value=value):
+                payload = {"alerts": {"mute_hours": value}}
+                self.assertEqual(alert_settings(payload)["mute_hours"], value)
+        for value in (-1, 49, 100, "4", 4.5, None, True, False, [4]):
+            with self.subTest(value=value):
+                payload = {"alerts": {"mute_hours": value}}
+                self.assertEqual(alert_settings(payload)["mute_hours"], 4)

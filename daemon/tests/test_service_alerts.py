@@ -279,8 +279,8 @@ class ServiceAlertAdminTests(AdminServerBase):
 
     def alerts_body(self, **changes):
         body = {"enabled": True, "warning_percent": 80, "critical_percent": 95,
-                "sound": True, "quiet_hours": False, "quiet_start": "22:00",
-                "quiet_end": "07:00", "pop_to_top": True}
+                "sound": False, "quiet_hours": False, "quiet_start": "22:00",
+                "quiet_end": "07:00", "pop_to_top": True, "mute_hours": 4}
         body.update(changes)
         return body
 

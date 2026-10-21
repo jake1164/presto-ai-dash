@@ -125,7 +125,22 @@ def _fetch_live(net, config):
         raise SystemExit("could not fetch %s: %s" % (url, type(exc).__name__))
 
 
-def render(payload="sample", out=DEFAULT_OUT, stale=False, offline=False, muted=False):
+def _mute_left_ms(text):
+    """How long the mute chip has left: "3h", "45m", or None for no end."""
+    if text is None:
+        return None
+    text = str(text).strip().lower()
+    if text in ("", "0", "none", "forever"):
+        return None
+    if text.endswith("h"):
+        return int(text[:-1]) * 60 * 60 * 1000
+    if text.endswith("m"):
+        return int(text[:-1]) * 60 * 1000
+    return int(text) * 60 * 60 * 1000
+
+
+def render(payload="sample", out=DEFAULT_OUT, stale=False, offline=False, muted=False,
+           mute_left=None):
     main, net = _load_app_modules()
     if HERE not in sys.path:
         sys.path.insert(0, HERE)
@@ -146,6 +161,13 @@ def render(payload="sample", out=DEFAULT_OUT, stale=False, offline=False, muted=
     if app.error:
         print("payload rejected by the app: %s" % app.error, file=sys.stderr)
     app.alerts.muted = muted
+    if muted:
+        # The time left on the mute chip: "3h", "45m", or "0" for a mute
+        # that lasts until the user presses again.
+        left = _mute_left_ms(mute_left)
+        if left is None and mute_left not in (None, ""):
+            app.alerts.set_mute_hours(0)
+        app.alerts.set_mute(True, left)
     if offline:
         app.connection_error = ("Daemon offline", "TimeoutError @head", True)
     elif stale:
@@ -223,8 +245,12 @@ def main_cli(argv=None):
     parser.add_argument("--stale", action="store_true", help="a failed refresh after good data")
     parser.add_argument("--offline", action="store_true", help="the full-screen connection error")
     parser.add_argument("--muted", action="store_true")
+    parser.add_argument("--mute-left", default=None,
+                        help="how long the mute chip has left: 3h, 45m, or 0 "
+                             "for a mute that lasts until pressed again")
     args = parser.parse_args(argv)
-    screens = render(args.payload, args.out, args.stale, args.offline, args.muted)
+    screens = render(args.payload, args.out, args.stale, args.offline, args.muted,
+                      args.mute_left)
     for screen in screens:
         print(os.path.join(args.out, screen["file"]))
 

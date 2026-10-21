@@ -166,8 +166,8 @@ class EffectTests(AlertWriteBase):
 
     def request_alerts_off(self):
         body = {"enabled": False, "warning_percent": 80, "critical_percent": 95,
-                "sound": True, "quiet_hours": False, "quiet_start": "22:00",
-                "quiet_end": "07:00", "pop_to_top": True}
+                "sound": False, "quiet_hours": False, "quiet_start": "22:00",
+                "quiet_end": "07:00", "pop_to_top": True, "mute_hours": 4}
         self.manager.set_alerts(body)
 
     def test_the_change_is_visible_in_the_status_payload(self):

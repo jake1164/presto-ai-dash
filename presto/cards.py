@@ -97,14 +97,151 @@ def truncate(text, max_chars):
     return text[:max_chars - 1] + "~"
 
 
+# The screen has bitmap fonts and no other glyphs, so every line is ASCII.
+NON_ASCII = {
+    "·": "-",   # the middle dot the daemon uses between two facts
+    "…": "-",
+    "–": "-",
+    "—": "-",
+    "‘": "'",
+    "’": "'",
+    "“": '"',
+    "”": '"',
+    "°": " deg",
+}
+
+
+def ascii_text(text):
+    """The line as ASCII: every other character becomes a space."""
+    out = []
+    for char in str(text):
+        if " " <= char <= "~":
+            out.append(char)
+        elif char in NON_ASCII:
+            out.append(NON_ASCII[char])
+        else:
+            out.append(" ")
+    return "".join(out)
+
+
+def _money_value(whole, fraction):
+    """One amount: two decimals, unless two decimals would hide it."""
+    if not fraction:
+        return "$" + whole
+    number = int(fraction)
+    scale = 10 ** len(fraction)
+    cents = (number * 100 + scale // 2) // scale
+    if cents:
+        return "$%s.%02d" % (whole, cents)
+    if number:
+        # A real amount below a cent: two decimals would read as zero.
+        trimmed = fraction.rstrip("0")
+        return "$%s.%s" % (whole, trimmed[:5] if len(trimmed) > 5 else trimmed)
+    return "$%s.00" % whole
+
+
+def format_money(text):
+    """A price with two decimals: $0.5000 is $0.50."""
+    out = []
+    index = 0
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if char != "$":
+            out.append(char)
+            index += 1
+            continue
+        whole = ""
+        probe = index + 1
+        while probe < length and text[probe].isdigit():
+            whole += text[probe]
+            probe += 1
+        if not whole:
+            out.append(char)
+            index += 1
+            continue
+        fraction = ""
+        if probe < length and text[probe] == ".":
+            end = probe + 1
+            while end < length and text[end].isdigit():
+                end += 1
+            if end > probe + 1:
+                fraction = text[probe + 1:end]
+                probe = end
+        out.append(_money_value(whole, fraction))
+        index = probe
+    return "".join(out)
+
+
+def format_booleans(text):
+    """A boolean is a word, not a word of code: ok and no."""
+    lowered = text.lower()
+    for word, spoken in (("true", "ok"), ("false", "no")):
+        suffix = ": " + word
+        if lowered.endswith(suffix):
+            return text[:-len(suffix)] + ": " + spoken
+    return text
+
+
+def tidy_line(text):
+    """One card line, ready for the screen.
+
+    ASCII only, money with two decimals, a boolean as a word, and no
+    "(stale)": staleness is shown once, as a chip beside the status.
+    """
+    text = ascii_text(text)
+    text = format_money(text)
+    text = format_booleans(text)
+    text = text.replace(" (stale)", "").replace("(stale)", "")
+    return " ".join(text.split())
+
+
+def is_unavailable_line(text):
+    """A line that says a window is not available."""
+    return str(text).strip().lower().endswith("unavailable")
+
+
+# The tiles a card may carry: at most six, a short label, a short value
+# and a tone. The daemon builds them; the device only draws them.
+MAX_TILES = 6
+MAX_TILE_LABEL = 8
+MAX_TILE_VALUE = 10
+TILE_TONES = ("normal", "good", "warn", "bad", "dim")
+
+
+def parse_tiles(raw):
+    """The tiles of a card, inside the limits. Never raises."""
+    if not isinstance(raw, list):
+        return []
+    tiles = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        label = item.get("label")
+        value = item.get("value")
+        if not isinstance(label, str) or not isinstance(value, str):
+            continue
+        label = " ".join(ascii_text(label).split())[:MAX_TILE_LABEL]
+        value = " ".join(ascii_text(value).split())[:MAX_TILE_VALUE]
+        if not label or not value:
+            continue
+        tone = item.get("tone")
+        if tone not in TILE_TONES:
+            tone = "normal"
+        tiles.append({"label": label, "value": value, "tone": tone})
+        if len(tiles) >= MAX_TILES:
+            break
+    return tiles
+
+
 class Card(object):
     """One swipeable card."""
 
     __slots__ = ("id", "title", "status", "primary", "secondary",
-                 "detail", "accent", "alert")
+                 "detail", "accent", "alert", "stale", "tiles")
 
     def __init__(self, id, title, status, primary="", secondary="",
-                 detail=None, accent=None, alert=None):
+                 detail=None, accent=None, alert=None, stale=False, tiles=None):
         self.id = id
         self.title = title
         self.status = normalise_status(status)
@@ -113,6 +250,12 @@ class Card(object):
         self.detail = [str(line) for line in (detail or [])]
         self.accent = accent if accent in VALID_ACCENTS else accent_for(self.status)
         self.alert = alert
+        # Whether any of the card's numbers is a stale reading. It is shown
+        # once, as a chip, and never on every line.
+        self.stale = bool(stale)
+        # Tiles the payload carried with the card. The lazy detail brings
+        # its own.
+        self.tiles = parse_tiles(tiles)
 
     @classmethod
     def from_dict(cls, data):
@@ -125,15 +268,22 @@ class Card(object):
         detail = data.get("detail")
         if not isinstance(detail, list):
             detail = []
+        raw = [str(line) for line in detail]
+        raw_primary = str(data.get("primary") or "")
+        raw_secondary = str(data.get("secondary") or "")
+        stale = any("(stale)" in line for line in
+                    [raw_primary, raw_secondary] + raw)
         return cls(
             id=data.get("id") or "unknown",
             title=data.get("title") or "Unknown",
             status=data.get("status"),
-            primary=data.get("primary"),
-            secondary=data.get("secondary"),
-            detail=detail,
+            primary=tidy_line(data.get("primary") or ""),
+            secondary=tidy_line(data.get("secondary") or ""),
+            detail=[tidy_line(line) for line in raw],
             accent=data.get("accent"),
             alert=alert,
+            stale=stale,
+            tiles=data.get("tiles"),
         )
 
     def detail_lines(self, limit):

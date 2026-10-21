@@ -20,9 +20,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 
 import presto_path  # noqa: F401  (adds presto/ to sys.path)
 from presto_ai_dash.dashboard import (DEVICE_ACTIVITY_KEYS, DEVICE_ALERT_KEYS,
+                                      DEVICE_CARD_KEYS, DEVICE_DETAIL_KEYS,
                                       DEVICE_METRICS_KEYS, DEVICE_QUOTA_KEYS,
                                       DEVICE_RESET_KEYS, DEVICE_SOURCE_KEYS,
-                                      DEVICE_TOP_KEYS, DEVICE_WINDOW_KEYS,
+                                      DEVICE_TILE_KEYS, DEVICE_TOP_KEYS,
+                                      DEVICE_WINDOW_KEYS,
                                       build_instance_payload, device_view)
 from presto_ai_dash.models import SourceSnapshot
 from presto_ai_dash.quotas import quota_report, quota_window
@@ -189,6 +191,18 @@ class DevicePayloadTests(unittest.TestCase):
             self.assertIn("alerts", source)
             self.assertIs(type(source["alerts"]), bool)
 
+    def test_every_source_carries_its_two_threshold_marks(self):
+        """The device draws a tick on the bar; it decides nothing."""
+        for source in self.slim["sources"]:
+            marks = source.get("marks")
+            self.assertIsInstance(marks, list, source["id"])
+            self.assertEqual(len(marks), 2)
+            for percent in marks:
+                self.assertIs(type(percent), int)
+                self.assertGreater(percent, 0)
+                self.assertLessEqual(percent, 100)
+            self.assertLess(marks[0], marks[1])
+
     def test_the_device_never_receives_the_thresholds(self):
         """The device switches the alerts; it does not choose the numbers."""
         payload = json.dumps(self.slim)
@@ -242,13 +256,18 @@ class WhitelistMatchesTheDeviceTests(unittest.TestCase):
     READERS = {"source": DEVICE_SOURCE_KEYS, "quota": DEVICE_QUOTA_KEYS,
                "window": DEVICE_WINDOW_KEYS, "activity": DEVICE_ACTIVITY_KEYS,
                "metrics": DEVICE_METRICS_KEYS, "reset_credits": DEVICE_RESET_KEYS,
-               "payload": DEVICE_TOP_KEYS, "alerts": DEVICE_ALERT_KEYS}
+               "payload": DEVICE_TOP_KEYS, "alerts": DEVICE_ALERT_KEYS,
+               "data": DEVICE_CARD_KEYS, "detail": DEVICE_DETAIL_KEYS,
+               "item": DEVICE_TILE_KEYS}
 
     # The device functions that read the payload, and the file they live in.
     SCANNED = (("home.py", "source_rows"), ("home.py", "reset_badge"),
                ("home.py", "overflow_rows"), ("home.py", "alert_settings"),
                ("home.py", "alerts_state"), ("home.py", "alerts_flag"),
-               ("main.py", "_apply_alerts"))
+               ("main.py", "_apply_alerts"),
+               # The card model and the lazy detail.
+               ("cards.py", "from_dict"), ("cards.py", "parse_tiles"),
+               ("main.py", "_load_card_detail"), ("main.py", "_render"))
 
     def keys_read(self, scanned=None):
         found = []
@@ -288,7 +307,10 @@ class WhitelistMatchesTheDeviceTests(unittest.TestCase):
                      ("source", "quota"), ("payload", "sources"), ("payload", "display"),
                      ("payload", "alerts"), ("alerts", "quiet"), ("alerts", "sound"),
                      ("alerts", "pop_to_top"), ("alerts", "enabled"),
-                     ("source", "alerts")):
+                     ("source", "alerts"), ("source", "marks"),
+                     ("data", "title"), ("data", "tiles"), ("detail", "tiles"),
+                     ("detail", "lines"), ("item", "label"), ("item", "value"),
+                     ("item", "tone")):
             self.assertIn(pair, found)
 
     def test_the_alert_settings_are_on_the_whitelist(self):

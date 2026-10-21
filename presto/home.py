@@ -417,9 +417,14 @@ def reset_label(seconds):
         return "%dm" % minutes
     hours = minutes // 60
     if hours < 24:
+        if minutes % 60 == 0:
+            return "%dh" % hours
         return "%dh%02dm" % (hours, minutes % 60)
     days = hours // 24
-    return "%dd" % days if days >= 10 else "%dd%dh" % (days, hours % 24)
+    remainder = hours % 24
+    if days >= 10 or remainder == 0:
+        return "%dd" % days
+    return "%dd%dh" % (days, remainder)
 
 
 def compact_left(seconds):
@@ -480,6 +485,18 @@ def binding_window(windows):
         if best is None or key > best[0]:
             best = (key, index)
     return None if best is None else best[1]
+
+
+def reset_stamp(text):
+    """The absolute reset time as it is shown: 10-25 12:00Z.
+
+    The device has no time zone, so the time stays in UTC, as the rest of
+    the card does.
+    """
+    text = str(text or "")
+    if len(text) < 16 or text[4] != "-" or text[10] not in ("T", " "):
+        return ""
+    return "%s-%s %s:%sZ" % (text[5:7], text[8:10], text[11:13], text[14:16])
 
 
 def window_tag(window):
@@ -555,6 +572,9 @@ def source_rows(payload):
             hint = quota.get("hint")
             if not isinstance(hint, str):  # a junk hint must never reach the screen
                 hint = None
+            marks = source.get("marks")
+            if not isinstance(marks, list):
+                marks = None
             if windows or text:
                 rows.append({"id": source.get("id"), "type": source.get("type"),
                              "name": str(source.get("name") or "Cloud account"),
@@ -562,6 +582,7 @@ def source_rows(payload):
                              "windows": windows, "activity": text, "hint": hint,
                              "reset_badge": reset_badge(quota.get("reset_credits"), now),
                              "binding": binding_window(windows),
+                             "marks": marks,
                              "alerts": alerts_state(source)})
                 continue
         metrics = source.get("metrics")
@@ -692,3 +713,20 @@ def quota_width(value, width):
     if value is None:
         return 0
     return round(width * min(value, 100) / 100)
+
+
+# A measured value above zero fills at least this many pixels: a 3% reading
+# on a narrow bar is otherwise a couple of pixels and reads as empty.
+MIN_BAR_FILL = 3
+
+
+def bar_fill(value, width):
+    """The filled part of a bar: at least three pixels for any reading.
+
+    Zero fills nothing, an unknown value fills nothing, and a measured
+    value fills at least three pixels so it never looks like an empty bar.
+    """
+    value = quota_value(value)
+    if value is None or value <= 0:
+        return 0
+    return min(width, max(MIN_BAR_FILL, quota_width(value, width)))

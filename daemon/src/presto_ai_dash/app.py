@@ -113,7 +113,11 @@ class Daemon:
                                  # alerts on or off. It is a setting of this
                                  # daemon, not a provider action.
                                  alert_writer=(self.source_configuration.set_service_alert_enabled
-                                               if managed else None))
+                                               if managed else None),
+                                 # The lazy card detail: one card's tiles and
+                                 # lines, fetched when the card is opened.
+                                 card_provider=(self.source_configuration.card_detail
+                                                if managed else None))
             if self.config["admin"]["enabled"]:
                 token = resolve_admin_token(self.config, self.shared_token)
                 self.admin = AdminServer(self.config["admin"]["port"],

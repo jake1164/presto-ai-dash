@@ -1146,6 +1146,23 @@ In order (item 0 is an urgent defect and goes first):
    - Rules: bitmap fonts and ASCII only; no loss of detail (everything now on a
      card stays reachable); provenance lines stay; draw tests check fit and
      overlap; PSL look at every card with fixture payloads (not live); device sync.
+    - **Done 2026-10-20.** The Home bars are fourteen pixels high (four-pixel
+      bars with one-pixel gaps for three windows, six for one or two), the
+      track is (56,60,72), a stale window keeps its own hue at 45% brightness,
+      any measured value above zero fills at least three pixels, and an expired
+      window stays empty. The card bell is twenty pixels wide with the same
+      48-pixel tap area, and the Home "alerts off" mark is a small crossed
+      bell. A card now has a hierarchy: dim labels, bright values, staleness
+      said once as a chip beside the status, the unavailable lines folded into
+      one dim line, money with two decimals, booleans as words, and the reset
+      as "resets in 1d12h" with the absolute time dim after it. A quota card
+      draws its windows like Home draws them, with the warning and critical
+      percentages as tick marks (the daemon sends them as `sources[].marks`;
+      the device draws them and decides nothing). The daemon builds the tiles
+      (`card_tiles.py`), and a card's tiles and lines are fetched when the card
+      is opened: `GET /api/v1/cards/<id>` with the shared token, and
+      `GET /api/v1/status?cards=lazy` for the small summary. The old status
+      response is unchanged for a client that does not ask for lazy cards.
 2. **Small changes (all):**
    - **Home follows the saved account order.** The swipe cards already do.
      Home currently groups cloud rows first and puts local services in a

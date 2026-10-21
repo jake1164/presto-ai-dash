@@ -18,7 +18,7 @@ from .collectors import claude_statusline
 from .config import (ALERT_KEYS, alert_base_settings, alert_settings,
                      ingest_enabled, overflow_rows)
 from .credentials import load_cipher
-from .dashboard import build_instance_payload, device_view
+from .dashboard import build_card_details, build_instance_payload, device_view
 from .effective import effective_settings, uptime_label, uptime_seconds
 from .problems import ProblemBuffer
 from .sources import source_catalog, source_type
@@ -559,7 +559,7 @@ class SourceConfiguration:
             snapshots = self.storage.latest_snapshots()
         return build_instance_payload(snapshots, records, alerts, resolutions=resolutions)
 
-    def status_payload(self):
+    def status_payload(self, lazy=False):
         settings = self.alerts_state()
         resolutions = self.alert_resolutions()
         thresholds = {"warning_percent": settings["warning_percent"],
@@ -568,6 +568,12 @@ class SourceConfiguration:
         # The Presto parses the whole response in a few hundred KB of RAM, so it
         # gets only the fields it reads (dashboard.device_view).
         payload = device_view(self.full_status_payload(thresholds, resolutions))
+        if lazy:
+            # The card's lines and tiles are fetched when the card is opened,
+            # so the poll stays small.
+            for card in payload.get("cards", []):
+                if isinstance(card, dict):
+                    card.pop("detail", None)
         # The Home display settings travel with the payload, so a change
         # applies on the next poll without restarting the daemon.
         payload["display"] = {"overflow_rows": self.display_state()["overflow_rows"]}
@@ -578,6 +584,24 @@ class SourceConfiguration:
                              "pop_to_top": settings["pop_to_top"],
                              "enabled": settings["enabled"]}
         return payload
+
+    def card_detail(self, card_id):
+        """One card's lazy detail: its tiles and its lines.
+
+        None when no card has that id. The call is read-only: it reads the
+        last snapshots and returns what the card would show.
+        """
+        settings = self.alerts_state()
+        resolutions = self.alert_resolutions()
+        thresholds = {"warning_percent": settings["warning_percent"],
+                      "critical_percent": settings["critical_percent"],
+                      "enabled": settings["enabled"]}
+        with self.storage._lock:
+            records = self.storage.source_instances()
+            snapshots = self.storage.latest_snapshots()
+        details = build_card_details(snapshots, records, thresholds,
+                                      resolutions=resolutions)
+        return details.get(card_id)
 
     def effective_config(self):
         """The effective daemon configuration and where each value came from."""

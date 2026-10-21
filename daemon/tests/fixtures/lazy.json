@@ -1,0 +1,260 @@
+{
+  "app": "presto-ai-dash",
+  "version": "0.1.0",
+  "overall_status": "warning",
+  "updated_at": "2026-10-20T12:00:00+00:00",
+  "card_order": "accounts",
+  "cards": [
+    {
+      "id": "dash",
+      "title": "AI Dash",
+      "status": "warning",
+      "primary": "6 live sources",
+      "secondary": "Configured source status",
+      "accent": "yellow",
+      "alert": null
+    },
+    {
+      "id": "go",
+      "title": "OpenCode Go",
+      "status": "warning",
+      "primary": "5h: 0% (stale)",
+      "secondary": "Weekly: 3% (stale) / Monthly: 5% (stale)",
+      "accent": "yellow",
+      "alert": null
+    },
+    {
+      "id": "cx",
+      "title": "Codex",
+      "status": "warning",
+      "primary": "Weekly: 2% (stale)",
+      "secondary": "Secondary: unavailable",
+      "accent": "yellow",
+      "alert": null
+    },
+    {
+      "id": "cl",
+      "title": "Claude",
+      "status": "ok",
+      "primary": "5h: 12% (stale)",
+      "secondary": "Weekly: 66% (stale)",
+      "accent": "green",
+      "alert": null
+    },
+    {
+      "id": "oc",
+      "title": "Ollama Cloud",
+      "status": "ok",
+      "primary": "2 requests",
+      "secondary": "$0.000020 / 84 tokens",
+      "accent": "green",
+      "alert": null
+    },
+    {
+      "id": "ol",
+      "title": "Ollama",
+      "status": "ok",
+      "primary": "llama3",
+      "secondary": "5 available \u00b7 version 0.12.1",
+      "accent": "green",
+      "alert": null
+    },
+    {
+      "id": "li",
+      "title": "LiteLLM",
+      "status": "ok",
+      "primary": "12 requests today",
+      "secondary": "340 tokens \u00b7 spend $0.5000",
+      "accent": "green",
+      "alert": null
+    }
+  ],
+  "sources": [
+    {
+      "id": "go",
+      "type": "opencode_go",
+      "name": "OpenCode Go",
+      "status": "warning",
+      "quota": {
+        "windows": [
+          {
+            "label": "5h",
+            "used_percent": 0,
+            "state": "stale",
+            "period_minutes": 300,
+            "resets_at": "2026-10-20T15:00:00+00:00",
+            "observed_at": "2026-10-20T10:00:00+00:00"
+          },
+          {
+            "label": "Weekly",
+            "used_percent": 3,
+            "state": "stale",
+            "period_minutes": 10080,
+            "resets_at": "2026-10-25T12:00:00+00:00",
+            "observed_at": "2026-10-20T10:00:00+00:00"
+          },
+          {
+            "label": "Monthly",
+            "used_percent": 5,
+            "state": "stale",
+            "period_minutes": null,
+            "resets_at": "2026-10-24T12:00:00+00:00",
+            "observed_at": "2026-10-20T10:00:00+00:00"
+          }
+        ]
+      },
+      "metrics": {},
+      "alerts": true,
+      "marks": [
+        80,
+        95
+      ]
+    },
+    {
+      "id": "cx",
+      "type": "codex",
+      "name": "Codex",
+      "status": "warning",
+      "quota": {
+        "windows": [
+          {
+            "label": "Weekly",
+            "used_percent": 2,
+            "state": "stale",
+            "period_minutes": 10080,
+            "resets_at": "2026-10-26T12:00:00+00:00",
+            "observed_at": "2026-10-20T10:00:00+00:00"
+          },
+          {
+            "label": "Secondary",
+            "used_percent": null,
+            "state": "unavailable",
+            "period_minutes": null,
+            "resets_at": null,
+            "observed_at": "2026-10-20T12:00:00+00:00"
+          }
+        ],
+        "reset_credits": {
+          "available": 3,
+          "expires_at": [
+            "2026-10-22T12:00:00+00:00",
+            "2026-10-29T12:00:00+00:00",
+            "2026-11-06T12:00:00+00:00"
+          ]
+        }
+      },
+      "metrics": {},
+      "alerts": true,
+      "marks": [
+        80,
+        95
+      ]
+    },
+    {
+      "id": "cl",
+      "type": "claude",
+      "name": "Claude",
+      "status": "ok",
+      "quota": {
+        "windows": [
+          {
+            "label": "5h",
+            "used_percent": 12,
+            "state": "stale",
+            "period_minutes": 300,
+            "resets_at": "2026-10-20T15:00:00+00:00",
+            "observed_at": "2026-10-20T10:00:00+00:00"
+          },
+          {
+            "label": "Weekly",
+            "used_percent": 66,
+            "state": "stale",
+            "period_minutes": 10080,
+            "resets_at": "2026-10-22T12:00:00+00:00",
+            "observed_at": "2026-10-20T10:00:00+00:00"
+          }
+        ],
+        "hint": "In use - quota 2h old"
+      },
+      "metrics": {},
+      "alerts": true,
+      "marks": [
+        80,
+        95
+      ]
+    },
+    {
+      "id": "oc",
+      "type": "ollama_cloud",
+      "name": "Ollama Cloud",
+      "status": "ok",
+      "quota": {
+        "windows": [
+          {
+            "label": "Monthly credits",
+            "used_percent": null,
+            "state": "unavailable",
+            "period_minutes": null,
+            "resets_at": null,
+            "observed_at": "2026-10-20T12:00:00+00:00"
+          }
+        ],
+        "activity": {
+          "request_count": 2,
+          "usage_usd": 2e-05,
+          "from": "2026-10-12T12:00:00+00:00",
+          "until": "2026-10-20T12:00:00+00:00",
+          "state": "available"
+        }
+      },
+      "metrics": {},
+      "alerts": true,
+      "marks": [
+        80,
+        95
+      ]
+    },
+    {
+      "id": "ol",
+      "type": "ollama",
+      "name": "Ollama",
+      "status": "ok",
+      "metrics": {
+        "loaded_model": "llama3",
+        "available_models": 5
+      },
+      "alerts": true,
+      "marks": [
+        80,
+        95
+      ]
+    },
+    {
+      "id": "li",
+      "type": "litellm",
+      "name": "LiteLLM",
+      "status": "ok",
+      "metrics": {
+        "requests_today": 12,
+        "tokens_today": 340,
+        "spend_today": 0.5,
+        "errors_today": 0
+      },
+      "alerts": true,
+      "marks": [
+        80,
+        95
+      ]
+    }
+  ],
+  "quota_schema_version": 1,
+  "display": {
+    "overflow_rows": 1
+  },
+  "alerts": {
+    "quiet": false,
+    "sound": true,
+    "pop_to_top": true,
+    "enabled": true
+  }
+}

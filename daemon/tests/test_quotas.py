@@ -20,7 +20,7 @@ from presto_ai_dash.sources.ollama_cloud import OllamaCloudSource
 from test_management import ManagementBase
 import presto_path
 from home import source_rows, HomeScroll, home_total_height, SOURCE_TOP, SOURCE_HEIGHT
-from ui import Palette, build_home_layout, draw_sources, PANEL
+from ui import Palette, build_home_layout, draw_sources, TRACK
 from test_ui import Display
 import test_home
 
@@ -273,7 +273,7 @@ class QuotaDeviceTests(unittest.TestCase):
                 self.assertIn("12%", texts)
                 self.assertIn("14%", texts)
                 self.assertEqual(texts.count("5h"), texts.count("Mo"))
-                self.assertIn("Mo resets 2d0h", texts)
+                self.assertIn("Mo resets 2d", texts)
         self.assertEqual(rows[0]["binding"], 2)
         self.assertTrue(all(w["percent"] is not None for row in rows for w in row["windows"]))
 
@@ -394,7 +394,7 @@ class QuotaDeviceTests(unittest.TestCase):
         display = Display()
         draw_sources(display, Palette(display), rows, 0, 3)
         self.assertIn("Monthly credits unavailable", [text for text, *_ in display.rows])
-        self.assertFalse(any(args[3] == 5 and color != PANEL for color, args in display.rectangles))
+        self.assertFalse(any(args[3] == 5 and color != TRACK for color, args in display.rectangles))
 
     def test_managed_home_keeps_saved_order_across_local_and_quota_accounts(self):
         report, _ = OllamaCloudSource().parse(cloud_response(), NOW)

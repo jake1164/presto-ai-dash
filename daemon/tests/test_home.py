@@ -18,7 +18,7 @@ from presto_ai_dash.models import SourceSnapshot
 from presto_ai_dash.quotas import quota_report, quota_window
 from test_management import ManagementBase
 from test_ui import Display
-from ui import (AMBER, PANEL, DAILY, WEEKLY, INK_DIM, Palette, build_home_layout, draw_home,
+from ui import (AMBER, TRACK, DAILY, WEEKLY, INK_DIM, Palette, build_home_layout, draw_home,
                 draw_sources)
 
 
@@ -105,8 +105,8 @@ class HomeLayoutTests(unittest.TestCase):
                 draw_home(display, Palette(display),
                           [{"name": "Test", "daily": daily, "weekly": weekly}], 0, 3)
                 bars = [(pen, rect) for pen, rect in display.rectangles if rect[1] >= 56 and rect[0] == 14]
-                self.assertEqual(bars[:2], [(PANEL, (14, 76, 218, 6)),
-                                            (PANEL, (14, 84, 218, 6))])
+                self.assertEqual(bars[:2], [(TRACK, (14, 76, 218, 6)),
+                                            (TRACK, (14, 84, 218, 6))])
                 fills = bars[2:]
                 expected = []
                 if daily is not None:
@@ -282,7 +282,7 @@ class HomeHintTests(unittest.TestCase):
         display = Display()
         draw_sources(display, Palette(display), [row], 0, 3)
         bars = [pen for pen, rect in display.rectangles if rect[2] > 20]
-        self.assertEqual(set(bars), {PANEL})  # tracks only, never a filled bar
+        self.assertEqual(set(bars), {TRACK})  # tracks only, never a filled bar
 
     def test_mixed_expired_only_the_stale_window_goes_unknown(self):
         windows = [self.window("5h", 300, 34, "stale", minutes_ago=3 * 24 * 60,

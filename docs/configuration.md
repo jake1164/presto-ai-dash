@@ -445,6 +445,52 @@ cards show details and UTC resets. Names, enable/disable changes, and accounts
 appear on the next successful poll. Refreshes preserve the selected card by
 instance ID; removing it returns to Home. Static samples remain DEMO.
 
+## The small summary and the lazy card detail
+
+The status payload has two shapes. A client that asks for nothing gets the
+whole payload, exactly as before. A client that asks for the small summary
+gets the same payload without the cards' detail lines:
+
+```text
+GET /api/v1/status?cards=lazy
+Authorization: Bearer <shared token>
+```
+
+The Presto asks for the small summary, so one source's detail can grow
+without making every poll bigger. The answer keeps the card's title,
+status, primary and secondary lines, the `sources` array and the settings;
+only the `detail` lines of the cards are left out.
+
+One card's detail is fetched when the card is opened:
+
+```text
+GET /api/v1/cards/<card id>
+Authorization: Bearer <shared token>
+```
+
+The answer is `{"id": ..., "tiles": [...], "lines": [...]}`:
+
+- `tiles` is a short list of at most six `{"label", "value", "tone"}` items.
+  The label is at most 8 ASCII characters, the value at most 10, and the tone
+  is one of `normal`, `good`, `warn`, `bad` or `dim`. A value the report does
+  not carry is left out; it is never shown as zero.
+- `lines` are that card's detail lines, the same ones the whole payload
+  carries.
+
+The card id must match `[A-Za-z0-9_-]{1,80}`. A wrong token is 401, an
+unknown card is 404, and the route changes nothing: it reads the last
+snapshots and returns what the card would show. It is never a provider call.
+
+The payload keys the device reads are on a whitelist in
+`daemon/src/presto_ai_dash/dashboard.py`, and a test proves that the device
+code reads nothing else. Two keys are new in this shape:
+
+- `sources[].marks` is the pair of percentages `[warning, critical]` that the
+  service really uses, so a card can draw a tick on its bars. The device draws
+  them and decides nothing; missing or junk marks mean no ticks.
+- `cards[].tiles` is optional. A payload that carries the tiles with the card
+  is drawn the same way as one that fetches them separately.
+
 ## The device's one write: `POST /api/v1/alerts/{id}`
 
 The Presto can switch the alerts of one service on or off. It sends the shared

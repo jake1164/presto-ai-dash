@@ -421,6 +421,50 @@ def _with_threshold(card, snapshot, resolution, now):
                 card.detail, None, card.alert)
 
 
+def _marks_for(row, alerts, resolutions):
+    """The warning and critical percentages this service really uses.
+
+    They travel to the device as two numbers so a card can draw a tick
+    mark on its bars. The device draws them and decides nothing: the
+    daemon still decides the status.
+    """
+    resolution = _resolution_for(row, alerts, resolutions)
+    warning = resolution.get("warning_percent")
+    critical = resolution.get("critical_percent")
+    if type(warning) is not int or type(critical) is not int:
+        return None
+    return [warning, critical]
+
+
+def build_card_details(snapshots, instances, alerts=None, now=None,
+                       resolutions=None):
+    """Every card's lazy detail: its tiles and its lines, by card id.
+
+    The summary payload carries only the card's headline; the lines and
+    the tiles are fetched when the card is opened, so one source's detail
+    can grow without making every poll bigger.
+    """
+    from . import card_tiles
+
+    payload = build_instance_payload(snapshots, instances, alerts, now,
+                                     resolutions)
+    sources = {}
+    for source in payload.get("sources", []):
+        if isinstance(source, dict) and source.get("id"):
+            sources[source["id"]] = source
+    details = {}
+    for card in payload.get("cards", []):
+        if not isinstance(card, dict) or not card.get("id"):
+            continue
+        source = sources.get(card["id"], {})
+        details[card["id"]] = {
+            "id": card["id"],
+            "tiles": card_tiles.tiles_for(source.get("type"), source, now),
+            "lines": [str(line) for line in (card.get("detail") or [])],
+        }
+    return details
+
+
 def build_instance_payload(snapshots, instances, alerts=None, now=None,
                            resolutions=None):
     """Home plus one card per enabled account, without overlapping totals.
@@ -476,7 +520,9 @@ def build_instance_payload(snapshots, instances, alerts=None, now=None,
          # service alerts at all.
          "alert_observations": (reporting[row["id"]].alerts
                                 if row["id"] in reporting else []),
-         "alerts": _resolution_for(row, alerts, resolutions)["enabled"]}
+         "alerts": _resolution_for(row, alerts, resolutions)["enabled"],
+         # The two effective thresholds, for the tick marks on a card's bars.
+         "marks": _marks_for(row, alerts, resolutions)}
         for row in enabled
     ]
     payload["quota_schema_version"] = QUOTA_SCHEMA_VERSION
@@ -494,7 +540,8 @@ def build_instance_payload(snapshots, instances, alerts=None, now=None,
 # screens from the slim payload, and that this list covers every key that
 # presto/home.py reads). Everything else stays available to the admin page, which
 # builds its own listing. Add a key here when presto/ starts reading it.
-DEVICE_SOURCE_KEYS = ("id", "type", "name", "status", "quota", "metrics", "alerts")
+DEVICE_SOURCE_KEYS = ("id", "type", "name", "status", "quota", "metrics", "alerts",
+                      "marks")
 DEVICE_QUOTA_KEYS = ("windows", "activity", "hint", "reset_credits")
 DEVICE_WINDOW_KEYS = ("label", "used_percent", "state", "period_minutes",
                       "resets_at", "observed_at")
@@ -502,6 +549,15 @@ DEVICE_ACTIVITY_KEYS = ("request_count", "usage_usd", "from", "until", "state")
 DEVICE_RESET_KEYS = ("available", "expires_at")
 DEVICE_METRICS_KEYS = ("requests_today", "tokens_today", "loaded_model", "spend_today",
                        "errors_today", "last_measured_tokens_per_sec", "available_models")
+# The keys the device reads from a card. "tiles" is optional: the tiles
+# travel with the lazy card detail, and a payload that carries them inline
+# (a fixture, or a daemon that sends the whole card) is read the same way.
+DEVICE_CARD_KEYS = ("id", "title", "status", "primary", "secondary", "detail",
+                    "accent", "alert", "tiles")
+# The keys of the lazy card detail: one card's tiles and its lines.
+DEVICE_DETAIL_KEYS = ("id", "tiles", "lines")
+# The keys of one tile.
+DEVICE_TILE_KEYS = ("label", "value", "tone")
 # The top-level keys the device reads, and the keys inside "alerts".
 DEVICE_TOP_KEYS = ("sources", "card_order", "updated_at", "display", "alerts")
 DEVICE_ALERT_KEYS = ("quiet", "sound", "pop_to_top", "enabled")

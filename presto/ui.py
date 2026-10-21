@@ -15,12 +15,21 @@ from cards import truncate
 # Layout, in the 240x240 default framebuffer.
 MARGIN = 8
 TITLE_Y = 6
-STATUS_Y = 26
-PRIMARY_Y = 48
-SECONDARY_Y = 84
-DETAIL_Y = 108
+STATUS_Y = 24
 DETAIL_LINE_H = 16
 FOOTER_Y = 222
+
+# The card, from the top: the title, the status chip on the right, the
+# numbers, and the detail lines. A quota card draws its windows where the
+# numbers go, so the rows of a card and the bars of Home agree.
+CARD_ROWS_TOP = 44
+CARD_ROW_H = 30
+CARD_ROW_H_TIGHT = 28
+CARD_DETAIL_H = 12
+CARD_BOTTOM = 204
+CARD_DETAIL_LINES = 6
+# One tile: a dim label over a bright value, in a two-column grid.
+TILE_H = 27
 
 # Character caps; _text also fits the selected font to the available pixels.
 TITLE_MAX = 22
@@ -32,6 +41,7 @@ FOOTER_MAX = 30
 # Colours, created once per display instance.
 INK = (235, 235, 235)
 INK_DIM = (140, 140, 140)
+INK_FAINT = (105, 105, 112)
 BACKGROUND = (16, 18, 22)
 PANEL = (28, 31, 38)
 DAILY = (65, 225, 255)
@@ -40,14 +50,31 @@ AMBER = (255, 169, 56)
 MONTHLY = AMBER
 LIMIT = (255, 64, 64)
 
+# The track a quota bar is drawn on. It has to be visible against the
+# background: the old panel colour was 1.13:1, which is nearly invisible.
+# This one is 1.70:1 (see the contrast test).
+TRACK = (56, 60, 72)
+
 # Live Home rows: a name line, then a bars/reset line.
 MARKER = 8
-BARS_H = 11
+# The height of the bar area of a row. The row is 46 pixels tall and the
+# numbers above the bars take 30 of them, so 14 leaves exactly the 2 pixels
+# of space between two rows.
+BARS_H = 14
+# The gap between two bars of the same row.
+BAR_GAP = 1
+
+# How far a stale window's colour is faded toward grey. It keeps a tint of its
+# own hue, so three bars can still be told apart, but it stays readable:
+# darkening a dark hue (the weekly purple at 45% was 1.36:1 on the background)
+# made stale numerals disappear. Contrast is checked in tests/test_presto_bars.
+DIM_FADE = 0.55
 
 # The bell that switches one service's alerts on and off. It sits in the
 # top-right corner of a card: the drawn bell is small, the tap area is
 # large.
-BELL_ICON = 12
+BELL_ICON = 20
+BELL_HEIGHT = 16
 BELL_HIT = 48
 BELL_GAP = 4
 BELL_ON = "ALERTS ON"
@@ -55,29 +82,68 @@ BELL_OFF = "ALERTS OFF"
 BELL_OFF_ALL = "ALERTS OFF (ALL)"
 
 # The bell, drawn from rectangles: the primitives the preview understands.
-# It is an outline, so it reads as a bell at twelve pixels.
+# It is an outline twenty pixels wide, so it reads as a bell across a desk.
 BELL_SHAPE = (
-    (5, 0, 2, 2),     # the knob
-    (4, 2, 1, 1), (7, 2, 1, 1),
-    (3, 3, 1, 1), (8, 3, 1, 1),
-    (2, 4, 1, 1), (9, 4, 1, 1),
-    (2, 5, 1, 1), (9, 5, 1, 1),
-    (1, 6, 1, 1), (10, 6, 1, 1),
-    (1, 7, 1, 1), (10, 7, 1, 1),
-    (1, 8, 1, 1), (10, 8, 1, 1),
-    (0, 9, 12, 1),    # the rim
-    (5, 10, 2, 2),    # the clapper
+    (9, 0, 2, 2),     # the knob
+    (8, 2, 1, 2), (11, 2, 1, 2),
+    (7, 4, 1, 2), (12, 4, 1, 2),
+    (6, 6, 1, 2), (13, 6, 1, 2),
+    (4, 8, 1, 2), (15, 8, 1, 2),
+    (2, 10, 1, 3), (17, 10, 1, 3),
+    (0, 13, 20, 1),   # the rim
+    (9, 14, 2, 2),    # the clapper
 )
 
-# The small mark on a Home row whose service has its alerts off.
-ALERT_MARK = 6
+# The small mark on a Home row whose service has its alerts off: a dim
+# eight-pixel bell with a slash cut through it. It is never interactive.
+ALERT_MARK = 8
 ALERT_MARK_SHAPE = (
-    (2, 0, 2, 1),
-    (1, 1, 4, 1),
-    (1, 2, 4, 1),
-    (0, 3, 6, 1),
+    (3, 0, 2, 2),     # the knob
+    (2, 2, 4, 2),     # the top
+    (1, 4, 6, 2),     # the body
+    (0, 6, 8, 1),     # the rim
+)
+# The slash, cut out of the bell in the background colour.
+ALERT_MARK_CUT = (
+    (4, 2, 2, 2),
+    (3, 3, 2, 2),
     (2, 4, 2, 2),
 )
+
+
+def bar_layout(count):
+    """The bar heights of a row and the gap between them.
+
+    The bars never leave the bar area: with many windows the gap shrinks
+    first, so a row of eight windows still fits.
+    """
+    if count <= 0:
+        return [], BAR_GAP
+    if count <= 2:
+        return [6] * count, BAR_GAP
+    gap = BAR_GAP
+    height = max(1, (BARS_H - (count - 1) * gap) // count)
+    while gap and height * count + gap * (count - 1) > BARS_H:
+        gap -= 1
+        height = max(1, (BARS_H - (count - 1) * gap) // count)
+    return [height] * count, gap
+
+
+def bar_heights(count):
+    """The height of each bar of a row, so the bars fill the bar area.
+
+    Three windows get four-pixel bars with one-pixel gaps; one or two
+    windows get a taller bar each. Never more than ``BARS_H`` in total.
+    """
+    return bar_layout(count)[0]
+
+
+def dim_rgb(rgb, fade=DIM_FADE):
+    """The colour faded toward grey: a stale window keeps a tint of its hue."""
+    keep = 1.0 - fade
+    return (int(rgb[0] * keep + INK_DIM[0] * fade),
+            int(rgb[1] * keep + INK_DIM[1] * fade),
+            int(rgb[2] * keep + INK_DIM[2] * fade))
 
 
 class Palette(object):
@@ -159,18 +225,27 @@ def _draw_bell(display, palette, x, y, rgb, slashed=False, crossed=False):
     # The mark is drawn over the bell in the bright ink, so it reads on
     # every background.
     display.set_pen(palette.pen(INK))
-    for step in range(11):
-        if slashed:
-            display.rectangle(x + step, y + step, 2, 2)
-        if crossed:
-            display.rectangle(x + step, y + step, 2, 2)
-            display.rectangle(x + 10 - step, y + step, 2, 2)
+    if slashed:
+        for step in range(12):
+            display.rectangle(x + 2 + step, y + step, 2, 2)
+    if crossed:
+        # A compact cross in the middle: the bell's outline still reads.
+        for step in range(8):
+            display.rectangle(x + 5 + step, y + 3 + step, 2, 2)
+            display.rectangle(x + 13 - step, y + 3 + step, 2, 2)
 
 
 def _draw_alert_mark(display, palette, x, y):
-    """The small dim bell on a Home row whose service has its alerts off."""
+    """The small dim bell on a Home row whose service has its alerts off.
+
+    A slash is cut out of it, so it reads as "alerts off" and not as a
+    decoration. It is drawn on the row's background, never on a bar.
+    """
     display.set_pen(palette.pen(INK_DIM))
     for dx, dy, w, h in ALERT_MARK_SHAPE:
+        display.rectangle(x + dx, y + dy, w, h)
+    display.set_pen(palette.pen(BACKGROUND))
+    for dx, dy, w, h in ALERT_MARK_CUT:
         display.rectangle(x + dx, y + dy, w, h)
 
 
@@ -178,7 +253,8 @@ def draw_home(display, palette, quotas, index, total, muted=False,
               width=240, height=240, scroll=0):
     """Scrollable demo quotas with a pinned title, legend, and footer."""
     from alerts import rgb_for_accent
-    from home import LIST_TOP, LIST_HEIGHT, ROW_HEIGHT, quota_label, quota_width, scroll_limit
+    from home import (LIST_TOP, LIST_HEIGHT, ROW_HEIGHT, bar_fill, quota_label,
+                      scroll_limit)
 
     display.set_pen(palette.pen(BACKGROUND))
     display.clear()
@@ -209,11 +285,11 @@ def draw_home(display, palette, quotas, index, total, muted=False,
         display.set_font("bitmap8")
         _text(display, palette, quota["name"], 14, y, INK, scale=2,
               max_width=bar_width)
-        display.set_pen(palette.pen(PANEL))
+        display.set_pen(palette.pen(TRACK))
         display.rectangle(14, y + 20, bar_width, 6)
         display.rectangle(14, y + 28, bar_width, 6)
-        weekly_width = quota_width(quota.get("weekly"), bar_width)
-        daily_width = quota_width(quota.get("daily"), bar_width)
+        weekly_width = bar_fill(quota.get("weekly"), bar_width)
+        daily_width = bar_fill(quota.get("daily"), bar_width)
         if daily_width:
             display.set_pen(palette.pen(DAILY))
             display.rectangle(14, y + 20, daily_width, 6)
@@ -246,16 +322,26 @@ def draw_home(display, palette, quotas, index, total, muted=False,
         _text(display, palette, "MUTED", width - 58, FOOTER_Y, INK_DIM, scale=1)
 
 
-def _window_rgb(window, dim):
+def _window_hue(window):
     """Cyan for a day or less, purple for longer, orange monthly; red at limit."""
-    if dim or window["state"] != "available":
-        return INK_DIM
     if (window["percent"] or 0) >= 100:
         return LIMIT
     period = window.get("period_minutes")
     if not period:
         return MONTHLY
     return DAILY if period <= 1440 else WEEKLY
+
+
+def _window_rgb(window, dim):
+    """The colour of a window's bar and label.
+
+    A stale or dimmed window keeps a tint of its own hue, faded toward grey,
+    so three bars of one service can still be told apart and stay readable.
+    """
+    rgb = _window_hue(window)
+    if dim or window["state"] != "available":
+        return dim_rgb(rgb)
+    return rgb
 
 
 def _marker(display, palette, row, x, y, size, stale):
@@ -297,7 +383,7 @@ def _freshness(row, stale):
 
 def _draw_quota_row(display, palette, row, y, row_width, stale):
     """Name and reset; big labelled percentages; one stacked bar per window."""
-    from home import quota_label, quota_width, home_windows, window_tag
+    from home import bar_fill, home_windows, quota_label, window_tag
     right = 14 + row_width
     _marker(display, palette, row, 14, y, MARKER, stale)
     note, note_rgb = _freshness(row, stale)
@@ -365,17 +451,17 @@ def _draw_quota_row(display, palette, row, y, row_width, stale):
         display.set_font("bitmap6")
         _text(display, palette, text, 14, bars_y + 2, INK_DIM, scale=1)
         return
-    bar_h = min(5, max(2, (BARS_H - (len(windows) - 1)) // len(windows)))
-    for window in windows:
-        display.set_pen(palette.pen(PANEL))
+    heights, gap = bar_layout(len(windows))
+    for index, window in enumerate(windows):
+        bar_h = heights[index]
+        display.set_pen(palette.pen(TRACK))
         display.rectangle(14, bars_y, row_width, bar_h)
         # An expired window's bar stays empty; a stale one keeps its dim fill.
-        filled = 0 if window.get("expired") else quota_width(window["percent"], row_width)
+        filled = 0 if window.get("expired") else bar_fill(window["percent"], row_width)
         if filled:
             display.set_pen(palette.pen(_window_rgb(window, stale)))
             display.rectangle(14, bars_y, filled, bar_h)
-        bars_y += bar_h + 1
-
+        bars_y += bar_h + gap
 
 def _draw_local_row(display, palette, row, y, row_width, stale):
     """Fallback list row when no quota accounts exist: name/status, usage."""
@@ -547,16 +633,180 @@ def draw_sources(display, palette, rows, index, total, status="offline",
         _text(display, palette, "MUTED", width - 58, FOOTER_Y, INK_DIM, scale=1)
 
 
+def _draw_chip(display, palette, text, right, y, background, foreground,
+               scale=2, height=16):
+    """A small labelled box, right-aligned: the status and the stale chip."""
+    display.set_font("bitmap6")
+    width = display.measure_text(text, scale)
+    x = max(0, right - width - 6)
+    display.set_pen(palette.pen(background))
+    display.rectangle(x, y, width + 6, height)
+    _text(display, palette, text, x + 3, y + (height - 6 * scale) // 2,
+          foreground, scale=scale)
+    return x
+
+
+def _draw_marks(display, palette, marks, x, y, width, height):
+    """Tick marks at the warning and critical percentages.
+
+    The daemon sends the two numbers; the device draws them and decides
+    nothing. Missing or junk marks mean no ticks at all: half a scale
+    would be worse than none.
+    """
+    if not isinstance(marks, (list, tuple)) or len(marks) < 2:
+        return
+    warning, critical = marks[0], marks[1]
+    for percent in (warning, critical):
+        if type(percent) is not int or percent <= 0 or percent > 100:
+            return
+    for index, percent in enumerate((warning, critical)):
+        position = x + round(width * percent / 100)
+        if position > x + width - 1:
+            position = x + width - 1
+        display.set_pen(palette.pen(INK))
+        display.rectangle(position, y, 2 if index else 1, height)
+
+
+def _reset_note(window):
+    """The reset countdown and the absolute time after it."""
+    from home import reset_label, reset_stamp
+
+    reset_in = window.get("reset_in")
+    if reset_in is None:
+        return "", ""
+    if reset_in <= 0:
+        return "reset passed", ""
+    note = "resets in " + reset_label(reset_in)
+    return note, reset_stamp(window.get("resets_at"))
+
+
+def _draw_window_block(display, palette, window, x, y, width, stale, marks=None,
+                       row_h=CARD_ROW_H):
+    """One window of a quota card: its colour, its big number, its bar.
+
+    The same parts a Home row draws, so a number looks the same in both
+    places.
+    """
+    from home import bar_fill, quota_label, window_tag
+
+    tag = window_tag(window)
+    value = quota_label(None if window.get("expired") else window["percent"])
+    rgb = _window_rgb(window, stale)
+    display.set_font("bitmap8")
+    _text(display, palette, tag, x, y + 8, INK_DIM, scale=1)
+    tag_w = display.measure_text(tag, 1) + 3
+    _text(display, palette, value, x + tag_w, y, rgb, scale=2)
+
+    bar_y = y + 17
+    bar_h = 5 if row_h >= CARD_ROW_H else 4
+    display.set_pen(palette.pen(TRACK))
+    display.rectangle(x, bar_y, width, bar_h)
+    filled = 0 if window.get("expired") else bar_fill(window["percent"], width)
+    if filled:
+        display.set_pen(palette.pen(rgb))
+        display.rectangle(x, bar_y, filled, bar_h)
+    _draw_marks(display, palette, marks, x, bar_y, width, bar_h)
+
+    relative, absolute = _reset_note(window)
+    if relative:
+        display.set_font("bitmap6")
+        _text(display, palette, relative, x, bar_y + bar_h + 1, INK_DIM, scale=1)
+    if absolute:
+        display.set_font("bitmap6")
+        _text(display, palette, absolute,
+              x + display.measure_text(relative, 1) + 4, bar_y + bar_h + 1,
+              INK_FAINT, scale=1)
+
+
+def _missing_window(windows):
+    """The dim line for a window the provider does not report.
+
+    None when every window has a reading: there is then nothing to fold.
+    """
+    for window in windows:
+        if window.get("percent") is None:
+            label = str(window.get("label") or "").strip()
+            head = label.split(" ")[0].lower() if label else "secondary"
+            return "no %s window" % head
+    return None
+
+
+def _filter_reset_lines(lines, windows):
+    """Drop the per-window reset lines: the quota rows show them better."""
+    heads = []
+    for window in windows:
+        reset_in = window.get("reset_in")
+        if reset_in is None or reset_in <= 0:
+            continue
+        label = str(window.get("label") or "").strip()
+        if label:
+            heads.append(label.split(" ")[0])
+    kept = []
+    for line in lines:
+        if any(line.startswith(head + " reset: ") for head in heads):
+            continue
+        kept.append(line)
+    return kept
+
+
+def _tone_rgb(tone):
+    """The colour of a tile's value, from the palette the card already uses."""
+    from alerts import rgb_for_accent
+
+    if tone == "good":
+        return rgb_for_accent("green")
+    if tone == "warn":
+        return rgb_for_accent("yellow")
+    if tone == "bad":
+        return rgb_for_accent("red")
+    if tone == "dim":
+        return INK_DIM
+    return INK
+
+
+def _draw_tiles(display, palette, tiles, x, y, width):
+    """The tiles as a two-column grid: a dim label over a bright value."""
+    if not tiles:
+        return y
+    column = width // 2
+    for index, item in enumerate(tiles):
+        cell_x = x + (index % 2) * column
+        cell_y = y + (index // 2) * TILE_H
+        label = item.get("label") or ""
+        value = item.get("value") or ""
+        tone = item.get("tone") or "normal"
+        display.set_font("bitmap8")
+        _text(display, palette, label, cell_x, cell_y, INK_DIM, scale=1,
+              max_width=column - 4)
+        _text(display, palette, value, cell_x, cell_y + 9, _tone_rgb(tone),
+              scale=2, max_width=column - 4)
+    rows = (len(tiles) + 1) // 2
+    return y + rows * TILE_H
+
+
 def draw_card(display, palette, card, index, total, muted=False,
-              width=240, height=240, stale=False, alerts=None, message=None):
+              width=240, height=240, stale=False, alerts=None, message=None,
+              quota=None, marks=None, detail=None, tiles=None, loading=False,
+              failed=False, detail_open=False):
     """Draw one card.
 
     ``index``/``total`` drive the page dots at the bottom. ``muted`` dims the
     accent so the device visibly acknowledges a long-press. ``alerts`` is
     the service's alert state, and draws the bell in the top-right corner.
     ``message`` is a short line above the dots, used when a write fails.
+
+    ``quota`` is this card's structured quota: the windows the daemon sent
+    for this service. They are drawn like Home draws them, so a card and a
+    row show the same numbers the same way. A card without that data falls
+    back to the text layout. ``marks`` are the warning and critical
+    percentages, drawn as ticks on the bars.
+
+    ``detail`` is the lazily fetched detail: its tiles and its lines.
+    ``tiles`` draws tiles the payload carried with the card. ``loading``
+    and ``failed`` say what the lazy fetch is doing.
     """
     from alerts import rgb_for_accent
+    from cards import is_unavailable_line
 
     display.set_pen(palette.pen(BACKGROUND))
     display.clear()
@@ -583,11 +833,6 @@ def draw_card(display, palette, card, index, total, muted=False,
     _text(display, palette, card.title, title_x, TITLE_Y, INK,
           scale=2, max_chars=TITLE_MAX, max_width=title_width)
 
-    # Status pill
-    display.set_font("bitmap6")
-    _text(display, palette, card.status.upper(), MARGIN + 6, STATUS_Y,
-          accent_rgb, scale=2, max_chars=14)
-
     # The bell: the service's own alert switch.
     if label:
         bell_colour = accent_rgb if (alerts.get("enabled") and
@@ -599,22 +844,87 @@ def draw_card(display, palette, card, index, total, muted=False,
         _text(display, palette, label, label_right - label_w, TITLE_Y + 3,
               bell_colour, scale=1, max_width=label_w + 2)
 
-    # Primary metric, the biggest thing on screen.
-    display.set_font("bitmap8")
-    _text(display, palette, card.primary, MARGIN + 6, PRIMARY_Y, INK,
-          scale=3, max_chars=PRIMARY_MAX, min_scale=2)
+    # The status chip, on the right of the card, and the stale chip beside
+    # it: staleness is said once, not on every line.
+    chip_right = width - MARGIN
+    if card.stale or stale:
+        chip_right = _draw_chip(display, palette, "STALE", chip_right,
+                                STATUS_Y, TRACK, INK_DIM, scale=1) - 4
+    _draw_chip(display, palette, card.status.upper(), chip_right, STATUS_Y,
+               TRACK, accent_rgb, scale=2)
 
-    # Secondary line
-    display.set_font("bitmap6")
-    _text(display, palette, card.secondary, MARGIN + 6, SECONDARY_Y, INK_DIM,
-          scale=2, max_chars=SECONDARY_MAX)
+    windows = quota if isinstance(quota, list) else []
+    lines = detail if isinstance(detail, list) else card.detail
+    secondary_missing = is_unavailable_line(card.secondary)
+    if windows:
+        # The provider does not report this window: the lines that say so
+        # are folded into one dim line below.
+        lines = [line for line in lines if not is_unavailable_line(line)]
+    missing = _missing_window(windows) if windows else None
+    if missing is None and secondary_missing:
+        missing = "no secondary window"
+    y = CARD_ROWS_TOP
+    measured = [window for window in windows
+                if window.get("percent") is not None and not window.get("expired")]
+    if measured:
+        # A quota card: the windows are drawn like Home draws them.
+        row_h = CARD_ROW_H if len(windows) <= 2 else CARD_ROW_H_TIGHT
+        for window in measured:
+            _draw_window_block(display, palette, window, MARGIN + 6, y,
+                               width - 2 * MARGIN - 6, stale, marks, row_h)
+            y += row_h
+        lines = _filter_reset_lines(lines, windows)
+    else:
+        # A text card: the big number, the dim line under it, then the lines.
+        _text(display, palette, card.primary, MARGIN + 6, y, INK,
+              scale=3, max_chars=PRIMARY_MAX, min_scale=2)
+        y += 28
+        if card.secondary and not secondary_missing:
+            display.set_font("bitmap6")
+            _text(display, palette, card.secondary, MARGIN + 6, y, INK_DIM,
+                  scale=2, max_chars=SECONDARY_MAX)
+            y += 16
+    if missing:
+        display.set_font("bitmap6")
+        _text(display, palette, missing, MARGIN + 6, y, INK_DIM, scale=1)
+        y += 10
+
+    # The tiles of the card, when it has any. The detail view shows the
+    # lines instead: the tiles and the lines never fight for the same room.
+    card_tiles = tiles if isinstance(tiles, list) else card.tiles
+    if not isinstance(card_tiles, list):
+        card_tiles = []
+    if detail_open:
+        card_tiles = []
+    if card_tiles:
+        y += 4
+        y = _draw_tiles(display, palette, card_tiles, MARGIN + 6, y,
+                        width - 2 * MARGIN - 6)
+    elif loading:
+        # A quiet placeholder: the detail is on its way.
+        display.set_font("bitmap6")
+        _text(display, palette, "loading detail", MARGIN + 6, y, INK_FAINT,
+              scale=1)
+        y += 12
+    elif failed and not lines:
+        # The detail could not be fetched and the card has no lines of its
+        # own: the summary stays, and says so.
+        display.set_font("bitmap6")
+        _text(display, palette, "detail unavailable", MARGIN + 6, y, INK_FAINT,
+              scale=1)
+        y += 12
 
     # Detail lines
-    y = DETAIL_Y
-    for line in card.detail_lines(6):
+    room = max(0, (CARD_BOTTOM - y) // CARD_DETAIL_H)
+    count = min(CARD_DETAIL_LINES, room)
+    display.set_font("bitmap6")
+    for line in lines[:count]:
         _text(display, palette, line, MARGIN + 6, y, INK_DIM,
               scale=1, max_chars=DETAIL_MAX)
-        y += DETAIL_LINE_H
+        y += CARD_DETAIL_H
+    if len(lines) > count:
+        _text(display, palette, "+%d more (tap)" % (len(lines) - count),
+              MARGIN + 6, y, INK_FAINT, scale=1, max_chars=DETAIL_MAX)
 
     # Page dots
     if message:

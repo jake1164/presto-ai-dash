@@ -73,6 +73,15 @@ def build_url(host, port, path="/api/v1/status"):
     return "http://{}:{}{}".format(host, port, path)
 
 
+# The device asks for the small summary: the card's lines and tiles are
+# fetched when the card is opened.
+LAZY_QUERY = "?cards=lazy"
+# The answer to a status fetch: the whole payload.
+STATUS_RESPONSE_LIMIT = 65536
+# The answer to a card fetch: one card's tiles and lines.
+CARD_RESPONSE_LIMIT = 8192
+
+
 # The device's only write: one service's alerts on or off. The service id
 # goes into the path, so it must be the plain identifier the daemon uses.
 SAFE_SERVICE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
@@ -263,9 +272,26 @@ class StatusClient(object):
         This speaks the daemon's Content-Length JSON contract. Redirects and
         chunked responses are rejected; credentials are never forwarded.
         """
+        return await self._fetch_path(self.path, STATUS_RESPONSE_LIMIT)
+
+    async def fetch_card(self, card_id):
+        """Fetch one card's lazy detail: its tiles and its lines.
+
+        The same contract as ``fetch_async``: bounded asyncio streams, the
+        same stages and reason strings, no redirect, no chunked body and a
+        capped answer. It is a read: nothing is changed on the daemon.
+        """
+        identifier = safe_service_id(card_id)
+        if identifier is None:
+            raise StatusError("invalid card id")
+        return await self._fetch_path("/api/v1/cards/" + identifier,
+                                      CARD_RESPONSE_LIMIT)
+
+    async def _fetch_path(self, path, limit):
         import asyncio
         try:
-            return await asyncio.wait_for(self._fetch_stream(), self.timeout)
+            return await asyncio.wait_for(self._fetch_stream(path, limit),
+                                          self.timeout)
         except (Unauthorised, StatusError):
             raise
         except Exception as exc:
@@ -273,13 +299,15 @@ class StatusClient(object):
             error.reason = describe_error(exc, self.stage)
             raise error
 
-    async def _fetch_stream(self):
+    async def _fetch_stream(self, path=None, limit=STATUS_RESPONSE_LIMIT):
         import asyncio
         writer = None
         self.stage = "conn"
         self.received = 0
         try:
-            path = self.path if self.path.startswith("/") else "/" + self.path
+            path = path if path is not None else self.path
+            if not path.startswith("/"):
+                path = "/" + path
             headers = self.headers
             if any(char in str(value) for value in (self.host, self.token, path)
                    for char in ("\r", "\n")):
@@ -321,7 +349,7 @@ class StatusClient(object):
                 raise Unauthorised("daemon rejected the shared token")
             if status != 200:
                 raise StatusError("daemon returned HTTP %s" % status)
-            if not 0 <= length <= 65536 or b"transfer-encoding" in headers:
+            if not 0 <= length <= limit or b"transfer-encoding" in headers:
                 raise StatusError("unsupported response size or framing")
             self.stage = "body"
             self.received = len(body)

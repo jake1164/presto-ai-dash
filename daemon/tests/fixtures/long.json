@@ -1,0 +1,415 @@
+{
+  "app": "presto-ai-dash",
+  "version": "0.1.0",
+  "overall_status": "warning",
+  "updated_at": "2026-10-20T12:00:00+00:00",
+  "card_order": "accounts",
+  "cards": [
+    {
+      "id": "dash",
+      "title": "A very long service title indeed",
+      "status": "warning",
+      "primary": "12345% (stale)",
+      "secondary": "A very long secondary line of text",
+      "detail": [
+        "OpenCode Go: warning",
+        "Codex: warning",
+        "Claude: ok",
+        "Ollama Cloud: ok",
+        "Ollama: ok",
+        "LiteLLM: ok"
+      ],
+      "accent": "yellow",
+      "alert": null,
+      "tiles": []
+    },
+    {
+      "id": "go",
+      "title": "A very long service title indeed",
+      "status": "warning",
+      "primary": "12345% (stale)",
+      "secondary": "A very long secondary line of text",
+      "detail": [
+        "5h reset: 10-20 15:00Z",
+        "Weekly reset: 10-25 12:00Z",
+        "Monthly reset: 10-24 12:00Z"
+      ],
+      "accent": "yellow",
+      "alert": null,
+      "tiles": [
+        {
+          "label": "5h",
+          "value": "0%",
+          "tone": "normal"
+        },
+        {
+          "label": "Weekly",
+          "value": "3%",
+          "tone": "normal"
+        },
+        {
+          "label": "Monthly",
+          "value": "5%",
+          "tone": "normal"
+        }
+      ]
+    },
+    {
+      "id": "cx",
+      "title": "A very long service title indeed",
+      "status": "warning",
+      "primary": "12345% (stale)",
+      "secondary": "A very long secondary line of text",
+      "detail": [
+        "Weekly reset: 10-26 12:00Z",
+        "Secondary reset: unavailable",
+        "Resets avail: 3",
+        "Next exp: 10-22 12:00Z (2 days)",
+        "Credits: 0",
+        "Source: local Codex app-server"
+      ],
+      "accent": "yellow",
+      "alert": null,
+      "tiles": [
+        {
+          "label": "resets",
+          "value": "3",
+          "tone": "good"
+        },
+        {
+          "label": "next exp",
+          "value": "10-22",
+          "tone": "normal"
+        },
+        {
+          "label": "credits",
+          "value": "0",
+          "tone": "normal"
+        }
+      ]
+    },
+    {
+      "id": "cl",
+      "title": "A very long service title indeed",
+      "status": "ok",
+      "primary": "12345% (stale)",
+      "secondary": "A very long secondary line of text",
+      "detail": [
+        "5h reset: 10-20 15:00Z",
+        "Weekly reset: 10-22 12:00Z",
+        "Quota via export, 2 h old",
+        "Last used: 3m ago (VS Code)",
+        "Log tokens 5h/7d: 1.2M/19.4M",
+        "Credit: $100 of $100 (exp 11-05)"
+      ],
+      "accent": "green",
+      "alert": null,
+      "tiles": [
+        {
+          "label": "last use",
+          "value": "10h ago",
+          "tone": "dim"
+        },
+        {
+          "label": "tok 5h",
+          "value": "1.2M",
+          "tone": "normal"
+        },
+        {
+          "label": "tok 7d",
+          "value": "19.4M",
+          "tone": "normal"
+        },
+        {
+          "label": "credit",
+          "value": "$100/$100",
+          "tone": "normal"
+        }
+      ]
+    },
+    {
+      "id": "oc",
+      "title": "A very long service title indeed",
+      "status": "ok",
+      "primary": "12345% (stale)",
+      "secondary": "A very long secondary line of text",
+      "detail": [
+        "Monthly reset: unavailable",
+        "Activity: available",
+        "Period: 2026-10-12 - 2026-10-20"
+      ],
+      "accent": "green",
+      "alert": null,
+      "tiles": [
+        {
+          "label": "requests",
+          "value": "2",
+          "tone": "normal"
+        },
+        {
+          "label": "tokens",
+          "value": "84",
+          "tone": "normal"
+        },
+        {
+          "label": "spend",
+          "value": "$0.00002",
+          "tone": "normal"
+        }
+      ]
+    },
+    {
+      "id": "ol",
+      "title": "A very long service title indeed",
+      "status": "ok",
+      "primary": "12345% (stale)",
+      "secondary": "A very long secondary line of text",
+      "detail": [
+        "Last measured: unavailable"
+      ],
+      "accent": "green",
+      "alert": null,
+      "tiles": [
+        {
+          "label": "model",
+          "value": "llama3",
+          "tone": "normal"
+        },
+        {
+          "label": "models",
+          "value": "5",
+          "tone": "normal"
+        }
+      ]
+    },
+    {
+      "id": "li",
+      "title": "A very long service title indeed",
+      "status": "ok",
+      "primary": "12345% (stale)",
+      "secondary": "A very long secondary line of text",
+      "detail": [
+        "Top model: gpt-4o",
+        "Errors today: 0",
+        "Database: True"
+      ],
+      "accent": "green",
+      "alert": null,
+      "tiles": [
+        {
+          "label": "requests",
+          "value": "12",
+          "tone": "normal"
+        },
+        {
+          "label": "tokens",
+          "value": "340",
+          "tone": "normal"
+        },
+        {
+          "label": "spend",
+          "value": "$0.50",
+          "tone": "normal"
+        },
+        {
+          "label": "errors",
+          "value": "0",
+          "tone": "good"
+        },
+        {
+          "label": "model",
+          "value": "gpt-4o",
+          "tone": "normal"
+        }
+      ]
+    }
+  ],
+  "sources": [
+    {
+      "id": "go",
+      "type": "opencode_go",
+      "name": "A very long account name indeed",
+      "status": "warning",
+      "quota": {
+        "windows": [
+          {
+            "label": "A very long window label",
+            "used_percent": 0,
+            "state": "stale",
+            "period_minutes": 300,
+            "resets_at": "2026-10-20T15:00:00+00:00",
+            "observed_at": "2026-10-20T10:00:00+00:00"
+          },
+          {
+            "label": "A very long window label",
+            "used_percent": 3,
+            "state": "stale",
+            "period_minutes": 10080,
+            "resets_at": "2026-10-25T12:00:00+00:00",
+            "observed_at": "2026-10-20T10:00:00+00:00"
+          },
+          {
+            "label": "A very long window label",
+            "used_percent": 5,
+            "state": "stale",
+            "period_minutes": null,
+            "resets_at": "2026-10-24T12:00:00+00:00",
+            "observed_at": "2026-10-20T10:00:00+00:00"
+          }
+        ]
+      },
+      "metrics": {},
+      "alerts": true,
+      "marks": [
+        80,
+        95
+      ]
+    },
+    {
+      "id": "cx",
+      "type": "codex",
+      "name": "A very long account name indeed",
+      "status": "warning",
+      "quota": {
+        "windows": [
+          {
+            "label": "A very long window label",
+            "used_percent": 2,
+            "state": "stale",
+            "period_minutes": 10080,
+            "resets_at": "2026-10-26T12:00:00+00:00",
+            "observed_at": "2026-10-20T10:00:00+00:00"
+          },
+          {
+            "label": "A very long window label",
+            "used_percent": null,
+            "state": "unavailable",
+            "period_minutes": null,
+            "resets_at": null,
+            "observed_at": "2026-10-20T12:00:00+00:00"
+          }
+        ],
+        "reset_credits": {
+          "available": 3,
+          "expires_at": [
+            "2026-10-22T12:00:00+00:00",
+            "2026-10-29T12:00:00+00:00",
+            "2026-11-06T12:00:00+00:00"
+          ]
+        }
+      },
+      "metrics": {},
+      "alerts": true,
+      "marks": [
+        80,
+        95
+      ]
+    },
+    {
+      "id": "cl",
+      "type": "claude",
+      "name": "A very long account name indeed",
+      "status": "ok",
+      "quota": {
+        "windows": [
+          {
+            "label": "A very long window label",
+            "used_percent": 12,
+            "state": "stale",
+            "period_minutes": 300,
+            "resets_at": "2026-10-20T15:00:00+00:00",
+            "observed_at": "2026-10-20T10:00:00+00:00"
+          },
+          {
+            "label": "A very long window label",
+            "used_percent": 66,
+            "state": "stale",
+            "period_minutes": 10080,
+            "resets_at": "2026-10-22T12:00:00+00:00",
+            "observed_at": "2026-10-20T10:00:00+00:00"
+          }
+        ],
+        "hint": "In use - quota 2h old"
+      },
+      "metrics": {},
+      "alerts": true,
+      "marks": [
+        80,
+        95
+      ]
+    },
+    {
+      "id": "oc",
+      "type": "ollama_cloud",
+      "name": "A very long account name indeed",
+      "status": "ok",
+      "quota": {
+        "windows": [
+          {
+            "label": "A very long window label",
+            "used_percent": null,
+            "state": "unavailable",
+            "period_minutes": null,
+            "resets_at": null,
+            "observed_at": "2026-10-20T12:00:00+00:00"
+          }
+        ],
+        "activity": {
+          "request_count": 2,
+          "usage_usd": 2e-05,
+          "from": "2026-10-12T12:00:00+00:00",
+          "until": "2026-10-20T12:00:00+00:00",
+          "state": "available"
+        }
+      },
+      "metrics": {},
+      "alerts": true,
+      "marks": [
+        80,
+        95
+      ]
+    },
+    {
+      "id": "ol",
+      "type": "ollama",
+      "name": "A very long account name indeed",
+      "status": "ok",
+      "metrics": {
+        "loaded_model": "llama3",
+        "available_models": 5
+      },
+      "alerts": true,
+      "marks": [
+        80,
+        95
+      ]
+    },
+    {
+      "id": "li",
+      "type": "litellm",
+      "name": "A very long account name indeed",
+      "status": "ok",
+      "metrics": {
+        "requests_today": 12,
+        "tokens_today": 340,
+        "spend_today": 0.5,
+        "errors_today": 0
+      },
+      "alerts": true,
+      "marks": [
+        80,
+        95
+      ]
+    }
+  ],
+  "quota_schema_version": 1,
+  "display": {
+    "overflow_rows": 1
+  },
+  "alerts": {
+    "quiet": false,
+    "sound": true,
+    "pop_to_top": true,
+    "enabled": true
+  }
+}

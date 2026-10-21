@@ -23,6 +23,11 @@ INGEST_BODY_LIMIT = 16384
 # state, so a double tap or a retry is harmless.
 ALERTS_PATH = re.compile(r"^/api/v1/alerts/([A-Za-z0-9_-]{1,80})$")
 ALERT_BODY_LIMIT = 256
+# The lazy card detail: one card's tiles and lines, fetched when the card
+# is opened. It is a read-only path with the same shared token.
+CARDS_PATH = re.compile(r"^/api/v1/cards/([A-Za-z0-9_-]{1,80})$")
+# The query that asks for the small summary: "?cards=lazy".
+LAZY_QUERY = "cards=lazy"
 
 
 class _IngestRateLimiter:
@@ -90,7 +95,7 @@ class _AlertRateLimiter:
 
 def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                  *, ingest_enabled=None, ingest_rate_limiter=None, client_registry=None,
-                 alert_writer=None, alert_rate_limiter=None):
+                 alert_writer=None, alert_rate_limiter=None, card_provider=None):
     if not shared_token:
         raise ValueError("API requires a nonempty shared token")
     limiter = ingest_rate_limiter if ingest_rate_limiter is not None else _IngestRateLimiter()
@@ -131,11 +136,16 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
             return sanitize_header(self.headers.get("X-Presto-Client"))
 
         def do_GET(self):
-            path = urlparse(self.path).path
+            parsed = urlparse(self.path)
+            path = parsed.path
             if ALERTS_PATH.match(path):
                 # The route takes a body: only POST may be used here.
                 self._send_json(405, {"error": "method_not_allowed"},
                                 headers={"Allow": "POST"})
+                return
+            card_match = CARDS_PATH.match(path)
+            if card_match:
+                self._card_detail(card_match[1])
                 return
             if path != STATUS_PATH:
                 self._send_json(404, {"error": "not_found"})
@@ -145,7 +155,7 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                 return
             try:
                 if status_provider is not None:
-                    payload = status_provider()
+                    payload = self._status_payload(parsed.query)
                 else:
                     snapshots = storage.latest_snapshots()
                     if source_ids is not None:
@@ -166,6 +176,40 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                 except Exception:
                     log.debug("could not record the client", exc_info=True)
             self._send_json(200, payload)
+
+        def _status_payload(self, query):
+            """The status payload, small when the client asks for lazy cards.
+
+            A client that does not ask gets exactly the payload it got
+            before: the summary without the query is unchanged.
+            """
+            lazy = LAZY_QUERY in (query or "")
+            if not lazy:
+                return status_provider()
+            try:
+                return status_provider(True)
+            except TypeError:
+                # An older provider that cannot make a lazy payload.
+                return status_provider()
+
+        def _card_detail(self, card_id):
+            """One card's tiles and lines. Read-only, with the shared token."""
+            if not self._authorized():
+                self._send_json(401, {"error": "unauthorised"})
+                return
+            if card_provider is None:
+                self._send_json(404, {"error": "not_found"})
+                return
+            try:
+                detail = card_provider(card_id)
+            except Exception:
+                log.exception("could not build the card detail")
+                self._send_json(500, {"error": "internal_error"})
+                return
+            if not isinstance(detail, dict):
+                self._send_json(404, {"error": "not_found"})
+                return
+            self._send_json(200, detail)
 
         def _ingest_allowed(self):
             """Re-evaluated per request so an admin toggle applies without a restart."""
@@ -353,7 +397,7 @@ class ApiServer:
     def __init__(self, host, port, storage, shared_token, source_ids=None,
                  status_provider=None, *, ingest_enabled=None, ingest_rate_limiter=None,
                  handler_class=None, client_registry=None, alert_writer=None,
-                 alert_rate_limiter=None):
+                 alert_rate_limiter=None, card_provider=None):
         self.host = host
         self._server = _ExclusiveHTTPServer(
             (host, port), handler_class or make_handler(
@@ -362,7 +406,8 @@ class ApiServer:
                 ingest_rate_limiter=ingest_rate_limiter,
                 client_registry=client_registry,
                 alert_writer=alert_writer,
-                alert_rate_limiter=alert_rate_limiter))
+                alert_rate_limiter=alert_rate_limiter,
+                card_provider=card_provider))
         self._server.daemon_threads = False
         self._server.block_on_close = True
         self._server._active_condition = threading.Condition()

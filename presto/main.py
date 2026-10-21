@@ -115,7 +115,10 @@ class App(object):
             getattr(config, "DAEMON_HOST", "toontown-int-srv1"),
             int(getattr(config, "DAEMON_PORT", 8787)),
             getattr(config, "SHARED_TOKEN", ""),
-            timeout=max(1, int(getattr(config, "HTTP_TIMEOUT", 8))))
+            timeout=max(1, int(getattr(config, "HTTP_TIMEOUT", 8))),
+            # The small summary: the card's lines and tiles are fetched when
+            # the card is opened, so one poll stays small.
+            path="/api/v1/status?cards=lazy")
 
         self.gestures = GestureRecogniser(
             long_press_ms=self.long_press_ms,
@@ -138,6 +141,11 @@ class App(object):
         self.alert_holds = {}
         self.alert_inflight = set()
         self.alert_message = None
+        # The lazily fetched detail of the open card: its tiles and its
+        # lines. Only the open card's detail is kept.
+        self.card_details = {}
+        self.card_pending = set()
+        self.card_failed = set()
         # The LED shows the worst of every service, not just the open card.
         self.overall_accent = None
 
@@ -145,13 +153,14 @@ class App(object):
         self.index = 0
         self.home_scroll = HomeScroll(len(DEMO_QUOTAS) * ROW_HEIGHT)
         self.home_layout = None
+        self.live_rows = None
+        self.card_rows = {}
         self._touch_x = 0
         self._touch_y = 0
         self.detail_open = False
         self.detail_opened_at = 0
         self.error = None
         self.last_good_at = None
-        self.live_rows = None
         self.connection_error = None
         self.fail_count = 0
         self.wifi_drops = 0
@@ -220,8 +229,14 @@ class App(object):
         self.error = error
         if error is None:
             self.last_good_at = _now_ms()
+            # The rows carry the structured quota of every service, so a
+            # card can draw its windows the way Home draws them.
+            self.live_rows = source_rows(payload)
+            self.card_rows = {}
+            for row in self.live_rows or ():
+                if row.get("id"):
+                    self.card_rows[row["id"]] = row
             if not self.static_demo:
-                self.live_rows = source_rows(payload)
                 # The list scrolls by its total height: quota rows and the
                 # compact local rows are not the same height. The overflow
                 # strip takes its band out of the list, and the band is
@@ -233,6 +248,7 @@ class App(object):
         self.index = next((i for i, card in enumerate(cards) if card.id == selected), 0)
         if selected is not None and self._current_card().id != selected:
             self.detail_open = False
+        self._free_details()
         if error is None:
             self._apply_alerts(payload)
         self._needs_redraw = True
@@ -519,11 +535,76 @@ class App(object):
     def _next_card(self):
         if self.cards:
             self.index = (self.index + 1) % len(self.cards)
+        self._free_details()
         self._needs_redraw = True
 
     def _prev_card(self):
         if self.cards:
             self.index = (self.index - 1) % len(self.cards)
+        self._free_details()
+        self._needs_redraw = True
+
+    def _free_details(self):
+        """The parsed detail of a card that is closed is freed.
+
+        The device has little memory, and a card the user has left is not
+        worth keeping. The card that is open keeps its detail for one poll
+        interval.
+        """
+        current = self._current_card().id if self.cards else None
+        for card_id in list(self.card_details):
+            if card_id != current:
+                del self.card_details[card_id]
+
+    def _maybe_load_detail(self):
+        """Fetch the open card's detail, at most once per poll interval."""
+        if self.static_demo or not self.cards:
+            return
+        card = self._current_card()
+        if card.id == "dash":
+            return
+        detail = self.card_details.get(card.id)
+        now = _now_ms()
+        if detail is not None:
+            if _ticks_diff(now, detail["at"]) <= self.poll_interval * 1000:
+                return
+            # Older than one poll interval: fetch it again.
+            del self.card_details[card.id]
+        if card.id in self.card_pending:
+            return
+        self.card_pending.add(card.id)
+        self.card_failed.discard(card.id)
+        self._needs_redraw = True
+        try:
+            import asyncio
+            asyncio.create_task(self._load_card_detail(card.id))
+        except Exception:
+            self.card_pending.discard(card.id)
+            self.card_failed.add(card.id)
+
+    async def _load_card_detail(self, card_id):
+        """One card's tiles and lines. A read: nothing is changed."""
+        detail = None
+        try:
+            detail = await self.client.fetch_card(card_id)
+        except Exception:
+            detail = None
+        self.card_pending.discard(card_id)
+        if not isinstance(detail, dict):
+            self.card_failed.add(card_id)
+            self._needs_redraw = True
+            return
+        # A response for a card that is no longer open is dropped: the user
+        # swiped away while it was on its way.
+        if card_id != self._current_card().id:
+            return
+        tiles = detail.get("tiles")
+        lines = detail.get("lines")
+        self.card_details[card_id] = {
+            "tiles": tiles if isinstance(tiles, list) else [],
+            "lines": lines if isinstance(lines, list) else [],
+            "at": _now_ms()}
+        self.card_failed.discard(card_id)
         self._needs_redraw = True
 
     def _open_detail(self):
@@ -555,6 +636,7 @@ class App(object):
             return False
         self.index = target
         self.detail_open = False
+        self._free_details()
         self._needs_redraw = True
         return True
 
@@ -645,6 +727,7 @@ class App(object):
 
     def _render(self):
         card = self._current_card()
+        self._maybe_load_detail()
 
         screen = self._connection_screen()
         if screen:
@@ -663,6 +746,8 @@ class App(object):
                          scroll=self.home_scroll.offset, stale=bool(self.connection_error),
                          layout=self.home_layout)
         else:
+            row = self.card_rows.get(card.id)
+            detail = self.card_details.get(card.id)
             draw_card(
                 self.display, self.palette, card,
                 self.index, len(self.cards),
@@ -671,6 +756,13 @@ class App(object):
                 stale=bool(self.connection_error),
                 alerts=self._card_alerts(card),
                 message=(self.alert_message[0] if self.alert_message else None),
+                quota=(row.get("windows") if row else None),
+                marks=(row.get("marks") if row else None),
+                tiles=(detail.get("tiles") if detail else None),
+                detail=(detail.get("lines") if detail else None),
+                loading=(card.id in self.card_pending),
+                failed=(card.id in self.card_failed),
+                detail_open=self.detail_open,
             )
 
         self.presto.update()

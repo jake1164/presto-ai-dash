@@ -17,12 +17,17 @@ arithmetic is implemented and tested now so it is ready for the v0.2 collector.
 
 import json
 import logging
+import os
+import stat
 
 from ..http_client import HttpError, HttpUnreachable, get_json, join_url
 from ..models import SourceSnapshot
 from . import Source, register
 
 log = logging.getLogger(__name__)
+
+# A sample is a few hundred bytes; the file is never read past this.
+SAMPLES_FILE_LIMIT = 256 * 1024
 
 # Fields a samples file may carry. All optional; anything missing is simply
 # not reported.
@@ -120,8 +125,18 @@ class OllamaSource(Source):
             return None
 
         try:
+            # A plain file of a sensible size: a sample is a few hundred bytes,
+            # and the path is something an administrator typed.
+            info = os.stat(self.samples_file)
+            if not stat.S_ISREG(info.st_mode):
+                log.warning("ollama samples file %s is not a regular file", self.samples_file)
+                return None
+            if info.st_size > SAMPLES_FILE_LIMIT:
+                log.warning("ollama samples file %s is larger than %d bytes; not read",
+                            self.samples_file, SAMPLES_FILE_LIMIT)
+                return None
             with open(self.samples_file, "r", encoding="utf-8") as handle:
-                data = json.load(handle)
+                data = json.loads(handle.read(SAMPLES_FILE_LIMIT + 1))
         except FileNotFoundError:
             log.debug("ollama samples file not found: %s", self.samples_file)
             return None

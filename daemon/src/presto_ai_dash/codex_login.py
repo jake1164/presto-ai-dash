@@ -127,6 +127,26 @@ class _LoginProcess:
             pass
 
 
+# A finished login stays readable for a while, so the page can show how it
+# ended, and then goes. No more than this many are kept at once.
+SESSION_KEEP_SECONDS = 3600
+SESSION_LIMIT = 20
+ERROR_LIMIT = 120
+
+
+def plain_error(value, default="login failed"):
+    """A provider's error text as a short line of printable ASCII.
+
+    The text comes from the Codex program and is shown on the admin page; it
+    is not trusted to be short or to hold only printable characters.
+    """
+    text = " ".join(str(value).split()) if value else ""
+    text = "".join(ch if " " <= ch <= "~" else "?" for ch in text)
+    if len(text) > ERROR_LIMIT:
+        text = text[:ERROR_LIMIT - 3] + "..."
+    return text or default
+
+
 class CodexLoginManager:
     def __init__(self, manager):
         self.manager = manager
@@ -163,7 +183,7 @@ class CodexLoginManager:
             result = proc.request("account/login/start", params, timeout=15)
         except Exception as exc:
             proc.close()
-            raise CodexLoginError(str(exc)) from None
+            raise CodexLoginError(plain_error(exc)) from None
         login_id = result.get("loginId")
         session_id = uuid.uuid4().hex
         session = {
@@ -181,6 +201,7 @@ class CodexLoginManager:
             "process": proc,
         }
         with self._lock:
+            self._prune()
             self._sessions[session_id] = session
         thread = threading.Thread(target=self._watch, args=(session,), daemon=True)
         thread.start()
@@ -204,7 +225,7 @@ class CodexLoginManager:
                                 session["status"] = "success"
                             else:
                                 session["status"] = "error"
-                                session["error"] = params.get("error") or "login failed"
+                                session["error"] = plain_error(params.get("error"))
                             session["completed_at"] = time.time()
                             proc.close()
                             return
@@ -219,6 +240,24 @@ class CodexLoginManager:
                 proc.close()
             except Exception:
                 pass
+
+    def _prune(self, now=None):
+        """Forget finished logins that are old, and the oldest beyond the limit.
+
+        Called with the lock held. A login still pending is never dropped.
+        """
+        now = time.time() if now is None else now
+        for session_id, session in list(self._sessions.items()):
+            finished = session.get("completed_at")
+            if finished is not None and now - finished > SESSION_KEEP_SECONDS:
+                del self._sessions[session_id]
+        excess = len(self._sessions) - (SESSION_LIMIT - 1)
+        if excess > 0:
+            finished = sorted((session for session in self._sessions.values()
+                               if session.get("completed_at") is not None),
+                              key=lambda session: session["completed_at"])
+            for session in finished[:excess]:
+                del self._sessions[session["id"]]
 
     def status(self, session_id):
         with self._lock:

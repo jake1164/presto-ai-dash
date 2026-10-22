@@ -9,6 +9,7 @@ import stat
 from cryptography.fernet import Fernet, InvalidToken
 
 from . import private_files
+from .secret_env import secret_from_environment
 
 
 def _dpapi(data, decrypt=False):
@@ -62,7 +63,7 @@ class CredentialCipher:
 
 def load_cipher(database, key_file="", existing=False):
     """Load env key, otherwise a separate protected file; never replace lost keys."""
-    environment_key = os.environ.get("DASH_ENCRYPTION_KEY")
+    environment_key = secret_from_environment("DASH_ENCRYPTION_KEY")
     if environment_key:
         try:
             key = environment_key.encode("ascii")

@@ -38,8 +38,13 @@ enabled = false
 port = 8788
 # Separate from shared_token. DASH_ADMIN_TOKEN overrides this value.
 # Empty generates a temporary token and prints it to the startup log.
-# Browser login is remembered for seven days in SQLite, even with fresh tokens.
+# Browser login is remembered for seven days in SQLite. With a token you set,
+# changing it ends those logins; with the generated one they survive restarts.
 token = ""
+# Mark the session cookie Secure. Only when the page is reached over HTTPS
+# (a TLS proxy); on plain HTTP the browser would drop the cookie.
+# DASH_ADMIN_SECURE_COOKIE overrides this value.
+secure_cookie = false
 # Empty uses <database>.key outside SQLite. DASH_KEY_FILE overrides it.
 # DASH_ENCRYPTION_KEY can instead supply a Fernet master key.
 key_file = ""

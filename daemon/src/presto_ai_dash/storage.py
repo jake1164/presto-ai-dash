@@ -91,7 +91,9 @@ def _token_digest(token):
 
 
 class Storage:
-    SCHEMA_VERSION = 7
+    SCHEMA_VERSION = 8
+    # Live browser sessions the admin page keeps; the oldest go first.
+    ADMIN_SESSION_LIMIT = 25
     MAX_HISTORY_LIMIT = 1000
 
     def __init__(self, path):
@@ -199,6 +201,14 @@ class Storage:
                 token_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL
             )""")
             self._conn.execute("PRAGMA user_version = 7")
+            # v8: a browser session is bound to the admin token that made it, so
+            # rotating a configured token ends the sessions made under the old
+            # one. Sessions from before this version have no binding, and so end.
+            columns = {row["name"] for row in self._conn.execute("PRAGMA table_info(admin_sessions)")}
+            if "binding" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE admin_sessions ADD COLUMN binding TEXT NOT NULL DEFAULT ''")
+            self._conn.execute("PRAGMA user_version = 8")
             self._conn.commit()
         except Exception:
             self._conn.rollback()
@@ -607,17 +617,28 @@ class Storage:
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM claude_bridges WHERE instance_id = ?", (instance_id,))
 
-    def create_admin_session(self, token_hash, csrf_token, expires_at, now):
-        """Store only a digest of the browser's bearer credential."""
-        with self._lock, self._conn:
-            self._conn.execute("DELETE FROM admin_sessions WHERE expires_at <= ?", (now,))
-            self._conn.execute(
-                "INSERT INTO admin_sessions (token_hash, csrf_token, expires_at) VALUES (?, ?, ?)",
-                (token_hash, csrf_token, expires_at))
+    def create_admin_session(self, token_hash, csrf_token, expires_at, now, binding="", limit=None):
+        """Store only a digest of the browser's bearer credential.
 
-    def admin_session(self, token_hash, now):
+        ``binding`` says which admin token made the session. A session whose
+        binding is not the current one is dead, and is removed here and on every
+        read. At most ``limit`` sessions are kept, the newest.
+        """
+        limit = self.ADMIN_SESSION_LIMIT if limit is None else limit
         with self._lock, self._conn:
-            self._conn.execute("DELETE FROM admin_sessions WHERE expires_at <= ?", (now,))
+            self._conn.execute(
+                "DELETE FROM admin_sessions WHERE expires_at <= ? OR binding <> ?", (now, binding))
+            self._conn.execute(
+                "INSERT INTO admin_sessions (token_hash, csrf_token, expires_at, binding)"
+                " VALUES (?, ?, ?, ?)", (token_hash, csrf_token, expires_at, binding))
+            self._conn.execute(
+                "DELETE FROM admin_sessions WHERE token_hash IN (SELECT token_hash FROM"
+                " admin_sessions ORDER BY expires_at DESC, rowid DESC LIMIT -1 OFFSET ?)", (limit,))
+
+    def admin_session(self, token_hash, now, binding=""):
+        with self._lock, self._conn:
+            self._conn.execute(
+                "DELETE FROM admin_sessions WHERE expires_at <= ? OR binding <> ?", (now, binding))
             row = self._conn.execute(
                 "SELECT csrf_token, expires_at FROM admin_sessions WHERE token_hash = ?",
                 (token_hash,)).fetchone()
@@ -626,6 +647,17 @@ class Storage:
     def revoke_admin_session(self, token_hash):
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM admin_sessions WHERE token_hash = ?", (token_hash,))
+
+    def revoke_all_admin_sessions(self):
+        """End every browser session. Returns how many there were."""
+        with self._lock, self._conn:
+            return self._conn.execute("DELETE FROM admin_sessions").rowcount
+
+    def admin_session_count(self, now, binding=""):
+        with self._lock, self._conn:
+            self._conn.execute(
+                "DELETE FROM admin_sessions WHERE expires_at <= ? OR binding <> ?", (now, binding))
+            return self._conn.execute("SELECT COUNT(*) FROM admin_sessions").fetchone()[0]
 
     def source_instances(self):
         """Internal records; callers must strip encrypted credential blobs for public output."""

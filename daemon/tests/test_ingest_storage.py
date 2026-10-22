@@ -46,7 +46,7 @@ class MigrationTests(unittest.TestCase):
         v5_database(path)
         storage = Storage(path)
         self.addCleanup(storage.close)
-        self.assertEqual(storage._conn.execute("PRAGMA user_version").fetchone()[0], 7)
+        self.assertEqual(storage._conn.execute("PRAGMA user_version").fetchone()[0], Storage.SCHEMA_VERSION)
         observation = storage.observation("claude-1")
         self.assertIsNotNone(observation)
         self.assertEqual(observation["evidence"], {"five_hour": "a" * 64})
@@ -72,7 +72,7 @@ class MigrationTests(unittest.TestCase):
             connection.close()
         storage = Storage(path)
         self.addCleanup(storage.close)
-        self.assertEqual(storage._conn.execute("PRAGMA user_version").fetchone()[0], 7)
+        self.assertEqual(storage._conn.execute("PRAGMA user_version").fetchone()[0], Storage.SCHEMA_VERSION)
         self.assertIsNotNone(storage.observation("claude-1"))
         storage.create_ingest_token("claude-1")  # The new table is usable again.
         self.assertTrue(storage.ingest_token_info("claude-1")["exists"])

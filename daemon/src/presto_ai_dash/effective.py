@@ -38,6 +38,7 @@ ENVIRONMENT_VARIABLES = {
     "ingest_enabled": "DASH_INGEST_ENABLED",
     "admin_host": "DASH_ADMIN_HOST",
     "admin_allowed_hosts": "DASH_ADMIN_ALLOWED_HOSTS",
+    "admin_secure_cookie": "DASH_ADMIN_SECURE_COOKIE",
 }
 
 
@@ -98,12 +99,14 @@ def effective_settings(config, storage=None, config_path=None, environ=None, now
     allowed_hosts = admin.get("allowed_hosts") or []
     add("Admin allowed hosts", ", ".join(allowed_hosts) if allowed_hosts else "none",
         origin_for("admin_allowed_hosts", "admin", "allowed_hosts"))
+    add("Admin cookie marked Secure", "yes" if admin.get("secure_cookie") else "no",
+        origin_for("admin_secure_cookie", "admin", "secure_cookie"))
     add("Log level", logging_section.get("level"), origin_for("log_level", "logging"))
     # Never the token itself: only whether it lasts across restarts.
     if admin.get("token_generated"):
         add("Admin token", "temporary: new at every start; set admin.token in dash.toml "
             "to keep one", GENERATED)
-    elif "DASH_ADMIN_TOKEN" in names:
+    elif "DASH_ADMIN_TOKEN" in names or "DASH_ADMIN_TOKEN_FILE" in names:
         add("Admin token", "set", ENVIRONMENT)
     elif admin.get("enabled") or admin.get("token"):
         add("Admin token", "set", FILE)

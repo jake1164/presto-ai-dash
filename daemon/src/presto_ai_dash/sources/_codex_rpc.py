@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import queue
+import re
 import shutil
 import subprocess
 import threading
@@ -33,7 +34,9 @@ def executable_setting_problem(configured):
     text = str(configured).strip()
     if text.startswith(("\\\\", "//")):
         return "Codex executable must be on this computer, not on a network share"
-    name = os.path.basename(text.rstrip("/\\"))
+    # Both separators on every system: a Windows-style path typed on a Linux
+    # host is still a path, and is refused as one.
+    name = re.split(r"[/\\]", text.rstrip("/\\"))[-1]
     if name != text and not os.path.isabs(text):
         return "Codex executable must be a full path or just the name codex"
     base, suffix = os.path.splitext(name.lower())

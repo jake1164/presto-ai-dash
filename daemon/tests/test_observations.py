@@ -80,7 +80,7 @@ class MigrationTests(unittest.TestCase):
         connection.close()
         storage = Storage(path)
         self.addCleanup(storage.close)
-        self.assertEqual(storage._conn.execute("PRAGMA user_version").fetchone()[0], 7)
+        self.assertEqual(storage._conn.execute("PRAGMA user_version").fetchone()[0], Storage.SCHEMA_VERSION)
         observation = storage.observation("claude-1")
         self.assertEqual(observation["report"], report)
         self.assertEqual(observation["evidence"], evidence)

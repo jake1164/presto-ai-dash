@@ -187,6 +187,33 @@ class AccountChanged(Exception):
     """The account behind the cache is not the one seen when the daemon started."""
 
 
+class FileSwapped(OSError):
+    """The file opened is not the one that was checked a moment before."""
+
+
+def _open_the_file_that_was_checked(path, checked):
+    """Open a regular file for reading, and only the one ``checked`` described.
+
+    Looking at a path and then opening it leaves a gap in which the file can be
+    replaced by a link to somewhere else. Where the platform can, the open itself
+    refuses a link (O_NOFOLLOW); everywhere, what was opened must be a regular
+    file with the identity of the one that was looked at.
+    """
+    def opener(name, flags):
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(name, flags)
+        try:
+            opened = os.fstat(descriptor)
+            if not stat_module.S_ISREG(opened.st_mode) or not os.path.samestat(checked, opened):
+                raise FileSwapped("the file changed between the check and the open")
+        except BaseException:
+            os.close(descriptor)
+            raise
+        return descriptor
+
+    return open(path, "rb", opener=opener)
+
+
 class UsageCacheReader:
     """Reads Claude Code's local usage cache, defensively and incrementally.
 
@@ -242,13 +269,16 @@ class UsageCacheReader:
         if path is None:
             return self._persistent(now, REASON_MISSING, self._missing_message(), None)
         try:
-            info = os.stat(path)
+            # lstat, not stat: a link is looked at, never followed.
+            info = os.lstat(path)
         except FileNotFoundError:
             return self._persistent(now, REASON_MISSING, self._missing_message(), None)
         except PermissionError:
             return self._transient(now, path, "PermissionError")
         except OSError as error:
             return self._transient(now, path, type(error).__name__)
+        if stat_module.S_ISLNK(info.st_mode):
+            return self._persistent(now, REASON_NOT_FILE, self._symlink_message(path), path)
         if not stat_module.S_ISREG(info.st_mode):
             return self._persistent(now, REASON_NOT_FILE, self._not_a_file_message(path),
                                     path)
@@ -275,7 +305,7 @@ class UsageCacheReader:
     def _read(self, now, path, info):
         """Open the file read-only, parse it, and report what it holds."""
         try:
-            with open(path, "rb") as handle:
+            with _open_the_file_that_was_checked(path, info) as handle:
                 data = handle.read(self._max_bytes)
         except PermissionError:
             return self._transient(now, path, "PermissionError")
@@ -552,6 +582,11 @@ class UsageCacheReader:
                 "file (its project history grows with use) or %s"
                 % (megabytes, self._max_bytes // (1024 * 1024), path, _UNAFFECTED,
                    _SILENCE))
+
+    def _symlink_message(self, path):
+        return ("Claude usage cache: SYMBOLIC LINK - %s is a symbolic link, which is "
+                "not followed, so it was not read. %s Point the reader at the real "
+                "file in the admin page, or %s" % (path, _UNAFFECTED, _SILENCE))
 
     def _not_a_file_message(self, path):
         return ("Claude usage cache: NOT A FILE - %s is not a regular file, so it "

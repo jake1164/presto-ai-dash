@@ -14,8 +14,10 @@ def run(coro):
 
 class DescribeErrorTests(unittest.TestCase):
     def test_type_errno_and_stage(self):
-        self.assertEqual(describe_error(OSError(104, "secret 10.0.0.1"), "body"),
-                         "OSError 104 @body")
+        # MicroPython raises a plain OSError; CPython turns errno 104 into a
+        # subclass, whose name describe_error reports.
+        self.assertIn(describe_error(OSError(104, "secret 10.0.0.1"), "body"),
+                      ("OSError 104 @body", "ConnectionResetError 104 @body"))
         self.assertEqual(describe_error(MemoryError("x"), "parse"), "MemoryError @parse")
         self.assertEqual(describe_error(asyncio.TimeoutError(), "conn"), "TimeoutError @conn")
 
@@ -50,7 +52,9 @@ class FetchReasonTests(unittest.TestCase):
             return caught.exception
 
         error = run(go())
-        self.assertTrue(error.reason.endswith("@conn"), error.reason)
+        # The reason is cut at 30 characters, and on CPython the name of the
+        # exception ("ConnectionRefusedError") is long enough to cut the stage.
+        self.assertIn(error.reason.rsplit("@", 1)[-1], ("conn", "co"), error.reason)
 
     def test_stalled_server_reports_timeout_at_head(self):
         async def go():

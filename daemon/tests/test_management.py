@@ -473,6 +473,14 @@ class AdminHttpTests(AdminServerBase):
         self.assertEqual(self.storage._conn.execute("SELECT COUNT(*) FROM admin_sessions").fetchone()[0], 0)
 
     def test_session_survives_reopened_database_and_rotated_startup_code(self):
+        # The startup code here is the generated, per-start kind: the page promises
+        # that a browser stays signed in across restarts that give it a new one.
+        # (A token the operator configured is different: see test_admin_sessions.)
+        self.admin.stop()
+        self.admin = AdminServer(0, self.manager, "unit-secret-admin-token", token_generated=True)
+        self.admin.start()
+        self.addCleanup(self.admin.stop)
+        self.base_url = "http://127.0.0.1:%d" % self.admin.actual_port
         cookie, session, _ = self.login()
         port = self.admin.actual_port
         self.admin.stop()
@@ -480,7 +488,8 @@ class AdminHttpTests(AdminServerBase):
         self.storage = Storage(self.database)
         self.addCleanup(self.storage.close)
         self.manager = SourceConfiguration(self.storage, self.config)
-        self.admin = AdminServer(port, self.manager, "different-startup-admin-code")
+        self.admin = AdminServer(port, self.manager, "different-startup-admin-code",
+                                 token_generated=True)
         self.admin.start()
         self.addCleanup(self.admin.stop)
         self.assertEqual(self.request()[0], 401)  # Old startup token is no longer accepted.

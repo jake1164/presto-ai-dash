@@ -71,6 +71,7 @@ scenario_interval = 20
 | `allowed_hosts` | `[]` | The names the page is reached by (for example `admin.example.lan:8788`), checked against the `Host` and `Origin` headers. The loopback names on the admin port always work |
 | `token` | `""` | The admin token. Empty means a fresh one at every start, printed once. The same strength rule as `shared_token` applies to one you choose |
 | `key_file` | `""` | Where the encryption master key lives. Empty means `<database>.key` |
+| `secure_cookie` | `false` | Mark the session cookie `Secure`. Turn it on only when the page is reached over HTTPS, for example behind a TLS proxy |
 
 ## `[display]`
 
@@ -117,6 +118,7 @@ Every variable below overrides the matching configuration key.
 | `DASH_ADMIN_TOKEN` | `admin.token` | Not printed when it is set |
 | `DASH_ADMIN_HOST` | `admin.host` | The admin listen address; see the Docker guide |
 | `DASH_ADMIN_ALLOWED_HOSTS` | `admin.allowed_hosts` | Comma-separated names |
+| `DASH_ADMIN_SECURE_COOKIE` | `admin.secure_cookie` | `true` behind a TLS proxy |
 | `DASH_KEY_FILE` | `admin.key_file` | |
 | `DASH_ENCRYPTION_KEY` | The encryption master key | A Fernet key. Use it when the key file cannot be protected, such as in a container |
 | `DASH_INGEST_ENABLED` | `daemon.ingest_enabled` and the stored switch | Accepts `1/true/yes/on` and `0/false/no/off`, case-insensitively. An invalid value fails closed: the route stays off |

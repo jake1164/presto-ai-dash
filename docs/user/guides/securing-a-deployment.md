@@ -79,10 +79,19 @@ the LAN.
 
 If you must serve it on another address, the daemon requires an explicit
 admin token, answers only to the names in `allowed_hosts`, and you should put
-a TLS reverse proxy in front of it. Two things to know about that setup: the session cookie
-is not marked `Secure`, so do not leave a plain-HTTP listener open next to the
-proxy, and a browser session lasts seven days and is not ended by changing the
-admin token. **Lock configuration** ends the session in that browser only.
+a TLS reverse proxy in front of it. Behind a proxy that terminates TLS, set
+`admin.secure_cookie = true` (or `DASH_ADMIN_SECURE_COOKIE=true`) so the session
+cookie is marked `Secure` and a browser never sends it over plain HTTP. Do not
+turn it on for a plain-HTTP address: the browser would drop the cookie and
+sign-in would not stick.
+
+A browser session lasts seven days, and at most 25 are kept (the oldest go
+first). When you set the admin token yourself, changing it ends every session
+that was opened under the old one. With the temporary token the daemon
+generates, sessions deliberately survive a restart, so that **Lock
+configuration**, which ends the session in that browser only, is not needed on
+every start. To end all of them at once, open **Settings > Browser sessions**
+and press **Sign out of every browser**.
 
 **Treat admin access as the ability to run programs as the daemon's account.**
 An administrator can set which Codex executable the daemon starts, and the
@@ -143,14 +152,19 @@ The image runs as a non-root user and holds only the installed package. To
 keep it that way:
 
 - Publish the status port on the LAN address only, not on every interface:
-  `"192.168.1.50:8787:8787"` in `compose.yaml`. On Linux, Docker's own
+  set `DASH_PUBLISH_ADDRESS=192.168.1.50` in `.env` (it becomes
+  `"192.168.1.50:8787:8787"` in `compose.yaml`). On Linux, Docker's own
   firewall rules bypass `ufw` and `firewalld`, so a published port is open to
   the whole network the host is on, whatever the host firewall says.
 - Leave the admin port published on `127.0.0.1` only, as the example does.
 - The tokens in `.env` are passed as environment variables, which anyone who
   can run `docker inspect` or read `/proc` on the host can see. Keep that
-  group small. A temporary shared token is written to the container's log.
-  Set `DASH_SHARED_TOKEN` so none is generated.
+  group small, or give the daemon the tokens as files instead
+  (`DASH_ADMIN_TOKEN_FILE`, `DASH_SHARED_TOKEN_FILE`,
+  `DASH_ENCRYPTION_KEY_FILE`, for example from Compose `secrets:`), which
+  keeps them out of `docker inspect`. The compose file requires
+  `DASH_SHARED_TOKEN`, so a temporary one is never written to the container's
+  log.
 - The data volume belongs to the container's `dash` user and its files are
   readable by that user only.
 
@@ -167,7 +181,7 @@ retired or lost, and create a new one for the replacement.
 | What | Do |
 | --- | --- |
 | The shared token | Set a new `daemon.shared_token`, restart the daemon, and put the same value in the Presto's private `config.py` as described in [Set up the Presto](../getting-started/set-up-the-presto.md) |
-| The admin token | Set a new `admin.token` and restart. Press **Lock configuration** in every browser that was signed in; existing sessions are not ended by the new token |
+| The admin token | Set a new `admin.token` and restart. Every session opened under the old token ends. If you use the generated token, press **Sign out of every browser** in **Settings** as well |
 | An ingest token | Revoke it in the admin page and create a new one |
 | `dash.db` and `dash.db.key` together | Assume every stored provider key is exposed. Replace each key at the provider, then remove and re-add it |
 | The log, if it held a temporary token | Set fixed tokens so the next start prints none |

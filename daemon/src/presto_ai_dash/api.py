@@ -170,8 +170,48 @@ class _AuthFailures:
             return entry[1] if entry[1] in self.REPORT_AT else None
 
 
+def parse_length(value, default=None):
+    """A Content-Length made of ASCII digits and nothing else, or ValueError.
+
+    ``int()`` alone also accepts "+16", " 16" and "1_6", which a proxy in front
+    may read differently from this server.
+    """
+    text = default if value is None else value
+    if text is None or not text.isascii() or not text.isdigit() or len(text) > 12:
+        raise ValueError("not a plain length")
+    return int(text)
+
+
 class BoundedRequestHandler(BaseHTTPRequestHandler):
     """A handler whose whole request must arrive within ``request_deadline``."""
+
+    # The Server header names the program, not the Python that runs it.
+    server_version = "presto-ai-dash"
+    sys_version = ""
+
+    def version_string(self):
+        return self.server_version
+
+    def send_error(self, code, message=None, explain=None):
+        """The server's own error answer: plain text, with the safety headers.
+
+        The standard one is an HTML page without them. Nothing the client sent
+        is repeated in the body.
+        """
+        short = self.responses.get(code, ("error", ""))[0]
+        body = ("%d %s\n" % (code, short)).encode("ascii", "replace")
+        self.send_response(code, message)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Security-Policy",
+                         "default-src 'none'; frame-ancestors 'none'")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.close_connection = True
+        if self.command != "HEAD" and code >= 200 and code not in (204, 205, 304):
+            self.wfile.write(body)
 
     request_deadline = 10.0
     io_timeout = 3.0
@@ -267,7 +307,9 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
             for name, value in (headers or {}).items():
                 self.send_header(name, value)
             self.end_headers()
-            self.wfile.write(body)
+            # A HEAD answer has the headers of the GET answer and no body.
+            if self.command != "HEAD":
+                self.wfile.write(body)
 
         def _authorized(self):
             """The shared bearer token, compared in constant time."""
@@ -395,7 +437,7 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                 self._send_json(400, {"error": "unsupported_transfer_encoding"})
                 return
             try:
-                length = int(self.headers.get("Content-Length", ""))
+                length = parse_length(self.headers.get("Content-Length"))
             except ValueError:
                 length = -1
             if length < 0:
@@ -467,7 +509,7 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                 self._send_json(400, {"error": "invalid_length"})
                 return
             try:
-                length = int(raw_length)
+                length = parse_length(raw_length)
             except ValueError:
                 self._send_json(400, {"error": "invalid_length"})
                 return

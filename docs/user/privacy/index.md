@@ -42,7 +42,8 @@ file that a tool on your own machine wrote.
   model request to produce a number. LiteLLM's `GET /health` endpoint *does*
   make test calls and costs tokens, so it is not used.
 - **Anything outside the profile directory.** The Claude readers never
-  follow a symlink out of the profile tree.
+  follow a symlink out of the profile tree, and the usage-cache reader does not
+  follow a link in place of its own file: it reports it and reads nothing.
 
 ## What it never does
 

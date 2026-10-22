@@ -1366,6 +1366,18 @@
     catch (error) { message(error.message, true); }
     finally { busy = false; }
   });
+  element("sign-out-everywhere").addEventListener("click", async () => {
+    if (busy) return;
+    if (!window.confirm("Sign every browser out of this page, this one too?")) return;
+    busy = true;
+    try {
+      const result = await request("/api/admin/sessions", "DELETE");
+      lock();
+      message("Signed out of " + result.signed_out + " browser session" +
+        (result.signed_out === 1 ? "" : "s") + ". Sign in again with the admin token.");
+    } catch (error) { message(error.message, true); }
+    finally { busy = false; }
+  });
   element("ingest-enabled").addEventListener("change", async () => {
     if (busy) { renderIngest(); return; }
     busy = true;

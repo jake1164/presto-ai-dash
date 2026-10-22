@@ -88,7 +88,8 @@ class Daemon:
         """
         database = self.config["daemon"]["database"]
         paths = [database]
-        if not os.environ.get("DASH_ENCRYPTION_KEY"):
+        if not (os.environ.get("DASH_ENCRYPTION_KEY")
+                or os.environ.get("DASH_ENCRYPTION_KEY_FILE")):
             paths.append(self.config["admin"].get("key_file") or (str(database) + ".key"))
         private_files.check_private_files(paths)
 
@@ -145,7 +146,9 @@ class Daemon:
                 self.admin = AdminServer(self.config["admin"]["port"],
                                          self.source_configuration, token,
                                          host=self.config["admin"]["host"],
-                                         allowed_hosts=self.config["admin"]["allowed_hosts"])
+                                         allowed_hosts=self.config["admin"]["allowed_hosts"],
+                                         token_generated=bool(self.config["admin"].get("token_generated")),
+                                         secure_cookie=bool(self.config["admin"].get("secure_cookie")))
             return self
         except Exception:
             self.stop()

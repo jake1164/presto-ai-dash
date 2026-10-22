@@ -170,6 +170,19 @@
         </div>
       </details>
 
+      <details class="setting" id="sessions-setting">
+        <summary><span class="setting-title">Browser sessions</span>
+          <span class="scope-badge">Applies to every browser</span></summary>
+        <div class="setting-body">
+          <p class="note">A browser stays signed in for seven days. If someone else may have signed in
+            with your admin token, sign every browser out, then lock this page and sign in again. A
+            token you set in the configuration file also ends the sessions made under the old one when
+            you change it; a token the daemon generates at each start does not, so this is the way
+            to end those.</p>
+          <div class="actions"><button type="button" id="sign-out-everywhere" class="danger">Sign out of every browser</button></div>
+        </div>
+      </details>
+
       <details class="setting">
         <summary><span class="setting-title">Effective daemon configuration</span>
           <span class="help-slot" data-help="effective-config" data-help-label="Effective configuration"></span>

@@ -142,6 +142,7 @@ Any other method than the ones below is answered `501`.
 | POST | `/api/admin/session` | Exchange the admin token for a seven-day browser session |
 | GET | `/api/admin/session` | Restore a valid cookie session and get the CSRF token |
 | DELETE | `/api/admin/session` | Revoke the current session |
+| DELETE | `/api/admin/sessions` | Revoke every browser session |
 
 Except for the page's own files, a request needs the admin bearer token or a
 valid browser session. A cookie-authenticated change also needs the exact page

@@ -69,10 +69,19 @@ class ContainerClaudeTests(unittest.TestCase):
         report = self.source().collect().metrics["quota"]
         self.assertIn("Awaiting", report["note"])
 
-    def test_the_report_never_carries_a_path_or_a_home_name(self):
+    def test_the_report_carries_no_path_or_home_name_but_the_admin_diagnostic(self):
         report = self.source().collect().metrics["quota"]
-        text = json.dumps(report)
-        self.assertNotIn(str(self.home), text)
+        # The one place a path is meant to appear: the usage cache's own
+        # message, which says where it looked ("tried: ...") and is shown only
+        # on the admin Status tab. Everything else, and what reaches the
+        # device, is free of it. (json.dumps would escape a Windows path's
+        # backslashes, so the home name is searched for as well as the path.)
+        cache = dict(report["usage_cache"])
+        self.assertIn(str(self.home), cache.pop("message"))
+        stripped = dict(report, usage_cache=cache)
+        text = json.dumps(stripped)
+        self.assertNotIn(str(self.home).replace("\\", "\\\\"), text)
+        self.assertNotIn(self.home.name, text)
 
 
 class ContainerCodexTests(unittest.TestCase):

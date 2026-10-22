@@ -24,7 +24,12 @@ never stored in the browser.
 
 **Lock configuration** revokes the current browser session on the server.
 Expiring requires the current startup token to log in again. Sessions
-survive only when the same database is reused.
+survive only when the same database is reused. At most 25 sessions are kept.
+
+**Settings > Browser sessions > Sign out of every browser** ends every session
+at once, including the ones in browsers you no longer have. If you set the admin
+token yourself, changing it also ends every older session. Behind a TLS proxy,
+set `admin.secure_cookie` so the cookie is marked `Secure`.
 
 Use the same browser address and port each time: `localhost` and
 `127.0.0.1` have separate cookies.

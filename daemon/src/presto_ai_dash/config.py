@@ -9,6 +9,7 @@ import tomllib
 from urllib.parse import urlsplit
 
 from . import child_env
+from .secret_env import SecretFileError, secret_from_environment
 from .alert_policy import (DEFAULT_CRITICAL_PERCENT, DEFAULT_MUTE_HOURS,
                            DEFAULT_QUIET_END, DEFAULT_QUIET_START,
                            DEFAULT_WARNING_PERCENT, is_quiet, parse_clock,
@@ -23,7 +24,7 @@ DEFAULTS = {
                "ingest_enabled": False},
     "logging": {"level": "INFO"},
     "admin": {"enabled": False, "port": 8788, "token": "", "key_file": "",
-              "host": "127.0.0.1", "allowed_hosts": []},
+              "host": "127.0.0.1", "allowed_hosts": [], "secure_cookie": False},
     "display": {"overflow_rows": 1},
     # The sound is off until the user turns it on: a desk device must never
     # beep unannounced. A value the user already stored (in the database or
@@ -52,6 +53,10 @@ ENV_OVERRIDES = {
     "DASH_ADMIN_HOST": ("admin", "host"),
 }
 
+# The variables that may instead name a file holding the value (NAME_FILE), so
+# a container secret stays out of the environment and `docker inspect`.
+FILE_SECRETS = ("DASH_SHARED_TOKEN", "DASH_ADMIN_TOKEN")
+
 # The names the admin page answers to, when it does not answer to the
 # loopback names alone. A comma-separated list in the environment.
 ADMIN_ALLOWED_HOSTS_ENV = "DASH_ADMIN_ALLOWED_HOSTS"
@@ -65,6 +70,8 @@ class ConfigError(ValueError):
 
 
 INGEST_ENV = "DASH_INGEST_ENABLED"
+# Mark the admin session cookie Secure: set it when the page is served over HTTPS.
+ADMIN_SECURE_COOKIE_ENV = "DASH_ADMIN_SECURE_COOKIE"
 TRUTHY_FLAGS = frozenset(("1", "true", "yes", "on"))
 FALSY_FLAGS = frozenset(("0", "false", "no", "off"))
 
@@ -339,8 +346,13 @@ def load_config(path=None):
         except (OSError, tomllib.TOMLDecodeError) as exc:
             raise ConfigError("cannot load config %s: %s" % (path, exc)) from exc
     for name, (section, key) in ENV_OVERRIDES.items():
-        if os.environ.get(name):
-            value = os.environ[name]
+        try:
+            # The two tokens may also come from a file (DASH_*_TOKEN_FILE).
+            value = (secret_from_environment(name) if name in FILE_SECRETS
+                     else os.environ.get(name))
+        except SecretFileError as exc:
+            raise ConfigError(str(exc)) from None
+        if value:
             if name == "DASH_PORT":
                 try:
                     value = int(value)
@@ -349,6 +361,9 @@ def load_config(path=None):
             config[section][key] = value
     if INGEST_ENV in os.environ:
         config["daemon"]["ingest_enabled"] = parse_flag(os.environ[INGEST_ENV], INGEST_ENV)
+    if ADMIN_SECURE_COOKIE_ENV in os.environ:
+        config["admin"]["secure_cookie"] = parse_flag(os.environ[ADMIN_SECURE_COOKIE_ENV],
+                                                      ADMIN_SECURE_COOKIE_ENV)
     if OVERFLOW_ENV in os.environ:
         overflow = parse_overflow_rows(os.environ[OVERFLOW_ENV])
         if overflow is None:
@@ -408,6 +423,8 @@ def load_config(path=None):
     check_token_strength("daemon.shared_token", token)
     if type(config["admin"]["enabled"]) is not bool:
         raise ConfigError("admin.enabled must be a boolean")
+    if type(config["admin"]["secure_cookie"]) is not bool:
+        raise ConfigError("admin.secure_cookie must be a boolean")
     for key in ("token", "key_file"):
         if not isinstance(config["admin"][key], str):
             raise ConfigError("admin.%s must be a string" % key)

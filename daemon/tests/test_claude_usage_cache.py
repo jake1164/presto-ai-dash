@@ -95,7 +95,14 @@ class CacheBase(unittest.TestCase):
         if raw is None:
             raw = json.dumps(document if document is not None
                              else cache_document()).encode("utf-8")
+        before = target.stat().st_mtime_ns if target.exists() else None
         target.write_bytes(raw)
+        # The reader re-reads when the modification time moves, and a file
+        # system (Linux's, for one) may not move its clock between two quick
+        # writes, so a rewrite always gets a later time.
+        if before is not None and target.stat().st_mtime_ns <= before:
+            later = before + 1_000_000_000
+            os.utime(str(target), ns=(later, later))
         return target
 
     def write_stamped(self, document, mtime):

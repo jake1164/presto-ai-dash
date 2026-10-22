@@ -8,9 +8,9 @@ import logging
 import re
 from urllib.parse import urlsplit
 
-from .api import ApiServer, BoundedRequestHandler
+from .api import ApiServer, BoundedRequestHandler, parse_length
 from .collectors import COLLECTOR_FILE, collector_bytes
-from .admin_sessions import AdminSessions, SESSION_SECONDS
+from .admin_sessions import AdminSessions, SESSION_SECONDS, token_binding
 from .storage import ConfigurationConflict
 
 log = logging.getLogger(__name__)
@@ -92,15 +92,24 @@ def origin_is_allowed(origin, host_header, server_port, allowed_hosts=()):
     origin_host, origin_port = split_host_port(rest.split("/")[0])
     if origin_host != hostname:
         return False
-    if origin_port is not None and port is not None and origin_port != port:
-        return False
-    return True
+    # The port the browser reached, which is the scheme's own when none is
+    # written, must be the one the Host header names; and a Host with no port
+    # means the scheme's own as well. So "dash.lan:8788" does not accept an
+    # Origin of "http://dash.lan", nor "proxy.lan" one of "http://proxy.lan:3000".
+    default = 443 if scheme == "https" else 80
+    reached = origin_port if origin_port is not None else default
+    named = port if port is not None else default
+    return reached == named
 
 
-def make_admin_handler(manager, token, allowed_hosts=()):
+def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
+                       secure_cookie=False):
     if not token:
         raise ValueError("admin API requires a token")
-    sessions = AdminSessions(manager.storage)
+    # A session is bound to the token that made it: change a configured token and
+    # the sessions made under the old one end. A generated token is new at every
+    # start, so those sessions are bound to "generated" and survive a restart.
+    sessions = AdminSessions(manager.storage, binding=token_binding(token, bool(token_generated)))
     allowed = tuple(allowed_hosts or ())
 
     class AdminHandler(BoundedRequestHandler):
@@ -144,7 +153,10 @@ def make_admin_handler(manager, token, allowed_hosts=()):
 
         def _cookie_name(self):
             # Cookies have no port isolation; keep separate daemon ports independent.
-            return "presto_admin_session_%d" % self.server.server_address[1]
+            # With the Secure flag on, the __Secure- prefix makes the browser refuse
+            # the cookie unless it came over HTTPS.
+            return "%spresto_admin_session_%d" % ("__Secure-" if secure_cookie else "",
+                                                  self.server.server_address[1])
 
         def _cookie_value(self):
             raw = self.headers.get("Cookie", "")
@@ -158,10 +170,13 @@ def make_admin_handler(manager, token, allowed_hosts=()):
                 return None
 
         def _session_cookie(self, credential=""):
-            # This listener is HTTP on loopback only, so Secure is intentionally
-            # omitted. Host-only, API-only cookies never contain the admin code.
-            return ("%s=%s; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age=%d" %
-                    (self._cookie_name(), credential, SESSION_SECONDS if credential else 0))
+            # The listener itself speaks HTTP, so Secure is off unless the operator
+            # says the page is served through HTTPS (admin.secure_cookie): a browser
+            # would not send a Secure cookie back over plain HTTP. Host-only,
+            # API-only cookies never contain the admin code.
+            return ("%s=%s; Path=/api/admin; HttpOnly; SameSite=Strict; Max-Age=%d%s" %
+                    (self._cookie_name(), credential, SESSION_SECONDS if credential else 0,
+                     "; Secure" if secure_cookie else ""))
 
         def _authorized(self, bearer_only=False):
             if not self._allowed_host():
@@ -316,7 +331,7 @@ def make_admin_handler(manager, token, allowed_hosts=()):
                 self._send(415, {"error": "send an application/json body"})
                 return
             try:
-                length = int(self.headers.get("Content-Length", "0"))
+                length = parse_length(self.headers.get("Content-Length"), "0")
             except ValueError:
                 self._send(400, {"error": "invalid body length"})
                 return
@@ -404,7 +419,7 @@ def make_admin_handler(manager, token, allowed_hosts=()):
                     self._send(415, {"error": "send an application/json body"})
                     return
                 try:
-                    length = int(self.headers.get("Content-Length", "0"))
+                    length = parse_length(self.headers.get("Content-Length"), "0")
                 except ValueError:
                     self._send(400, {"error": "invalid body length"})
                     return
@@ -445,6 +460,14 @@ def make_admin_handler(manager, token, allowed_hosts=()):
                     sessions.revoke(self._cookie_value())
                     self._send(200, {"logged_out": True}, cookie=self._session_cookie())
                 return
+            if urlsplit(self.path).path == "/api/admin/sessions":
+                # Every browser, this one included. The way to end a session an
+                # attacker made, when the token that made it was a generated one.
+                if self._authorized():
+                    count = sessions.revoke_all()
+                    log.warning("every admin browser session was ended (%d)", count)
+                    self._send(200, {"signed_out": count}, cookie=self._session_cookie())
+                return
             token_revoke = re.fullmatch(INGEST_TOKEN_PATH, urlsplit(self.path).path)
             if token_revoke:
                 self._ingest_token("DELETE", token_revoke[1])
@@ -455,6 +478,8 @@ def make_admin_handler(manager, token, allowed_hosts=()):
 
 
 class AdminServer(ApiServer):
-    def __init__(self, port, manager, token, host="127.0.0.1", allowed_hosts=()):
+    def __init__(self, port, manager, token, host="127.0.0.1", allowed_hosts=(),
+                 token_generated=False, secure_cookie=False):
         super().__init__(host, port, manager.storage, token,
-                         handler_class=make_admin_handler(manager, token, allowed_hosts))
+                         handler_class=make_admin_handler(manager, token, allowed_hosts,
+                                                          token_generated, secure_cookie))

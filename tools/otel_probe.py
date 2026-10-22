@@ -249,10 +249,24 @@ class ProbeHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _other(self):
+        """Any contact that is not a POST to an OTLP path: show it, count it, answer 404.
+
+        Silence here would look exactly like "nothing arrived". The query string is
+        never echoed: it could carry anything.
+        """
+        path = self.path.split("?")[0][:80]
+        self.server.counts["unrecognised"] = self.server.counts.get("unrecognised", 0) + 1
+        self.server.out("[%s] contact: %s %s -> 404 (not a POST to /v1/metrics, /v1/logs "
+                        "or /v1/traces)" % (self.server.clock(), self.command, path))
+        self._reply(404, b'{"error":"not found"}')
+
+    do_GET = do_PUT = do_DELETE = do_PATCH = do_HEAD = do_OPTIONS = _other
+
     def do_POST(self):
         kind = PATHS.get(self.path.split("?")[0])
         if kind is None:
-            self._reply(404, b'{"error":"not found"}')
+            self._other()
             return
         try:
             length = int(self.headers.get("Content-Length", ""))
@@ -339,6 +353,19 @@ Press Ctrl-C to stop.
 """
 
 
+def final_summary(counts):
+    """The lines printed when the probe stops."""
+    total = sum(value for key, value in counts.items() if key != "unrecognised")
+    stray = counts.get("unrecognised", 0)
+    lines = ["stopped: %d telemetry request(s) received %s" % (total, dict(counts))]
+    if stray:
+        lines.append("%d unrecognised contact(s): something connected, but not with a POST to "
+                     "/v1/metrics, /v1/logs or /v1/traces. See the contact lines above." % stray)
+    if not total and not stray:
+        lines.append("Nothing arrived: this surface did not emit telemetry to the probe.")
+    return chr(10).join(lines)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--port", type=int, default=4318)
@@ -354,10 +381,7 @@ def main(argv=None):
         pass
     finally:
         server.server_close()
-    total = sum(server.counts.values())
-    print("\nstopped: %d request(s) received %s" % (total, dict(server.counts)))
-    if not total:
-        print("Nothing arrived: this surface did not emit telemetry to the probe.")
+    print(chr(10) + final_summary(server.counts))
     return 0
 
 

@@ -210,6 +210,46 @@ class ServerTests(unittest.TestCase):
             self.assertNotIn(secret, repr(self.server.__dict__))
 
 
+class UnrecognisedContactTests(ServerTests):
+    """Any contact must be visible, or silence would look like 'nothing arrived'."""
+
+    def shown(self):
+        return chr(10).join(self.lines)
+
+    def get(self, path):
+        try:
+            with urlopen("http://127.0.0.1:%d%s" % (self.port, path), timeout=5) as response:
+                return response.status
+        except HTTPError as error:
+            return error.code
+
+    def test_a_post_to_an_unknown_path_is_shown_and_counted(self):
+        status, _ = self.post("/some/other/path?token=SECRETQUERY", {})
+        self.assertEqual(status, 404)
+        text = self.shown()
+        self.assertIn("contact", text)
+        self.assertIn("POST", text)
+        self.assertIn("/some/other/path", text)
+        self.assertNotIn("SECRETQUERY", text)   # a query string is never echoed
+        self.assertEqual(self.server.counts.get("unrecognised"), 1)
+
+    def test_a_get_is_shown_and_counted_not_silently_dropped(self):
+        self.get("/")
+        text = self.shown()
+        self.assertIn("contact", text)
+        self.assertIn("GET", text)
+        self.assertEqual(self.server.counts.get("unrecognised"), 1)
+
+    def test_a_good_post_is_not_reported_as_an_unrecognised_contact(self):
+        self.post("/v1/metrics", metrics_payload())
+        self.assertNotIn("unrecognised", self.server.counts)
+
+    def test_the_summary_line_mentions_unrecognised_contacts(self):
+        self.get("/")
+        self.assertIn("unrecognised", probe.final_summary(self.server.counts))
+        self.assertIn("Nothing arrived", probe.final_summary({}))
+
+
 class PortFallbackTests(unittest.TestCase):
     """Windows reserves some ports (Hyper-V, Docker): the probe must not just crash."""
 

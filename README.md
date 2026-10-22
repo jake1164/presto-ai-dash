@@ -129,4 +129,8 @@ Repository-internal notes (status, contracts, history) are indexed in
 
 MIT. See [LICENSE](LICENSE) for the full text and the copyright notice.
 
-No provider logos, mascots, fonts or artwork are shipped in this repository.
+No provider logos, mascots or artwork are shipped in this repository. The
+host-side preview tools carry bitmap font data generated from Pimoroni's
+MIT-licensed fonts, so they draw the same letters as the Presto's firmware; its
+notice is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The Presto itself
+uses the fonts built into its firmware.

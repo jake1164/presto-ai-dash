@@ -84,4 +84,4 @@ what is read from your machine and what is stored.
 
 ## Licence
 
-MIT. The repository also ships no provider logos, fonts or artwork.
+MIT. The repository ships no provider logos or artwork. The host-side preview tools carry bitmap font data generated from Pimoroni's MIT-licensed fonts; its notice is in `THIRD_PARTY_NOTICES.md` in the repository.

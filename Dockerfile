@@ -16,7 +16,7 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1
 
 WORKDIR /build
-COPY daemon/pyproject.toml daemon/README.md ./daemon/
+COPY daemon/pyproject.toml daemon/README.md daemon/LICENSE ./daemon/
 COPY daemon/src ./daemon/src
 
 # The daemon and its one dependency, into a virtual environment the final
@@ -28,6 +28,12 @@ RUN python -m venv /opt/venv \
 
 
 FROM python:3.13-alpine3.21@sha256:e77011e08668411a8db356ec6bae7d39cdb0ff531db49bf1de9d5a64d8f75a6a
+
+# The licence the project is distributed under, and the notices for what it
+# includes, travel with the image.
+LABEL org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.title="Presto AI Dash" \
+      org.opencontainers.image.source="https://github.com/jake1164/presto-ai-dash"
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -42,6 +48,7 @@ RUN addgroup -g 10001 dash \
  && chown dash:dash /data
 
 COPY --from=builder /opt/venv /opt/venv
+COPY LICENSE THIRD_PARTY_NOTICES.md /licenses/
 
 USER dash
 WORKDIR /data

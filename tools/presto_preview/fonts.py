@@ -1,8 +1,10 @@
 """PicoGraphics bitmap6/bitmap8 glyphs (printable ASCII only).
 
 Generated from pimoroni-pico libraries/bitmap_fonts/font{6,8}_data.cpp
-(MIT licence, Copyright (c) 2021 Pimoroni Ltd). Each glyph is a tuple of
-column bytes, least-significant bit at the top, trimmed to its width.
+(MIT licence, Copyright (c) 2021 Pimoroni Ltd; the full notice is in
+THIRD_PARTY_NOTICES.md at the root of the repository, which must stay with
+this file). Each glyph is a tuple of column bytes, least-significant bit at the
+top, trimmed to its width.
 """
 
 FONTS = {

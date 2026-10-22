@@ -10,7 +10,10 @@ import subprocess
 import threading
 import time
 
-from ..child_env import child_environment
+try:
+    from ..child_env import child_environment
+except ImportError:  # the one-file collector has no package; it loads its own copy first
+    from presto_collector_embedded.child_env import child_environment
 
 
 class CodexReportingError(Exception):

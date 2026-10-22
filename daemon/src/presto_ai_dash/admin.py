@@ -326,7 +326,7 @@ def make_admin_handler(manager, token, allowed_hosts=()):
                 return
             try:
                 data = json.loads(self.rfile.read(length))
-            except (ValueError, UnicodeError):
+            except (ValueError, UnicodeError, RecursionError):
                 self._send(400, {"error": "invalid JSON"})
                 return
             try:
@@ -414,7 +414,7 @@ def make_admin_handler(manager, token, allowed_hosts=()):
                     return
                 try:
                     data = json.loads(self.rfile.read(length))
-                except (ValueError, UnicodeError):
+                except (ValueError, UnicodeError, RecursionError):
                     self._send(400, {"error": "invalid JSON"})
                     return
                 try:

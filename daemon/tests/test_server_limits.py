@@ -139,6 +139,11 @@ class HandlerCapTests(ServerLimitBase):
                 break
             time.sleep(0.1)
         self.assertIn(b"200", status)
+        # The slot is released when the handler has finished, a moment after
+        # the client has what it asked for.
+        deadline = time.monotonic() + 3
+        while api._server._slots_used and time.monotonic() < deadline:
+            time.sleep(0.02)
         self.assertEqual(api._server._slots_used, 0)
 
     def test_one_address_cannot_take_every_slot(self):

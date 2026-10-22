@@ -61,6 +61,8 @@ FIRST_SCAN_MAX_AGE_SECONDS = 8 * 24 * 3600
 # Only the newest 7 days of records are kept in memory and totalled.
 KEEP_SECONDS = 7 * 24 * 3600
 WINDOW_5H_SECONDS = 5 * 3600
+# A record dated further ahead than this is not kept: more than a skewed clock explains.
+FUTURE_TOLERANCE_SECONDS = 24 * 3600
 # A model name is shown, so only a short printable ASCII name is kept.
 MAX_MODEL_CHARS = 40
 
@@ -156,7 +158,12 @@ class ActivityReader:
             # The unofficial format may change; a parse bug must never take
             # Claude's quota reporting down with it, and never logs internals.
             return self._failed("activity scan failed")
-        return self._summary(now, complete)
+        try:
+            return self._summary(now, complete)
+        except Exception:
+            # Whatever a hostile record holds, the answer is "unavailable",
+            # not an exception that takes the whole Claude source offline.
+            return self._failed("activity summary failed")
 
     # -- scanning ----------------------------------------------------------
 
@@ -346,7 +353,11 @@ class ActivityReader:
 
     def _summary(self, now, complete):
         cutoff = now.timestamp() - KEEP_SECONDS
-        for key in [k for k, value in self._records.items() if value[0] < cutoff]:
+        ceiling = now.timestamp() + FUTURE_TOLERANCE_SECONDS
+        # A record from the future is a skewed clock or a hostile file. It
+        # would count as "within the last five hours" for ever, so it goes.
+        for key in [k for k, value in self._records.items()
+                    if value[0] < cutoff or value[0] > ceiling]:
             del self._records[key]
         five = [value for value in self._records.values()
                 if now.timestamp() - value[0] < WINDOW_5H_SECONDS]

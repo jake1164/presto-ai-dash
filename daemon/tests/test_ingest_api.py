@@ -132,8 +132,11 @@ class RouteTests(IngestApiBase):
                 self.assertEqual(status, 400)
 
     def test_chunked_transfer_encoding_is_unsupported(self):
-        status, _, _ = self.post(envelope(), headers={"Transfer-Encoding": "chunked"})
+        status, _, body = self.post(envelope(), headers={"Transfer-Encoding": "chunked"})
         self.assertEqual(status, 400)
+        # Named for what it is, not "invalid_length": the check for chunking
+        # comes before the one for Content-Length.
+        self.assertEqual(json.loads(body), {"error": "unsupported_transfer_encoding"})
         self.assertEqual(self.post(envelope())[0], 204)  # the same body is fine unchunked
 
     def test_invalid_json_is_400_without_echoing_the_input(self):

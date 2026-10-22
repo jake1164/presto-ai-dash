@@ -16,7 +16,8 @@ import tempfile
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from presto_ai_dash.collectors.claude_statusline import MAX_INPUT, build_envelope, normalize
+from presto_ai_dash.collectors.claude_statusline import (MAX_INPUT, build_envelope, normalize,
+                                                         powershell_quote)
 from presto_ai_dash.credentials import load_cipher
 from presto_ai_dash.ingest import ingest
 from presto_ai_dash.models import iso, now_utc
@@ -52,7 +53,7 @@ def helper_command(database, instance_id, key_file=""):
         args += ["--key-file", str(Path(key_file).resolve())]
     if os.name == "nt":
         # Encoded PowerShell avoids shell interpolation by either Git Bash or PS.
-        quoted = " ".join("'" + value.replace("\\", "/").replace("'", "''") + "'" for value in args)
+        quoted = " ".join("'" + powershell_quote(value.replace("\\", "/")) + "'" for value in args)
         script = ("$ProgressPreference = 'SilentlyContinue'; "
                   "$OutputEncoding = [Console]::InputEncoding = [Text.UTF8Encoding]::new($false); "
                   "$prestoInput = [Console]::In.ReadToEnd(); $prestoInput | & " + quoted)

@@ -110,9 +110,14 @@ def normalize(data):
                 raise ValueError("incomplete quota window")
             if type(percent) not in (int, float) or not math.isfinite(percent) or percent < 0:
                 raise ValueError("invalid quota percentage")
+            try:
+                resets_at = datetime.fromtimestamp(reset, timezone.utc).isoformat()
+            except (OverflowError, OSError, ValueError) as exc:
+                # A finite number can still be no date: 1e20, or year 3000+ on Windows.
+                raise ValueError("invalid quota reset time") from exc
             window = {"id": key, "label": label, "period_minutes": minutes,
                       "used_percent": percent,
-                      "resets_at": datetime.fromtimestamp(reset, timezone.utc).isoformat(),
+                      "resets_at": resets_at,
                       "state": "available"}
         windows.append(window)
         signal = [window["state"], window["used_percent"], window["resets_at"],
@@ -300,13 +305,25 @@ def posix_snippet(script, url, token_file, host, previous=(), python="python3"):
     return " ".join(shlex.quote(value) for value in args)
 
 
+# PowerShell ends a single-quoted string at any of these, not only at the
+# ASCII apostrophe: the typographic single quotes count as quotes too.
+_POWERSHELL_QUOTES = "'\u2018\u2019\u201a\u201b"
+
+
+def powershell_quote(value):
+    """Text as the inside of a PowerShell single-quoted string, every quote doubled."""
+    for quote in _POWERSHELL_QUOTES:
+        value = value.replace(quote, quote * 2)
+    return value
+
+
 def powershell_snippet(script, url, token_file, host, previous=(), python="python"):
     """The settings.json status line for Windows: encoded PowerShell, forward slashes."""
     args = [python, script, "--url", url, "--token-file", token_file, "--host", host]
     if previous:
         args += ["--"] + list(previous)
     # Encoded PowerShell avoids shell interpolation by either Git Bash or PS.
-    quoted = " ".join("'" + value.replace("\\", "/").replace("'", "''") + "'" for value in args)
+    quoted = " ".join("'" + powershell_quote(value.replace("\\", "/")) + "'" for value in args)
     script_text = ("$ProgressPreference = 'SilentlyContinue'; "
                    "$OutputEncoding = [Console]::InputEncoding = [Text.UTF8Encoding]::new($false); "
                    "$prestoInput = [Console]::In.ReadToEnd(); $prestoInput | & " + quoted)
@@ -330,7 +347,7 @@ def main(argv=None, state_path=None):
     if len(raw) <= MAX_INPUT:
         try:
             envelope = build_envelope(json.loads(raw.decode("utf-8-sig")), args.host)
-        except (ValueError, TypeError, UnicodeError):
+        except (ValueError, TypeError, UnicodeError, RecursionError):
             envelope = None
     if envelope is None:
         envelope = heartbeat_envelope(args.host)

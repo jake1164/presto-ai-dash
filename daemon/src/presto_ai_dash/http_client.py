@@ -24,6 +24,22 @@ class HttpUnreachable(Exception):
     """The server could not be reached at all."""
 
 
+# What a provider's answer may weigh. The real ones are a few kilobytes; a
+# gateway or a hostile server must not be able to fill the daemon's memory.
+MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+# Only the start of an error body is ever shown.
+MAX_ERROR_BODY_BYTES = 64 * 1024
+
+
+def _read_body(response, limit=None):
+    """The response body, refused when it is larger than the limit."""
+    limit = MAX_RESPONSE_BYTES if limit is None else limit
+    raw = response.read(limit + 1)
+    if len(raw) > limit:
+        raise HttpUnreachable("response is larger than the %d byte limit" % limit)
+    return raw
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, fp, code, message, headers, new_url):
         return None
@@ -99,10 +115,10 @@ def get_json(url, timeout=5, headers=None, transport=None, allow_redirects=True)
     try:
         with _open(request, timeout, allow_redirects) as response:
             status = getattr(response, "status", None) or response.getcode()
-            raw = response.read()
+            raw = _read_body(response)
     except urllib.error.HTTPError as exc:
         try:
-            body = exc.read().decode("utf-8", "replace")
+            body = exc.read(MAX_ERROR_BODY_BYTES).decode("utf-8", "replace")
         except Exception:  # pragma: no cover - defensive
             body = ""
         raise HttpError(exc.code, body)
@@ -128,10 +144,10 @@ def get_text(url, timeout=5, headers=None, transport=None):
     try:
         with _open(request, timeout) as response:
             status = getattr(response, "status", None) or response.getcode()
-            raw = response.read()
+            raw = _read_body(response)
     except urllib.error.HTTPError as exc:
         try:
-            body = exc.read().decode("utf-8", "replace")
+            body = exc.read(MAX_ERROR_BODY_BYTES).decode("utf-8", "replace")
         except Exception:  # pragma: no cover - defensive
             body = ""
         raise HttpError(exc.code, body)
@@ -158,10 +174,10 @@ def post_json(url, payload, timeout=5, headers=None, transport=None):
     try:
         with _open(request, timeout) as response:
             status = getattr(response, "status", None) or response.getcode()
-            raw = response.read()
+            raw = _read_body(response)
     except urllib.error.HTTPError as exc:
         try:
-            text = exc.read().decode("utf-8", "replace")
+            text = exc.read(MAX_ERROR_BODY_BYTES).decode("utf-8", "replace")
         except Exception:  # pragma: no cover - defensive
             text = ""
         raise HttpError(exc.code, text)
@@ -187,6 +203,8 @@ def _decode(raw):
         return json.loads(raw)
     except ValueError as exc:
         raise HttpUnreachable("response was not valid JSON: %s" % exc)
+    except RecursionError:
+        raise HttpUnreachable("response was not valid JSON: nested too deeply")
 
 
 def join_url(base, path):

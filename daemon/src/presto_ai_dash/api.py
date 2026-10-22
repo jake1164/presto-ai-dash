@@ -181,9 +181,47 @@ class BoundedRequestHandler(BaseHTTPRequestHandler):
     server_label = "status"
     auth_failures = _AuthFailures()
 
+    # After the answer, how much of a body the handler left unread is read and
+    # thrown away, for how long at most, before the connection closes.
+    drain_bytes = 64 * 1024
+    drain_seconds = 0.5
+
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         cls.auth_failures = _AuthFailures()
+
+    def finish(self):
+        super().finish()
+        self._drain_unread()
+
+    def _drain_unread(self):
+        """Read and discard what the client is still sending, then let it close.
+
+        A handler that rejects a request early, a 401 or a 413, has not read the
+        body. Closing a socket with unread bytes in it makes Windows, and
+        sometimes Linux, reset the connection, and the reset can destroy the
+        answer before the client reads it: the client sees a reset instead of
+        the error. So the end of the answer is signalled first, and what is
+        still arriving is drained, within a small bound.
+        """
+        try:
+            self.connection.shutdown(socket.SHUT_WR)
+        except OSError:
+            return
+        deadline = time.monotonic() + self.drain_seconds
+        remaining = self.drain_bytes
+        try:
+            while remaining > 0:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    break
+                self.connection.settimeout(left)
+                chunk = self.connection.recv(min(4096, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except OSError:
+            pass
 
     def note_failed_auth(self):
         """Record and slow down a bearer token that did not match.
@@ -351,6 +389,11 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                 # A disabled route looks like an unknown one and hides itself.
                 self._send_json(404, {"error": "not_found"})
                 return
+            # A chunked body has no Content-Length, so it is named for what it
+            # is before the length is looked at.
+            if self.headers.get("Transfer-Encoding"):
+                self._send_json(400, {"error": "unsupported_transfer_encoding"})
+                return
             try:
                 length = int(self.headers.get("Content-Length", ""))
             except ValueError:
@@ -361,9 +404,6 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
             if length > INGEST_BODY_LIMIT:
                 # Refuse the size before reading a single body byte.
                 self._send_json(413, {"error": "body_too_large"})
-                return
-            if self.headers.get("Transfer-Encoding"):
-                self._send_json(400, {"error": "unsupported_transfer_encoding"})
                 return
             parts = self.headers.get("Authorization", "").split()
             token = parts[1] if len(parts) == 2 and parts[0].lower() == "bearer" else ""
@@ -381,7 +421,8 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
             data = self.rfile.read(length)
             try:
                 envelope = json.loads(data.decode("utf-8"))
-            except (ValueError, UnicodeError):
+            except (ValueError, UnicodeError, RecursionError):
+                # RecursionError: a body nested thousands of levels deep.
                 self._send_json(400, {"error": "invalid_json"})
                 return
             try:
@@ -440,7 +481,7 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
             data = self.rfile.read(length) if length else b""
             try:
                 payload = json.loads(data.decode("utf-8")) if data else None
-            except (ValueError, UnicodeError):
+            except (ValueError, UnicodeError, RecursionError):
                 self._send_json(400, {"error": "invalid_json"})
                 return
             if (not isinstance(payload, dict) or set(payload) != {"enabled"} or

@@ -171,6 +171,20 @@ a poll and never run from a remote request.
 If the provider's API offers an action - Codex's
 `ConsumeAccountRateLimitResetCredit`, for example - do not wire it up.
 
+## What the HTTP client enforces
+
+A source that reads over HTTP uses `presto_ai_dash.http_client`
+(`get_json`, `get_text`), which holds the rules so a source does not have to:
+
+- **Redirects stay on the host.** A redirect is followed only to the same host
+  and port, or from `http` to `https` on the same host. Anything else is an
+  error, so a key in a header never reaches another server.
+- **An answer is at most 4 MB**, and an error body is read only as far as its
+  first 64 KB. A larger answer is refused as unreachable, not read into memory.
+- **A body that is not JSON, or is nested too deeply to parse, is
+  "unreachable"**, never an exception that escapes the source.
+- A request has a timeout, and the source decides how long.
+
 ## The device payload whitelist
 
 The daemon does not send the full payload to the device. It sends a **device

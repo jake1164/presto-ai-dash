@@ -32,8 +32,8 @@ class HttpClientTests(unittest.TestCase):
             def __exit__(self, *_):
                 return False
 
-            def read(self):
-                return b"I'm alive!"
+            def read(self, size=-1):
+                return b"I'm alive!"[:size] if size >= 0 else b"I'm alive!"
 
             def getcode(self):
                 return self.status

@@ -157,21 +157,32 @@ class FailedSignInTests(ManagementBase):
             status = exc.code
         return status, time.monotonic() - started
 
+    def request(self, *args, **kwargs):
+        """The status, and the pauses the server took before answering."""
+        with patch("presto_ai_dash.api.time.sleep") as sleep:
+            status, _ = self.get(*args, **kwargs)
+        return status, [call.args[0] for call in sleep.call_args_list]
+
     def test_a_wrong_token_is_answered_after_a_pause(self):
         status, elapsed = self.get("/api/v1/status", "wrong-token-value-123456")
         self.assertEqual(status, 401)
         self.assertGreaterEqual(elapsed, self.DELAY * 0.9)
 
+    def test_the_pause_is_the_configured_one(self):
+        status, pauses = self.request("/api/v1/status", "wrong-token-value-123456")
+        self.assertEqual(status, 401)
+        self.assertEqual(pauses, [self.DELAY])
+
     def test_the_right_token_is_not_delayed(self):
-        status, elapsed = self.get("/api/v1/status", "device-token-0123456789")
+        status, pauses = self.request("/api/v1/status", "device-token-0123456789")
         self.assertEqual(status, 200)
-        self.assertLess(elapsed, self.DELAY * 0.75)
+        self.assertEqual(pauses, [])
 
     def test_a_request_with_no_token_at_all_is_not_delayed_or_logged(self):
         with self.assertNoLogs("presto_ai_dash.api", level="WARNING"):
-            status, elapsed = self.get("/api/v1/status")
+            status, pauses = self.request("/api/v1/status")
         self.assertEqual(status, 401)
-        self.assertLess(elapsed, self.DELAY * 0.75)
+        self.assertEqual(pauses, [])
 
     def test_the_failure_is_logged_with_the_address_and_never_the_token(self):
         secret = "guess-that-must-not-be-logged-1"
@@ -205,9 +216,9 @@ class FailedSignInTests(ManagementBase):
 
     def test_an_ingest_request_with_no_token_is_not_logged(self):
         with self.assertNoLogs("presto_ai_dash.api", level="WARNING"):
-            status, elapsed = self.get("/api/v1/ingest", method="POST", body={})
+            status, pauses = self.request("/api/v1/ingest", method="POST", body={})
         self.assertEqual(status, 401)
-        self.assertLess(elapsed, self.DELAY * 0.75)
+        self.assertEqual(pauses, [])
 
 
 class AdminFailedSignInTests(ManagementBase):
@@ -233,6 +244,12 @@ class AdminFailedSignInTests(ManagementBase):
             status = exc.code
         return status, time.monotonic() - started
 
+    def request(self, *args, **kwargs):
+        """The status, and the pauses the server took before answering."""
+        with patch("presto_ai_dash.api.time.sleep") as sleep:
+            status, _ = self.get(*args, **kwargs)
+        return status, [call.args[0] for call in sleep.call_args_list]
+
     def test_a_wrong_admin_token_is_slowed_and_logged_as_admin(self):
         secret = "wrong-admin-token-xxxxxxxx"
         with self.assertLogs("presto_ai_dash.api", level="WARNING") as logged:
@@ -244,15 +261,15 @@ class AdminFailedSignInTests(ManagementBase):
         self.assertNotIn(secret, text)
 
     def test_the_right_admin_token_is_not_delayed(self):
-        status, elapsed = self.get("/api/admin/sources", "admin-token-0123456789")
+        status, pauses = self.request("/api/admin/sources", "admin-token-0123456789")
         self.assertEqual(status, 200)
-        self.assertLess(elapsed, self.DELAY * 0.75)
+        self.assertEqual(pauses, [])
 
     def test_opening_the_page_without_a_session_is_not_delayed_or_logged(self):
         with self.assertNoLogs("presto_ai_dash.api", level="WARNING"):
-            status, elapsed = self.get("/api/admin/session")
+            status, pauses = self.request("/api/admin/session")
         self.assertEqual(status, 401)
-        self.assertLess(elapsed, self.DELAY * 0.75)
+        self.assertEqual(pauses, [])
 
     def test_the_status_and_admin_servers_keep_separate_counts(self):
         from presto_ai_dash.api import BoundedRequestHandler

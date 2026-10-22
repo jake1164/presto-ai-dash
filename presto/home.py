@@ -535,7 +535,7 @@ def home_windows(row):
 
 def source_rows(payload):
     """Reusable per-instance summaries; absent usage is never a zero or quota."""
-    from cards import normalise_status
+    from cards import clean_id, normalise_status
     sources = payload.get("sources")
     if not isinstance(sources, list):
         return None  # Older daemons still render their ordinary summary card.
@@ -566,8 +566,9 @@ def source_rows(payload):
                 resets = iso_seconds(window.get("resets_at"))
                 observed = iso_seconds(window.get("observed_at"))
                 reset_in = None if resets is None or now is None else resets - now
+                period = window.get("period_minutes")
                 windows.append({"label": label, "percent": percent, "state": state,
-                                "period_minutes": window.get("period_minutes"),
+                                "period_minutes": period if _number(period) else None,
                                 "resets_at": window.get("resets_at"),
                                 "reset_in": reset_in,
                                 "age": None if observed is None or now is None else now - observed,
@@ -591,7 +592,7 @@ def source_rows(payload):
             if not isinstance(marks, list):
                 marks = None
             if windows or text:
-                rows.append({"id": source.get("id"), "type": source.get("type"),
+                rows.append({"id": clean_id(source.get("id")), "type": source.get("type"),
                              "name": str(source.get("name") or "Cloud account"),
                              "status": normalise_status(source.get("status")), "usage": text,
                              "windows": windows, "activity": text, "hint": hint,
@@ -605,12 +606,12 @@ def source_rows(payload):
         usage = []
         for key, label in (("requests_today", "req"), ("tokens_today", "tok")):
             value = metrics.get(key)
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if _number(value):
                 usage.append("%s %s" % (value, label))
         text = " / ".join(usage) if usage else "Usage unavailable"
         if not usage and metrics.get("loaded_model"):
             text = str(metrics["loaded_model"])
-        rows.append({"id": source.get("id"), "type": source.get("type"),
+        rows.append({"id": clean_id(source.get("id")), "type": source.get("type"),
                      "name": str(source.get("name") or source.get("type") or "Source"),
                      "status": normalise_status(source.get("status")), "usage": text,
                      "parts": local_parts(metrics, usage),
@@ -618,8 +619,13 @@ def source_rows(payload):
     return rows
 
 
+_INFINITY = float("inf")
+
+
 def _number(value):
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    """A real, finite number. A bool, nan and inf are not: %d overflows on them."""
+    return (isinstance(value, (int, float)) and not isinstance(value, bool) and
+            value == value and value != _INFINITY and value != -_INFINITY)
 
 
 def local_parts(metrics, usage):

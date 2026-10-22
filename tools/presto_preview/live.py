@@ -35,8 +35,13 @@ from presto_bundle import sync_status  # noqa: E402
 WATCHED = (render.PRESTO_DIR, HERE)
 
 
-class Stop(Exception):
-    """Raised inside the app loop (from touch.poll) to end it for a restart."""
+class Stop(BaseException):
+    """Raised inside the app loop (from touch.poll) to end it for a restart.
+
+    A BaseException, like KeyboardInterrupt: the app's loop guards catch
+    ``Exception`` so that a bad frame never ends the app, and this must not be
+    mistaken for one.
+    """
 
 
 class FakeTouch(object):

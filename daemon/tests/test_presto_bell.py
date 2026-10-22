@@ -424,6 +424,9 @@ class DeviceAlertLogicTests(unittest.IsolatedAsyncioTestCase):
         clock = patch.object(self.module, "_now_ms", side_effect=lambda: self.now[0])
         clock.start()
         self.addCleanup(clock.stop)
+        ticks = patch.object(self.module, "_ticks_diff", side_effect=lambda a, b: a - b)
+        ticks.start()
+        self.addCleanup(ticks.stop)
         self.tones = []
         self.app._buzzer = SimpleNamespace(
             set_tone=lambda *args: self.tones.append(args))

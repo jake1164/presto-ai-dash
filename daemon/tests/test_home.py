@@ -137,14 +137,16 @@ class AppHomeTests(unittest.TestCase):
                                                             poll=lambda: None),
                                       update=lambda: None)
         self.app = self.module.App(self.device)
-        with patch.object(self.module, "_now_ms", return_value=0):
+        with patch.object(self.module, "_now_ms", return_value=0), \
+                patch.object(self.module, "_ticks_diff", side_effect=lambda a, b: a - b):
             self.app._set_payload(embedded_payload())
 
     def touch(self, state, x, y, moment):
         self.device.touch.state = state
         self.device.touch.x = x
         self.device.touch.y = y
-        with patch.object(self.module, "_now_ms", return_value=moment):
+        with patch.object(self.module, "_now_ms", return_value=moment), \
+                patch.object(self.module, "_ticks_diff", side_effect=lambda a, b: a - b):
             self.app._handle_gestures(self.app._poll_touch())
 
     def test_home_is_first_and_renders_demo(self):

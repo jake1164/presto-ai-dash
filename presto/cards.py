@@ -234,6 +234,35 @@ def parse_tiles(raw):
     return tiles
 
 
+def clean_id(value):
+    """A card or service id: a non-empty string, or ``None``.
+
+    Ids are used as dictionary keys and compared with each other, and a list
+    or a dict from a bad payload cannot be hashed. Anything but text is
+    therefore not an id.
+    """
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+# The most detail lines a card may show; the daemon sends far fewer.
+MAX_DETAIL_LINES = 40
+
+
+def parse_lines(raw):
+    """The detail lines of a card, as clean text. Never raises."""
+    if not isinstance(raw, list):
+        return []
+    lines = []
+    for item in raw:
+        if isinstance(item, str):
+            lines.append(tidy_line(item))
+            if len(lines) >= MAX_DETAIL_LINES:
+                break
+    return lines
+
+
 class Card(object):
     """One swipeable card."""
 
@@ -273,9 +302,10 @@ class Card(object):
         raw_secondary = str(data.get("secondary") or "")
         stale = any("(stale)" in line for line in
                     [raw_primary, raw_secondary] + raw)
+        title = data.get("title")
         return cls(
-            id=data.get("id") or "unknown",
-            title=data.get("title") or "Unknown",
+            id=clean_id(data.get("id")) or "unknown",
+            title=title if isinstance(title, str) and title else "Unknown",
             status=data.get("status"),
             primary=tidy_line(data.get("primary") or ""),
             secondary=tidy_line(data.get("secondary") or ""),

@@ -26,8 +26,8 @@ except ImportError:
         STATIC_DEMO = True
 
 from alerts import AlertTracker, led_brightness, led_pattern, worst_accent
-from cards import (error_card, normalise_status, offline_card, overall_status,
-                   parse_cards)
+from cards import (clean_id, error_card, normalise_status, offline_card, overall_status,
+                   parse_cards, parse_lines, parse_tiles)
 from gestures import (
     LONG_PRESS,
     SWIPE_LEFT,
@@ -47,6 +47,7 @@ from net import (
     load_static_payload,
 )
 from popup import PopToTop
+from ticks import Uptime
 from ui import (Palette, bell_hit, build_home_layout, dot_hit, draw_boot,
                 draw_card, draw_home, draw_sources, draw_message)
 
@@ -127,6 +128,10 @@ class App(object):
         )
         self.alerts = AlertTracker(clock=lambda: _now_ms(),
                                    ticks_diff=lambda a, b: _ticks_diff(a, b))
+        # A counter that goes on through the 12-day rollover of the ticks. The
+        # gestures, the pop-to-top and the offline timer subtract times, and
+        # raw ticks make that wrong at the wrap or after six days.
+        self.uptime = Uptime(lambda: _now_ms(), lambda a, b: _ticks_diff(a, b))
         # The alarm pop-to-top: Home scrolls to a service that got worse.
         self.popup = PopToTop()
         # What the daemon says about alerts, and whether it is quiet now.
@@ -167,6 +172,8 @@ class App(object):
         self.wifi_drops = 0
         self.started_at = None
         self._last_screen = None
+        # The kind of error the main loop last raised, so it is shown once.
+        self._loop_error = None
 
         self._buzzer = None
         self._needs_redraw = True
@@ -229,7 +236,7 @@ class App(object):
         self.cards = cards
         self.error = error
         if error is None:
-            self.last_good_at = _now_ms()
+            self.last_good_at = self.uptime.ms()
             # The rows carry the structured quota of every service, so a
             # card can draw its windows the way Home draws them.
             self.live_rows = source_rows(payload)
@@ -276,11 +283,14 @@ class App(object):
         statuses = {}
         alerting = {}
         sources = payload.get("sources") if isinstance(payload, dict) else None
-        for source in sources or ():
-            if isinstance(source, dict) and source.get("id"):
-                statuses[source["id"]] = normalise_status(source.get("status"))
+        if not isinstance(sources, list):
+            sources = []
+        for source in sources:
+            service = clean_id(source.get("id")) if isinstance(source, dict) else None
+            if service:
+                statuses[service] = normalise_status(source.get("status"))
                 if alerts_flag(source):
-                    alerting[source["id"]] = statuses[source["id"]]
+                    alerting[service] = statuses[service]
         if not statuses:
             # An older daemon sends no sources: the card carries the status.
             card = self._current_card()
@@ -288,11 +298,12 @@ class App(object):
             alerting = dict(statuses)
         # The per-service switch, for the bell on the card.
         self.service_alerts = {}
-        for source in sources or ():
-            if isinstance(source, dict) and source.get("id"):
+        for source in sources:
+            service = clean_id(source.get("id")) if isinstance(source, dict) else None
+            if service:
                 state = alerts_state(source)
                 if state is not None:
-                    self.service_alerts[source["id"]] = state
+                    self.service_alerts[service] = state
         # A service whose alerts were turned off stops counting at once:
         # its baseline goes with it, so turning them back on starts from
         # the status as it is now and never chirps for an old alarm.
@@ -305,7 +316,7 @@ class App(object):
         self.overall_accent = worst_accent(alerting.values())
         for _service, cue in self.alerts.update(alerting):
             self._play_cue(cue)
-        now = _now_ms() / 1000.0
+        now = self.uptime.seconds()
         for service, status in alerting.items():
             self.popup.observe(service, status, now)
         self._confirm_holds()
@@ -463,10 +474,31 @@ class App(object):
             self._note_failure(reason)
             self._poll_failed("Daemon offline", reason)
             return False
+        saved = self._display_state()
+        try:
+            self._set_payload(payload)
+        except Exception as exc:
+            # The cards parsed, but something in the payload is not what the
+            # app can use. Keep what was on screen, say so, and carry on: a
+            # poll that raised would otherwise end the poller for good while
+            # the screen kept showing old numbers as if they were current.
+            self._restore_display_state(saved)
+            reason = type(exc).__name__
+            print("AI Dash: rejected refresh: %s" % reason)
+            self._poll_failed("Bad data", reason)
+            return False
         self.connection_error = None
         self.fail_count = 0
-        self._set_payload(payload)
         return True
+
+    def _display_state(self):
+        """What a payload replaces, so a refresh that fails can be put back."""
+        return (self.cards, self.error, self.last_good_at, self.live_rows,
+                self.card_rows, self.home_layout, self.index, self.detail_open)
+
+    def _restore_display_state(self, saved):
+        (self.cards, self.error, self.last_good_at, self.live_rows,
+         self.card_rows, self.home_layout, self.index, self.detail_open) = saved
 
     def _note_failure(self, reason):
         """Count the failure and log it to the serial console, not the screen."""
@@ -481,8 +513,8 @@ class App(object):
         and a diagnostic must never raise.
         """
         if self.started_at is None:
-            self.started_at = _now_ms()
-        up = _ticks_diff(_now_ms(), self.started_at) // 1000
+            self.started_at = self.uptime.ms()
+        up = (self.uptime.ms() - self.started_at) // 1000
         lines = ["fails %d  up %dh%02dm" % (self.fail_count, up // 3600, up // 60 % 60)]
         parts = []
         try:
@@ -524,13 +556,20 @@ class App(object):
         if self.static_demo or self.connection_error is None:
             return None
         if (self.connection_error[2] or self.last_good_at is None or
-                _ticks_diff(_now_ms(), self.last_good_at) >= self.offline_after_s * 1000):
+                self.uptime.ms() - self.last_good_at >= self.offline_after_s * 1000):
             return self.connection_error[:2]
         return None
 
     async def _network_loop(self):
         while True:
-            good = await self.poll_once()
+            try:
+                good = await self.poll_once()
+            except Exception as exc:
+                # Whatever went wrong, the next poll must still happen.
+                reason = type(exc).__name__
+                print("AI Dash: poll failed: %s" % reason)
+                self._poll_failed("Poll error", reason)
+                good = False
             await asyncio.sleep(self.poll_interval if good else self.retry_interval)
 
     # -- interaction --------------------------------------------------------
@@ -608,9 +647,11 @@ class App(object):
             return
         tiles = detail.get("tiles")
         lines = detail.get("lines")
+        # The same limits as the tiles and lines in the summary: the detail
+        # is as untrusted as the poll, and the drawing code expects text.
         self.card_details[card_id] = {
-            "tiles": tiles if isinstance(tiles, list) else [],
-            "lines": lines if isinstance(lines, list) else [],
+            "tiles": parse_tiles(tiles),
+            "lines": parse_lines(lines),
             "at": _now_ms()}
         self.card_failed.discard(card_id)
         self._needs_redraw = True
@@ -679,7 +720,7 @@ class App(object):
         touch = self.presto.touch
         touch.poll()
         state = bool(touch.state)
-        now = _now_ms() / 1000.0
+        now = self.uptime.seconds()
         if state:
             self._touch_x = touch.x
             self._touch_y = touch.y
@@ -695,7 +736,7 @@ class App(object):
             self._needs_redraw = True
         # Use the final touched position on release, rather than resetting to
         # (0, 0), so left/right swipes use the actual gesture.
-        return self.gestures.update(state, self._touch_x, self._touch_y, _now_ms())
+        return self.gestures.update(state, self._touch_x, self._touch_y, self.uptime.ms())
 
     def _poll_popup(self):
         """Move Home to an alarmed service, and back to the user's position.
@@ -709,7 +750,7 @@ class App(object):
             return
         if self.connection_error is not None:
             return
-        now = _now_ms() / 1000.0
+        now = self.uptime.seconds()
         action = self.popup.poll(now, self.home_layout, self.home_scroll.offset)
         if action is None:
             return
@@ -782,6 +823,26 @@ class App(object):
         self._needs_redraw = False
         self._last_screen = screen
 
+    def _loop_failed(self, exc):
+        """One pass of the main loop raised. Say so once, and keep running.
+
+        An error that ended the loop would end the app, and it would repeat on
+        every pass if left to. So the screen says what failed, and the loop
+        tries again when something changes.
+        """
+        name = type(exc).__name__
+        self._needs_redraw = False
+        if name == self._loop_error:
+            return
+        self._loop_error = name
+        print("AI Dash: screen error: %s" % name)
+        try:
+            draw_message(self.display, self.palette, "Display error", name,
+                         detail=["Retrying...", "RESET returns to carousel"])
+            self.presto.update()
+        except Exception:
+            pass
+
     def _render_offline(self, message):
         from alerts import rgb_for_accent
         draw_message(
@@ -796,7 +857,7 @@ class App(object):
 
     def run(self):
         """Run the selected mode; live mode never falls back to static values."""
-        self.started_at = _now_ms()
+        self.started_at = self.uptime.ms()
         self._setup_buzzer()
         if not self.static_demo:
             self._poll_failed("Connecting...", "Joining Wi-Fi")
@@ -805,20 +866,24 @@ class App(object):
         self.load_static()
 
         while True:
-            gestures = self._poll_touch()
-            self._handle_gestures(gestures)
-            self._poll_popup()
-            if self._expire_alerts():
-                self._needs_redraw = True
+            try:
+                gestures = self._poll_touch()
+                self._handle_gestures(gestures)
+                self._poll_popup()
+                if self._expire_alerts():
+                    self._needs_redraw = True
 
-            # A detail view closes itself after a while.
-            if self.detail_open:
-                if _ticks_diff(_now_ms(), self.detail_opened_at) > DETAIL_TIMEOUT_MS:
-                    self._close_detail()
+                # A detail view closes itself after a while.
+                if self.detail_open:
+                    if _ticks_diff(_now_ms(), self.detail_opened_at) > DETAIL_TIMEOUT_MS:
+                        self._close_detail()
 
-            if self._needs_redraw:
-                self._update_leds()
-                self._render()
+                if self._needs_redraw:
+                    self._update_leds()
+                    self._render()
+                    self._loop_error = None
+            except Exception as exc:
+                self._loop_failed(exc)
 
             time.sleep_ms(20)
 
@@ -826,17 +891,23 @@ class App(object):
         poller = asyncio.create_task(self._network_loop())
         try:
             while True:
-                self._handle_gestures(self._poll_touch())
-                self._poll_popup()
-                if self._expire_alerts():
-                    self._needs_redraw = True
-                if self._last_screen != self._connection_screen():
-                    self._needs_redraw = True
-                if self.detail_open and _ticks_diff(_now_ms(), self.detail_opened_at) > DETAIL_TIMEOUT_MS:
-                    self._close_detail()
-                if self._needs_redraw:
-                    self._update_leds()
-                    self._render()
+                try:
+                    self._handle_gestures(self._poll_touch())
+                    self._poll_popup()
+                    if self._expire_alerts():
+                        self._needs_redraw = True
+                    if self._last_screen != self._connection_screen():
+                        self._needs_redraw = True
+                    if self.detail_open and _ticks_diff(_now_ms(), self.detail_opened_at) > DETAIL_TIMEOUT_MS:
+                        self._close_detail()
+                    if self._needs_redraw:
+                        self._update_leds()
+                        self._render()
+                        # Only a draw that worked clears the error, not a pass
+                        # with nothing to draw.
+                        self._loop_error = None
+                except Exception as exc:
+                    self._loop_failed(exc)
                 await asyncio.sleep(0.02)
         finally:
             poller.cancel()

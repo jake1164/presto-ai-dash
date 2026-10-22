@@ -7,7 +7,9 @@
 # --- Daemon ----------------------------------------------------------------
 # False polls the daemon; True keeps the offline static quota design preview.
 STATIC_DEMO = True
-DAEMON_HOST = "home-server"
+# The daemon's LAN IP address, not a name: looking a name up can freeze the
+# touch screen for as long as the lookup takes when DNS is slow or down.
+DAEMON_HOST = "192.168.1.50"
 DAEMON_PORT = 8787
 
 # Must match `daemon.shared_token` in the daemon config.

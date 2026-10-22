@@ -39,8 +39,7 @@ class HttpClientTests(unittest.TestCase):
                 return self.status
 
         response = Response()
-        with patch("presto_ai_dash.http_client.urllib.request.urlopen",
-                   return_value=response):
+        with patch("presto_ai_dash.http_client._open", return_value=response):
             self.assertEqual(get_text("http://localhost/health/liveliness"),
                              "I'm alive!")
 

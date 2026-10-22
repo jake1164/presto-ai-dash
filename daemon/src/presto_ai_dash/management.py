@@ -21,6 +21,7 @@ from .config import (ALERT_KEYS, alert_base_settings, alert_settings,
 from .credentials import load_cipher
 from .dashboard import build_card_details, build_instance_payload, device_view
 from .effective import effective_settings, uptime_label, uptime_seconds
+from .http_client import origin_of
 from .problems import ProblemBuffer
 from .sources import source_catalog, source_type
 from .models import SourceSnapshot, iso, now_utc
@@ -485,6 +486,17 @@ class SourceConfiguration:
                 raise ValueError("choose replace key or remove key")
             record_id = instance_id or uuid4().hex
             credential = current["credential"] if current else None
+            if credential is not None and not secret and not clear_key:
+                # The saved key is sent to the URL. Keeping it across a change
+                # of address would let an edit that never shows the key move it
+                # to another server, so a new address needs the key again.
+                for field in cls.config_fields:
+                    if (field["type"] == "url" and
+                            origin_of(settings[field["key"]]) !=
+                            origin_of(current["config"].get(field["key"], field["default"]))):
+                        raise ValueError(
+                            "Enter the API key again, or remove it, when you change the "
+                            "URL, so a saved key is never sent to a new address")
             if clear_key:
                 credential = None
             elif secret:

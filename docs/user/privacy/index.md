@@ -80,7 +80,8 @@ readable in the database file, which is your own file on your own machine.
 **Nothing is sent to the project, its author or any third party.** There is
 no telemetry, no analytics, no crash reporting, no counter and no license
 check. The daemon never contacts a server that is not one of the services you
-configured.
+configured. It does not follow a redirect to another host, and a saved key is
+never sent to a new address: changing a source's URL asks for the key again.
 
 The only traffic is the traffic you set up: requests from the daemon to the
 providers you added, which carry the key you gave for that provider (OpenCode

@@ -8,6 +8,7 @@ substitute a transport without a network.
 import json
 import urllib.error
 import urllib.request
+from urllib.parse import urlsplit
 
 
 class HttpError(Exception):
@@ -28,6 +29,60 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def origin_of(url):
+    """The scheme, host and port of a URL, so two spellings compare equal."""
+    parts = urlsplit(url or "")
+    scheme = parts.scheme.lower()
+    try:
+        port = parts.port or _DEFAULT_PORTS.get(scheme)
+    except ValueError:
+        port = None
+    return (scheme, (parts.hostname or "").lower(), port)
+
+
+def redirect_allowed(old_url, new_url):
+    """Whether a redirect stays on the host that was configured.
+
+    urllib copies every request header, an ``Authorization`` key included, onto
+    the redirected request, whatever host it points at. So a redirect is only
+    followed to the same host and port, or from http to https on the same
+    host. Never to another host, never from https back to http, and never to
+    a scheme other than http and https.
+    """
+    old, new = urlsplit(old_url), urlsplit(new_url)
+    if old.scheme not in _DEFAULT_PORTS or new.scheme not in _DEFAULT_PORTS:
+        return False
+    if not old.hostname or old.hostname.lower() != (new.hostname or "").lower():
+        return False
+    try:
+        old_port = old.port or _DEFAULT_PORTS[old.scheme]
+        new_port = new.port or _DEFAULT_PORTS[new.scheme]
+    except ValueError:
+        return False
+    if old.scheme == new.scheme:
+        return old_port == new_port
+    return old.scheme == "http" and new.scheme == "https" and new_port in (443, old_port)
+
+
+class _SameHostRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, message, headers, new_url):
+        if not redirect_allowed(request.full_url, new_url):
+            return None
+        return super().redirect_request(request, fp, code, message, headers, new_url)
+
+
+_FOLLOWING = urllib.request.build_opener(_SameHostRedirect())
+_REFUSING = urllib.request.build_opener(_NoRedirect())
+
+
+def _open(request, timeout, allow_redirects=True):
+    """Open a request; a redirect is followed only as ``redirect_allowed`` says."""
+    return (_FOLLOWING if allow_redirects else _REFUSING).open(request, timeout=timeout)
+
+
 def get_json(url, timeout=5, headers=None, transport=None, allow_redirects=True):
     """GET a URL and parse the JSON body.
 
@@ -42,8 +97,7 @@ def get_json(url, timeout=5, headers=None, transport=None, allow_redirects=True)
         request.add_header(key, value)
 
     try:
-        opener = urllib.request.urlopen if allow_redirects else urllib.request.build_opener(_NoRedirect()).open
-        with opener(request, timeout=timeout) as response:
+        with _open(request, timeout, allow_redirects) as response:
             status = getattr(response, "status", None) or response.getcode()
             raw = response.read()
     except urllib.error.HTTPError as exc:
@@ -72,7 +126,7 @@ def get_text(url, timeout=5, headers=None, transport=None):
     for key, value in (headers or {}).items():
         request.add_header(key, value)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with _open(request, timeout) as response:
             status = getattr(response, "status", None) or response.getcode()
             raw = response.read()
     except urllib.error.HTTPError as exc:
@@ -102,7 +156,7 @@ def post_json(url, payload, timeout=5, headers=None, transport=None):
         request.add_header(key, value)
 
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with _open(request, timeout) as response:
             status = getattr(response, "status", None) or response.getcode()
             raw = response.read()
     except urllib.error.HTTPError as exc:

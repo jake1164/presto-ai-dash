@@ -41,6 +41,13 @@ against every configured model, and it therefore costs tokens. The dashboard
 never makes a paid model call, so it uses the two cheap health endpoints
 instead.
 
+**The key stays with its address.** The daemon follows a redirect only to
+the same host, or from `http` to `https` on the same host, so a gateway that
+redirects somewhere else never receives the key; the card shows an error
+instead, and the fix is to set `base_url` to the final address. For the same
+reason, when you change the URL of a source that has a saved key, the admin
+page asks you to enter the key again (or remove it) before it will save.
+
 **Spend needs a database.** LiteLLM's spend tracking needs a
 `DATABASE_URL`. If the proxy runs without one, there is nothing to report,
 and the card says **unavailable**. It never shows `$0.00`: zero spend and

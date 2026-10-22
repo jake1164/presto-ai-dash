@@ -6,10 +6,9 @@
 # - docker: the base image in the Dockerfile, pinned by digest, which nothing
 #   else would ever move.
 #
-# The daemon's own dependencies in daemon/pyproject.toml are lower bounds
-# (cryptography>=46), not pins, so there is nothing for Dependabot to bump
-# there; security alerts for them come from the repository's own Dependabot
-# alerts setting.
+# - pip (docker): the exact versions the container image installs. The daemon's
+#   own dependencies in daemon/pyproject.toml are lower bounds
+#   (cryptography>=46), not pins, so there is nothing to bump there.
 
 version: 2
 
@@ -33,6 +32,13 @@ updates:
     groups:
       docs-build:
         patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /docker
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "docker"
 
   - package-ecosystem: docker
     directory: /

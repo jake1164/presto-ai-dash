@@ -15,6 +15,7 @@
 # Python environments and build output
 .venv
 .venv-docs
+.venv-*
 build
 dist
 *.egg-info
@@ -28,6 +29,12 @@ __pycache__
 
 # The container's own tokens
 .env
+.env.*
+
+# A copy of a private file made by hand or by an editor
+dash.toml.*
+dash.toml~
+*.bak
 
 # The private runtime files
 dash.toml

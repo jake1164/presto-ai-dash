@@ -6,8 +6,8 @@ build/
 dist/
 .venv/
 venv/
-# Documentation site environment (mkdocs and the Material theme).
-.venv-docs/
+# Documentation site and browser-check environments (mkdocs; Playwright).
+.venv-*/
 
 # Daemon runtime state
 *.db
@@ -18,9 +18,15 @@ venv/
 *.db-shm
 *.key
 dash.toml
+# A copy of a private file made by hand or by an editor
+dash.toml.*
+dash.toml~
+*.bak
 .local-backups/
 # The container's tokens (see .env.example)
 .env
+.env.*
+!.env.example
 
 # Presto device files (never commit credentials)
 presto/secrets.py

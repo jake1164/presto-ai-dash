@@ -3,9 +3,11 @@
 #   cp .env.example .env      (fill in the tokens)
 #   docker compose up -d
 #
-# The device port (8787) is published on the LAN, so the Presto can poll it.
-# The admin page is published on 127.0.0.1 only: it is reachable from this
-# machine and from nowhere else. See
+# The device port (8787) is published so the Presto can poll it, on every
+# address of this host unless DASH_PUBLISH_ADDRESS in .env names one (the
+# host's LAN address). Docker's own firewall rules bypass ufw and firewalld,
+# so on a host with a public interface, set it. The admin page is published on
+# 127.0.0.1 only: it is reachable from this machine and from nowhere else. See
 # https://jake1164.github.io/presto-ai-dash/getting-started/install-with-docker/
 # (source: docs/user/getting-started/install-with-docker.md).
 
@@ -25,9 +27,9 @@ services:
       DASH_ADMIN_PORT: "8788"
       DASH_ADMIN_ALLOWED_HOSTS: "localhost:8788,127.0.0.1:8788"
       DASH_ADMIN_TOKEN: "${DASH_ADMIN_TOKEN:?set DASH_ADMIN_TOKEN in .env}"
-      # The token the Presto device holds. The daemon prints a temporary one
-      # when this is empty.
-      DASH_SHARED_TOKEN: "${DASH_SHARED_TOKEN:-}"
+      # The token the Presto device holds. Required: a temporary one would be
+      # written to Docker's log, which outlives the container.
+      DASH_SHARED_TOKEN: "${DASH_SHARED_TOKEN:?set DASH_SHARED_TOKEN in .env}"
       # The database and its key file, in the volume below.
       DASH_DATABASE: "/data/dash.db"
       DASH_KEY_FILE: "/data/dash.db.key"
@@ -42,11 +44,20 @@ services:
       # quiet hours and the weekly reset estimate use the local time, so set
       # TZ in .env to your own zone (for example America/New_York).
       TZ: "${TZ:-UTC}"
+    # The daemon needs nothing of the kernel beyond ordinary file and socket
+    # use, and writes only to /data (and a scratch /tmp).
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp
     volumes:
       - dash-data:/data
     ports:
-      # The device port, on the LAN so the Presto can reach it.
-      - "8787:8787"
+      # The device port, on every address unless DASH_PUBLISH_ADDRESS names one.
+      - "${DASH_PUBLISH_ADDRESS:-0.0.0.0}:8787:8787"
       # The admin page, on this machine only.
       - "127.0.0.1:8788:8788"
     healthcheck:

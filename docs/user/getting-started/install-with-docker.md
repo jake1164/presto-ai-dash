@@ -18,19 +18,21 @@ credential it was not given.
 | `.dockerignore` | The list of files that may not go into the image. |
 | `.env.example` | A template for the tokens. Copy it to `.env`. |
 
-The image is built on `python:3.13-alpine3.21`, pinned to one digest, and it
+The image is built on `python:3.13-alpine3.24`, pinned to one digest, and it
 runs as an unprivileged user (`dash`, uid 10001). It is about 95 MB.
 
 ## Quick start
 
 ```bash
-# 1. A token for the admin page. Generate one and keep it.
+# 1. Two tokens: one for the admin page, one for the Presto device. Generate
+#    each, keep them, and keep them different.
 python -c "import secrets; print(secrets.token_urlsafe(24))"
 #    or: openssl rand -base64 24
 
-# 2. Put it in .env next to compose.yaml.
+# 2. Put them in .env next to compose.yaml.
 cp .env.example .env
-#    then edit .env and paste the token after DASH_ADMIN_TOKEN=
+#    then edit .env and paste the tokens after DASH_ADMIN_TOKEN= and
+#    DASH_SHARED_TOKEN=
 
 # 3. Build and start.
 docker compose up -d
@@ -65,21 +67,17 @@ DASH_ADMIN_TOKEN) before listening on a non-loopback address
 A second message, of the same kind, appears when the list of names the page
 answers to (`DASH_ADMIN_ALLOWED_HOSTS`) is empty.
 
-The device token is separate. The Presto display holds it, and the daemon
-prints a temporary one in its log when `DASH_SHARED_TOKEN` is empty:
-
-```text
-no shared token configured; temporary token: ...
-```
-
-Put that one in the Presto's settings (`presto/config.py`) or, better, set
-`DASH_SHARED_TOKEN` in `.env` so it survives a restart.
+The device token is separate. The Presto display holds it, and the compose
+file refuses to start without `DASH_SHARED_TOKEN` in `.env`. That is on purpose:
+without one the daemon would print a temporary token in its log, and Docker
+keeps that log after the container is gone. Put the same value in the Presto's
+settings (`presto/config.py`).
 
 ## The ports
 
 | Port | Published as | Who uses it |
 | --- | --- | --- |
-| 8787 | `0.0.0.0:8787` (the LAN) | The Presto display polls this. |
+| 8787 | `0.0.0.0:8787` (every address), or the one `DASH_PUBLISH_ADDRESS` names | The Presto display polls this. |
 | 8788 | `127.0.0.1:8788` (this machine only) | The admin page. |
 
 The admin page is published on the loopback address of the host on purpose.
@@ -217,11 +215,37 @@ full, including publishing the status port on one LAN address only.
   Tailscale.
 - **The admin token is separate from the device token** and the daemon
   refuses to use the same value for both.
+- **Limits are per address.** The daemon limits how many connections, and how
+  many alert writes, one client address may use. Where every client appears to
+  come from one address (Docker Desktop on Windows or macOS, or a proxy in
+  front), they share one allowance.
 - **The container never sees your Claude credentials.** Do not mount
   `~/.claude` or `~/.claude.json` into it. Those files hold credentials, and
   the daemon has no reason to read them in a container. The image's build
   context excludes them, and the test suite fails if it ever stops doing so.
-- **The container runs as an unprivileged user** and owns only `/data`.
+- **The container runs as an unprivileged user** and owns only `/data`. The
+  compose file also drops every Linux capability, forbids gaining new
+  privileges, and mounts the root filesystem read-only (with a scratch `/tmp`).
+- **Tokens can come from files instead of the environment.** Anything in
+  `environment:` shows in `docker inspect`. For the two tokens and the master
+  key, set `DASH_ADMIN_TOKEN_FILE`, `DASH_SHARED_TOKEN_FILE` or
+  `DASH_ENCRYPTION_KEY_FILE` to a path, and mount the file there (Compose
+  `secrets:` appear under `/run/secrets/`). Setting both a variable and its
+  `_FILE` form is an error, so in `compose.yaml` replace the
+  `DASH_ADMIN_TOKEN` and `DASH_SHARED_TOKEN` lines rather than adding to them:
+
+  ```yaml
+  environment:
+    DASH_ADMIN_TOKEN_FILE: /run/secrets/admin_token
+    DASH_SHARED_TOKEN_FILE: /run/secrets/shared_token
+  secrets:
+    - admin_token
+    - shared_token
+  ```
+
+  with a top-level `secrets:` block that points each name at a file outside the
+  repository. The daemon reads the whole file (up to 4 KB) and drops the
+  trailing newline.
 - **The image carries no secrets.** The configuration, the tokens and the
   database all come from the environment and the volume.
 
@@ -299,11 +323,14 @@ hold any of them:
 
 | Variable | What it does |
 | --- | --- |
-| `DASH_SHARED_TOKEN` | The token the Presto device holds. Empty: a temporary one is printed. |
+| `DASH_SHARED_TOKEN` | The token the Presto device holds. Required by the compose file. |
+| `DASH_PUBLISH_ADDRESS` | The host address the device port is published on. Every address by default; set your LAN address on a host with a public interface. |
+| `DASH_ADMIN_TOKEN_FILE`, `DASH_SHARED_TOKEN_FILE`, `DASH_ENCRYPTION_KEY_FILE` | A path to a file holding the value, instead of the variable. Not both. |
 | `DASH_HOST` / `DASH_PORT` | The device port. `0.0.0.0:8787` inside the container. |
 | `DASH_ADMIN_HOST` | The admin page's bind address. `0.0.0.0` inside the container. |
 | `DASH_ADMIN_ALLOWED_HOSTS` | The names the admin page answers to, comma separated. |
 | `DASH_ADMIN_TOKEN` | The admin page's token. Required for a non-loopback bind address. |
+| `DASH_ADMIN_SECURE_COOKIE` | `true` when a TLS proxy fronts the admin page, so the session cookie is marked `Secure`. |
 | `DASH_DATABASE` | The database. `/data/dash.db`. |
 | `DASH_KEY_FILE` | The key file. `/data/dash.db.key`. |
 | `DASH_ENCRYPTION_KEY` | The encryption master key, instead of the key file. |

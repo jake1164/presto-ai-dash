@@ -134,3 +134,37 @@ class SecretShapesTests(unittest.TestCase):
         from presto_ai_dash.problems import clean_message
         self.assertEqual(clean_message("Ollama is not reachable: refused"),
                          "Ollama is not reachable: refused")
+
+    def test_an_authorization_header_is_redacted_whatever_its_scheme(self):
+        from presto_ai_dash.problems import clean_message
+        for message, secret in (
+                ("Authorization: Basic dXNlcjpwYXNz", "dXNlcjpwYXNz"),
+                ("authorization=Bearer abcdef", "abcdef"),
+                ("AUTHORIZATION: Token s3cr3t", "s3cr3t"),
+                ("headers {'Authorization': 'Basic Zm9vOmJhcg=='}", "Zm9vOmJhcg"),
+                ('{"authorization": "Digest xyz"}', "xyz")):
+            with self.subTest(message=message):
+                shown = clean_message(message)
+                self.assertNotIn(secret, shown)
+                self.assertIn("<redacted>", shown)
+
+    def test_short_password_style_values_are_redacted(self):
+        from presto_ai_dash.problems import clean_message
+        for message, secret in (("login failed pass=abc", "abc"),
+                                ("pwd: hunter", "hunter"),
+                                ("passphrase=correct", "correct"),
+                                ("PASSWORD = 'x1'", "x1")):
+            with self.subTest(message=message):
+                self.assertNotIn(secret, clean_message(message))
+
+    def test_words_that_only_look_like_credentials_survive(self):
+        from presto_ai_dash.problems import clean_message
+        for message in ("authorization failed for the source",
+                        "checks passed: 3 sources", "bypass: not needed",
+                        "the password manager is not involved"):
+            with self.subTest(message=message):
+                self.assertEqual(clean_message(message), message)
+
+    def test_the_pattern_holds_no_control_characters(self):
+        from presto_ai_dash import problems
+        self.assertEqual([char for char in problems._SECRET.pattern if ord(char) < 32], [])

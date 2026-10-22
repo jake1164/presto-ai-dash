@@ -10,7 +10,10 @@ ordinary ChatGPT message limits, and it does not cover API billing.
 2. Give the account a display name and enable collection.
 3. Leave **Codex executable** blank for path discovery, followed by the
    discovery of a locally installed VS Code Codex extension binary. You can
-   also save a custom executable path.
+   also save a custom executable path. It must be a full path on this
+   computer to a program named `codex` (`codex`, `codex.exe`, `codex.cmd`,
+   `codex.bat`, or a name starting `codex-`), or just `codex`. A network
+   share, a relative path and any other program name are refused.
 4. Leave **Codex profile directory** blank to use the existing default
    login. For another account, point it at that separately authenticated
    Codex profile directory.

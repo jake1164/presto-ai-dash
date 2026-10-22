@@ -8,7 +8,8 @@ import time
 from ..models import iso, now_utc
 from ..quotas import quota_report, quota_window
 from . import Source, register
-from ._codex_rpc import CodexReportingError, find_executable, read_subscription
+from ._codex_rpc import (CodexReportingError, executable_setting_problem, find_executable,
+                         read_subscription)
 
 # Banked reset credits (Phase 9). The provider's count is authoritative; the
 # rows only supply expiries. Missing or malformed data means "not reported".
@@ -125,6 +126,12 @@ class CodexSource(Source):
         {"key": "refresh_seconds", "label": "Refresh interval (seconds)", "type": "int",
          "default": 60, "minimum": 30, "maximum": 3600},
     )
+
+    @staticmethod
+    def check_settings(settings):
+        problem = executable_setting_problem(settings.get("executable", ""))
+        if problem:
+            raise ValueError(problem)
 
     def __init__(self, config=None):
         super().__init__(config)

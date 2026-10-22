@@ -9,12 +9,43 @@ import subprocess
 import threading
 import time
 
+from ..child_env import child_environment
+
 
 class CodexReportingError(Exception):
     """Only fixed, credential-free messages cross the source boundary."""
 
 
+_EXECUTABLE_SUFFIXES = ("", ".exe", ".cmd", ".bat")
+
+
+def executable_setting_problem(configured):
+    """Why a configured Codex executable is refused, or ``None`` when it is fine.
+
+    The daemon starts this program on every poll, so the setting must name
+    Codex and not any program on the computer. This is not a defence against
+    someone who can put a file of that name where they like; it keeps the
+    admin page from being a way to run an arbitrary program, or one on a
+    network share.
+    """
+    if not configured:
+        return None
+    text = str(configured).strip()
+    if text.startswith(("\\\\", "//")):
+        return "Codex executable must be on this computer, not on a network share"
+    name = os.path.basename(text.rstrip("/\\"))
+    if name != text and not os.path.isabs(text):
+        return "Codex executable must be a full path or just the name codex"
+    base, suffix = os.path.splitext(name.lower())
+    if not base.startswith("codex") or suffix not in _EXECUTABLE_SUFFIXES:
+        return "Codex executable must be a program named codex"
+    return None
+
+
 def find_executable(configured=""):
+    problem = executable_setting_problem(configured)
+    if problem:
+        raise CodexReportingError(problem)
     if configured:
         resolved = shutil.which(configured)
         if resolved:
@@ -35,7 +66,7 @@ def find_executable(configured=""):
 
 class ReportingSession:
     def __init__(self, executable, home="", timeout=15):
-        env = os.environ.copy()
+        env = child_environment()
         if home:
             profile = Path(home).expanduser()
             if not profile.is_absolute():

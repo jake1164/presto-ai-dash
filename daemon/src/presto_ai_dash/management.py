@@ -116,6 +116,10 @@ def validate_settings(cls, settings):
                     raise ValueError(field["label"] + " must be an HTTP(S) URL without credentials")
                 value = value.rstrip("/")
         result[key] = value
+    # A source may refuse a combination of settings that is valid field by field.
+    check = getattr(cls, "check_settings", None)
+    if check is not None:
+        check(result)
     return result
 
 

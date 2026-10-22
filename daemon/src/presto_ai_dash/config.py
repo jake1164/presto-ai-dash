@@ -8,6 +8,7 @@ import secrets
 import tomllib
 from urllib.parse import urlsplit
 
+from . import child_env
 from .alert_policy import (DEFAULT_CRITICAL_PERCENT, DEFAULT_MUTE_HOURS,
                            DEFAULT_QUIET_END, DEFAULT_QUIET_START,
                            DEFAULT_WARNING_PERCENT, is_quiet, parse_clock,
@@ -468,6 +469,7 @@ def load_config(path=None):
     key_env = config["sources"]["litellm"].get("api_key_env", "")
     if key_env and not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key_env):
         raise ConfigError("sources.litellm.api_key_env must be an environment variable name")
+    child_env.hide(key_env)
     if key_env and os.environ.get(key_env):
         config["sources"]["litellm"]["api_key"] = os.environ[key_env]
     if config["sources"]["fake"].get("enabled") and any(

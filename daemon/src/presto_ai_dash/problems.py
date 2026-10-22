@@ -25,9 +25,9 @@ _SECRET = re.compile(
     r"(?i)\bbearer\s+\S+"
     # A credential-named key with its value, quoted or not: token=abc,
     # 'x-api-key': 'abc', password: abc, cookie: session=abc.
-    r"|\b(?:x-api-key|api[_-]?key|access[_-]?token|token|password|passwd|secret|"
+    r"|\b(?:x-api-key|api[_-]?key|access[_-]?token|token|pass(?:word|wd|phrase)?|pwd|secret|"
     r"cookie)['\"]?\s*[=:]\s*['\"]?[^\s'\",;&]+"
-    r"|authorization['\"]?\s*[=:]\s*['\"]?(?:(?:bearer|basic)\s+)?[^\s'\",;&]+"
+    r"|\bauthorization['\"]?\s*[=:]\s*['\"]?(?:[a-z][a-z0-9-]*\s+)?[^\s'\",;&]+"
     # A provider-style key on its own, and any long opaque run of characters.
     r"|\bsk-[A-Za-z0-9_-]{8,}|\b[A-Za-z0-9_-]{32,}\b")
 

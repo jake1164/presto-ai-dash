@@ -11,6 +11,7 @@ import time
 import uuid
 from pathlib import Path
 
+from .child_env import child_environment
 from .sources._codex_rpc import find_executable, CodexReportingError
 
 
@@ -20,7 +21,7 @@ class CodexLoginError(Exception):
 
 class _LoginProcess:
     def __init__(self, executable, home, timeout):
-        env = os.environ.copy()
+        env = child_environment()
         if home:
             profile = Path(home).expanduser()
             if not profile.is_absolute():

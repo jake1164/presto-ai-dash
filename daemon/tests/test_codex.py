@@ -192,13 +192,13 @@ class CodexProtocolTests(unittest.TestCase):
     def test_executable_discovery_explicit_path_and_missing_install(self):
         with patch("presto_ai_dash.sources._codex_rpc.shutil.which", return_value="/installed/codex"):
             self.assertEqual(find_executable(), "/installed/codex")
-            self.assertEqual(find_executable("custom"), "/installed/codex")
+            self.assertEqual(find_executable("codex-custom"), "/installed/codex")
         with patch("presto_ai_dash.sources._codex_rpc.shutil.which", return_value=None), \
              patch("presto_ai_dash.sources._codex_rpc.Path.home", return_value=self.directory):
             with self.assertRaises(CodexReportingError):
                 find_executable()
             with self.assertRaises(CodexReportingError):
-                find_executable("missing")
+                find_executable("codex-missing")
 
 
 class CodexManagedTests(ManagementBase):

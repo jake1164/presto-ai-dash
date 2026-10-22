@@ -86,8 +86,13 @@ admin token. **Lock configuration** ends the session in that browser only.
 
 **Treat admin access as the ability to run programs as the daemon's account.**
 An administrator can set which Codex executable the daemon starts, and the
-daemon starts it on every poll. That is by design: the admin page is the
-configuration. It is why it must not be exposed.
+daemon starts it on every poll. The setting must be a program named `codex`
+on this computer, not a network share, but a file with that name can be put
+anywhere, so this limits mistakes, not a determined administrator. That is by
+design: the admin page is the configuration. It is why it must not be
+exposed. The Codex process is started without the daemon's own secrets
+(`DASH_*` variables and the provider key variable), so setting them in the
+environment does not hand them to Codex.
 
 ## The database and its key
 

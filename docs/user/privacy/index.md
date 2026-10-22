@@ -87,8 +87,13 @@ The only traffic is the traffic you set up: requests from the daemon to the
 providers you added, which carry the key you gave for that provider (OpenCode
 Go, Ollama Cloud and LiteLLM are the ones that use a key), and requests from
 the Presto, the admin page and any remote collector to your own daemon. The
-documentation site you are reading loads nothing from a third party: no web
-fonts, no scripts, no analytics. It is static files on GitHub Pages.
+documentation site you are reading asks no other host for anything: no web
+fonts, no scripts, no analytics, and the repository link in the header is a
+plain link that fetches nothing. The one exception is a browser too old to have
+`ResizeObserver` (before about 2020): the theme then fetches a small polyfill
+from `unpkg.com`. The site is static files on GitHub Pages, so GitHub, which
+hosts them, sees the visits as any web host does. The build checks all of this
+on the finished site each time it runs.
 
 ## The one write the Presto can make
 

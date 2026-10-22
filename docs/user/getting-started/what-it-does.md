@@ -90,8 +90,8 @@ anything.
 ## What it deliberately does not do
 
 - **No analytics.** There is no telemetry, no counter and no crash reporting.
-  The documentation site you are reading loads nothing from a third party
-  either.
+  The documentation site you are reading asks no other host for anything
+  either, in any current browser; see [Privacy](../privacy/index.md).
 - **No cloud service.** There is no account to create and no vendor to sign
   up with.
 - **No request history for services that do not keep one.** Ollama exposes

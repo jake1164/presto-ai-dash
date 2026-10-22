@@ -4,11 +4,18 @@
 # docs/ (the plan, the readiness notes, the milestones) stays in the
 # repository and is never published.
 #
-# Privacy: this site loads nothing from a third party. There is no analytics,
-# no external script and no CDN asset. The Material theme's Google Fonts
-# request is switched off with `font: false`, so the page uses the reader's
-# own fonts. Mermaid is deliberately not enabled: Material loads the mermaid
-# library from a CDN.
+# Privacy: this site loads nothing from a third party in a current browser.
+# There is no analytics, no external script and no CDN asset. Three things in
+# the Material theme would break that, and each is switched off:
+#   - Google Fonts, with `font: false`, so the page uses the reader's own fonts;
+#   - Mermaid, by not enabling it: Material loads the library from a CDN;
+#   - the repository widget, which asks api.github.com for stars and releases
+#     on every page view: docs/overrides/partials/source.html leaves out the
+#     attribute that turns it on.
+# One thing remains and cannot be switched off: a browser too old to have
+# ResizeObserver (before about 2020) fetches a polyfill from unpkg.com. The
+# privacy page says so. tools/check_docs_site.py checks the built site for all
+# of this in CI.
 
 site_name: Presto AI Dash
 site_description: >-
@@ -25,6 +32,8 @@ site_dir: build/docs/site
 
 theme:
   name: material
+  # Replaces Material's repository widget with one that fetches nothing.
+  custom_dir: docs/overrides
   # No web fonts: the site must not ask a third party for anything.
   font: false
   palette:

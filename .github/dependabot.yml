@@ -1,0 +1,42 @@
+# Dependabot proposes updates as pull requests; nothing is merged for you.
+#
+# - github-actions: every action in .github/workflows is pinned to a commit
+#   SHA, and Dependabot moves the SHA and the tag comment together.
+# - pip (docs): the documentation build's two pinned packages.
+# - docker: the base image in the Dockerfile, pinned by digest, which nothing
+#   else would ever move.
+#
+# The daemon's own dependencies in daemon/pyproject.toml are lower bounds
+# (cryptography>=46), not pins, so there is nothing for Dependabot to bump
+# there; security alerts for them come from the repository's own Dependabot
+# alerts setting.
+
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: pip
+    directory: /docs
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "docs"
+    groups:
+      docs-build:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: "docker"

@@ -1,0 +1,23 @@
+{#-
+  Material's own "source" partial, with one attribute removed.
+
+  The theme's script looks for data-md-component="source" and, for every page
+  view, asks api.github.com from the reader's browser for the repository's
+  stars, forks and latest release. This site promises that it loads nothing
+  from a third party, so that attribute is left out: the link to the
+  repository, the repository name and the edit-this-page buttons stay, and
+  nothing is fetched.
+
+  tools/check_docs_site.py fails the documentation build if the attribute
+  comes back, for instance when the theme is upgraded and this file is
+  replaced.
+-#}
+<a href="{{ config.repo_url }}" title="{{ lang.t('source') }}" class="md-source">
+  <div class="md-source__icon md-icon">
+    {% set icon = config.theme.icon.repo or "fontawesome/brands/git-alt" %}
+    {% include ".icons/" ~ icon ~ ".svg" %}
+  </div>
+  <div class="md-source__repository">
+    {{ config.repo_name }}
+  </div>
+</a>

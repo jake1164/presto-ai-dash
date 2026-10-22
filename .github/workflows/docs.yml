@@ -1,20 +1,29 @@
 name: Documentation Site
 
+# Every action is pinned to a full commit SHA, with the tag it was taken from
+# in a comment. A tag can be moved by whoever owns the action; a SHA cannot.
+# Dependabot (.github/dependabot.yml) proposes the new SHA and comment when an
+# action is released, so the pins do not go stale.
+
 on:
   workflow_dispatch:
   push:
     branches: [main]
     paths:
       - 'docs/user/**'
+      - 'docs/overrides/**'
       - 'mkdocs.yml'
       - 'docs/requirements.txt'
+      - 'tools/check_docs_site.py'
       - '.github/workflows/docs.yml'
   pull_request:
     branches: [main]
     paths:
       - 'docs/user/**'
+      - 'docs/overrides/**'
       - 'mkdocs.yml'
       - 'docs/requirements.txt'
+      - 'tools/check_docs_site.py'
       - '.github/workflows/docs.yml'
 
 permissions:
@@ -30,10 +39,14 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # Nothing after this step needs to push, so the token is not left
+          # in .git/config for later steps to read.
+          persist-credentials: false
 
       - name: Setup Python
-        uses: actions/setup-python@v7
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
           cache: pip
@@ -47,20 +60,52 @@ jobs:
         # and a warning of any kind into a failed build.
         run: mkdocs build --strict
 
+      - name: Check the built site asks nothing of any other host
+        # The site says it loads nothing from a third party. This reads the
+        # finished pages, styles and scripts and fails if that stops being true,
+        # for example when a theme upgrade brings back a widget that phones home.
+        run: python tools/check_docs_site.py build/docs/site
+
+      - name: Upload PR preview artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: docs-preview
+          path: build/docs/site
+          retention-days: 7
+
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
+        with:
+          path: build/docs/site
+
+  links:
+    # A job of its own, so the third-party link checker never runs in the job
+    # that builds the site: whatever it does, it cannot change the pages that
+    # get published. It reads the Markdown sources and nothing else.
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
       - name: Check links
         # Scans the Markdown sources, not the rendered HTML in
         # build/docs/site/: the rendered output is full of Material-generated
         # root-relative links that lychee cannot resolve without a real
         # deployment. Internal Markdown-to-Markdown links are already fully
-        # validated by the strict MkDocs build above; this step's job is the
-        # external links.
+        # validated by the strict MkDocs build in the build job; this job's
+        # work is the external links.
         #
         # The canonical site URL (excluded below) 404s until the Pages site is
         # first deployed: the one link this check cannot verify before the
         # deployment it belongs to. A 429 (a shop rate-limiting the runner) is
         # accepted: it is not a broken link. Keep comments out of the args block: in a
         # folded YAML scalar a "#" line is passed to lychee as text.
-        uses: lycheeverse/lychee-action@v2
+        uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2
         with:
           args: >
             --no-progress
@@ -74,23 +119,11 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           fail: true
 
-      - name: Upload PR preview artifact
-        if: github.event_name == 'pull_request'
-        uses: actions/upload-artifact@v7
-        with:
-          name: docs-preview
-          path: build/docs/site
-          retention-days: 7
-
-      - name: Upload Pages artifact
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-        uses: actions/upload-pages-artifact@v5
-        with:
-          path: build/docs/site
-
   deploy:
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    needs: build
+    # Both must pass: a broken external link still stops a deploy, as it did
+    # when the check was a step of the build.
+    needs: [build, links]
     runs-on: ubuntu-latest
     permissions:
       pages: write
@@ -101,4 +134,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5

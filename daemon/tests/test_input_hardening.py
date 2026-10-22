@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from presto_ai_dash import http_client
 from presto_ai_dash.admin import AdminServer
 from presto_ai_dash.api import ApiServer, BoundedRequestHandler
-from presto_ai_dash.collectors import claude_statusline as collector
+from presto_ai_dash.collectors import presto_collector as collector
 from presto_ai_dash.collectors.claude_activity import ActivityReader
 from presto_ai_dash.http_client import HttpError, HttpUnreachable, get_json, get_text
 from test_claude_activity import NOW, iso, line
@@ -364,7 +364,7 @@ class StatusLineResetTimeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             token = Path(temp) / "token"
             token.write_text("t" * 30, encoding="utf-8")
-            args = ["--url", "http://127.0.0.1:1", "--token-file", str(token), "--host", "laptop"]
+            args = ["claude-statusline", "--url", "http://127.0.0.1:1", "--token-file", str(token), "--host", "laptop"]
             output = io.StringIO()
             stdin = io.TextIOWrapper(io.BytesIO(raw.encode("utf-8")))
             with patch("sys.stdin", stdin), patch("sys.stdout", output):
@@ -437,7 +437,9 @@ class PowerShellQuotingTests(unittest.TestCase):
             values.append(value)
         self.assertIn("host\u2019; calc; #", values)
         self.assertIn("it's", values)
-        self.assertEqual(len(values), 11)  # every argument, and none made out of an injection
+        # Every argument, and none made out of an injection: python, the script,
+        # the mode, three options and their values, "--" and two chained words.
+        self.assertEqual(len(values), 12)
 
     @unittest.skipUnless(os.name == "nt" and shutil.which("powershell"), "needs Windows PowerShell")
     def test_a_real_powershell_runs_no_injected_command(self):

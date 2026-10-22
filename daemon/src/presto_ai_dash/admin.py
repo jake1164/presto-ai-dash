@@ -9,12 +9,12 @@ import re
 from urllib.parse import urlsplit
 
 from .api import ApiServer, BoundedRequestHandler
+from .collectors import COLLECTOR_FILE, collector_bytes
 from .admin_sessions import AdminSessions, SESSION_SECONDS
 from .storage import ConfigurationConflict
 
 log = logging.getLogger(__name__)
 MAX_BODY = 65536
-COLLECTOR_FILE = "claude_statusline.py"
 INGEST_TOKEN_PATH = r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/ingest-token"
 SERVICE_ALERTS_PATH = r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/alerts"
 ASSETS = {"/": ("index.html", "text/html; charset=utf-8"),
@@ -225,8 +225,7 @@ def make_admin_handler(manager, token, allowed_hosts=()):
                 return
             if path == "/api/admin/collector":
                 if self._authorized():
-                    self._send(200, files("presto_ai_dash").joinpath(
-                        "collectors", COLLECTOR_FILE).read_bytes(),
+                    self._send(200, collector_bytes(),
                         "text/x-python; charset=utf-8",
                         headers={"Content-Disposition":
                                  'attachment; filename="%s"' % COLLECTOR_FILE})

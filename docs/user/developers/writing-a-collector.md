@@ -62,9 +62,36 @@ the admin page agree on the wording.
 ## A push collector
 
 A push collector runs on the computer where the tool lives and posts to the
-daemon. `collectors/claude_statusline.py` is the reference: it is the same
+daemon. `collectors/presto_collector.py` is the reference: it is the same
 code that drives the local Claude export, and it is downloadable from the
 admin page so a remote machine does not need the repository.
+
+### One file, one mode per service
+
+There is **one** collector file for every service, so a user downloads, copies
+and updates one thing. A service is a *mode*, a subcommand named on the command
+line and sent in the envelope as `collector.name`:
+
+```bash
+python3 presto_collector.py claude-statusline --url ... --token-file ... --host ...
+```
+
+To add a service, add a mode: an entry in `MODES`, a subparser with its own
+options (a service that is polled, rather than started by a hook, will want
+different ones), and its parsing. Do not add a second file.
+
+### The version
+
+`COLLECTOR_VERSION` belongs to the file as a whole, and it is a whole number.
+Change the file and raise the number. `tests/test_collector_version.py` records
+each released version with the hash of the file and fails when they disagree,
+so a changed file cannot keep an old version.
+
+Every report carries the version. The daemon compares it with the version of
+the file it serves and shows an "update available" notice to its owner in the
+admin page, the Problems list and the card's detail lines. The remote page, the
+download, the tokens and the notice are the same for every mode, so a new mode
+needs no new screen.
 
 ### The envelope
 

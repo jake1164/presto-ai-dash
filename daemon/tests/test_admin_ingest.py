@@ -16,7 +16,7 @@ from envutil import clean_env
 from test_management import AdminServerBase
 
 COLLECTOR_FILE = Path(__file__).resolve().parents[1] / "src" / "presto_ai_dash" / \
-    "collectors" / "claude_statusline.py"
+    "collectors" / "presto_collector.py"
 
 
 def bearer_token_response(opener, url, token, body, method="POST"):
@@ -61,7 +61,23 @@ class AdminIngestTests(AdminServerBase):
     def test_ingest_state_defaults_to_off_and_unlocked(self):
         status, _, state = self.request("/api/admin/ingest")
         self.assertEqual(status, 200)
+        collector = state.pop("collector")
         self.assertEqual(state, {"enabled": False, "locked_by_environment": False})
+        # The file the page offers, and the hash of the very bytes it serves.
+        self.assertEqual(set(collector), {"file", "version", "sha256", "size"})
+        self.assertEqual(collector["file"], "presto_collector.py")
+
+    def test_the_hash_shown_is_the_hash_of_the_download(self):
+        import hashlib
+        _, _, state = self.request("/api/admin/ingest")
+        request = Request(self.base_url + "/api/admin/collector",
+                          headers={"Authorization": "Bearer unit-secret-admin-token"})
+        with self.opener.open(request, timeout=5) as response:
+            body = response.read()
+            disposition = response.headers["Content-Disposition"]
+        self.assertEqual(hashlib.sha256(body).hexdigest(), state["collector"]["sha256"])
+        self.assertEqual(len(body), state["collector"]["size"])
+        self.assertIn('filename="presto_collector.py"', disposition)
 
     def test_toggle_requires_authorization_and_validates_the_body(self):
         self.assertEqual(self.request("/api/admin/ingest", token=None)[0], 401)
@@ -94,7 +110,7 @@ class AdminIngestTests(AdminServerBase):
         decoded = base64.b64decode(encoded).decode("utf-16-le")
         for snippet in (data["posix_snippet"], decoded):
             self.assertIn("--token-file", snippet)
-            self.assertIn("claude_statusline.py", snippet)
+            self.assertIn("presto_collector.py", snippet)
             self.assertIn("/api/v1/ingest", snippet)
             self.assertNotIn(data["token"], snippet)
         # One later listing: no token, no hash, only that one exists.

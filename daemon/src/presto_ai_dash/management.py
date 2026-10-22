@@ -15,7 +15,7 @@ from .alert_policy import (apply_threshold, parse_clock, resolve_alert_settings,
                            validate_thresholds)
 from .clients import ClientRegistry
 from .codex_login import CodexLoginManager
-from .collectors import claude_statusline
+from .collectors import collector_info, presto_collector, served_version, update_state
 from .config import (ALERT_KEYS, alert_base_settings, alert_settings,
                      ingest_enabled, overflow_rows)
 from .credentials import load_cipher
@@ -232,12 +232,19 @@ class SourceConfiguration:
             "token_exists": info["exists"], "created_at": info["created_at"],
             "collector_seen_at": observation["collector_seen_at"] if observation else None,
             "collector_host": observation["collector_host"] if observation else None,
+            "collector_version": observation["collector_version"] if observation else None,
+            # Against the collector this daemon serves: only a remote copy can lag.
+            "collector_update": update_state(
+                observation["collector_version"] if observation else None),
+            "collector_latest": served_version(),
             "last_progress_at": observation["last_progress_at"] if observation else None}
 
     def ingest_state(self):
         """The route switch for the admin page; the environment locks the toggle."""
         return {"enabled": ingest_enabled(self.config, self.storage.ingest_enabled_setting()),
-                "locked_by_environment": os.environ.get("DASH_INGEST_ENABLED") is not None}
+                "locked_by_environment": os.environ.get("DASH_INGEST_ENABLED") is not None,
+                # The file the page offers for download, and its hash.
+                "collector": collector_info()}
 
     def set_ingest_enabled(self, data):
         if not isinstance(data, dict) or set(data) != {"enabled"} or \
@@ -435,11 +442,11 @@ class SourceConfiguration:
         token = self.storage.create_ingest_token(instance_id)
         token_file = "claude-%s.token" % instance_id
         return {"token": token,
-                "posix_snippet": claude_statusline.posix_snippet(
-                    "/path/to/claude_statusline.py", INGEST_URL_PLACEHOLDER,
+                "posix_snippet": presto_collector.posix_snippet(
+                    "/path/to/presto_collector.py", INGEST_URL_PLACEHOLDER,
                     "~/.config/presto-ai-dash/" + token_file, "laptop"),
-                "powershell_snippet": claude_statusline.powershell_snippet(
-                    "C:/path/to/claude_statusline.py", INGEST_URL_PLACEHOLDER,
+                "powershell_snippet": presto_collector.powershell_snippet(
+                    "C:/path/to/presto_collector.py", INGEST_URL_PLACEHOLDER,
                     "C:/Users/USERNAME/presto-ai-dash/" + token_file, "laptop")}
 
     def revoke_ingest_token(self, instance_id):
@@ -726,10 +733,18 @@ class SourceConfiguration:
             if not isinstance(ingest, dict):
                 continue
             seen = ingest.get("collector_seen_at")
+            update = ingest.get("collector_update")
+            state = "reporting" if seen else "no reports yet"
+            if seen and update == "available":
+                state = "update available"
+            elif seen and update == "newer":
+                state = "newer than this daemon"
             rows.append({"account": source["name"],
                          "host": ingest.get("collector_host") or "unknown",
                          "last_seen": seen,
-                         "state": "reporting" if seen else "no reports yet"})
+                         "version": ingest.get("collector_version"),
+                         "latest": ingest.get("collector_latest"),
+                         "state": state})
         return rows
 
     def save_observation(self, record, snapshot):

@@ -5,6 +5,7 @@ from . import quotas
 from .alert_policy import (DEFAULT_CRITICAL_PERCENT, DEFAULT_WARNING_PERCENT,
                            apply_threshold, resolve_alert_settings,
                            threshold_status)
+from .collectors import served_version, update_state
 from .models import Card, iso, now_utc, overall_status, severity
 from .quotas import (QUOTA_SCHEMA_VERSION, age_label, compact_age, compact_tokens,
                      estimated_weekly_reset, present_quota, present_snapshot, timestamp)
@@ -130,6 +131,11 @@ def _trail_lines(report, now):
         host = _short_label(report.get("collector_host") or "unknown",
                             max(1, 30 - len("Reports: ") - 1 - len(age)))
         lines.append("Reports: %s %s" % (host, age))
+        # Only an old copy of the collector is worth a line: it is a chore for
+        # the owner, not a fault, so it changes no status and no colour.
+        if update_state(report.get("collector_version")) == "available":
+            lines.append("Collector v%s old, v%s ready"
+                         % (report["collector_version"], served_version()))
     return lines
 
 

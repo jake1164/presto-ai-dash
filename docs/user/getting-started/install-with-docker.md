@@ -260,14 +260,15 @@ uses:
 1. Turn the feature on: **Settings -> Remote reports -> Accept remote
    reports** in the admin page, or `DASH_INGEST_ENABLED=1` in the
    environment (the usual choice for a container).
-2. On the Claude account's row, press **Create remote token**. The token is
-   shown once. The daemon stores only its hash.
-3. Download the collector `claude_statusline.py` from the same page. It is a
-   single file, Python 3.8 or newer, and it runs on the Claude machine.
+2. On the same panel, download the collector `presto_collector.py`. It is a
+   single file, Python 3.8 or newer, and it runs on the Claude machine. The
+   panel shows its SHA-256 to compare after you copy it.
+3. Under **Accounts that report remotely**, press **Create remote token** for
+   the Claude account. The token is shown once. The daemon stores only its hash.
 4. On the Claude machine, set that profile's `statusLine` command to the
-   snippet the page gives you, and point the URL at the container's
-   address (`http://server:8787`) and the token file at the token you
-   copied.
+   snippet the page gives you, and point the URL at the container's ingest
+   address (`http://server:8787/api/v1/ingest`) and the token file at the token
+   you copied.
 
 Claude Code then runs the collector after each response, and the reading
 arrives in the container. The body carries quota numbers, hashes and a short

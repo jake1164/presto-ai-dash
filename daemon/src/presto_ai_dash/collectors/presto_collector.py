@@ -1,22 +1,35 @@
-"""Claude Code status-line collector: one file, stdlib only, Python 3.8+.
+"""Presto AI Dash collector: one file, stdlib only, Python 3.8+.
 
-Runs on any machine that uses Claude Code and posts quota observations to a
-Presto AI Dash daemon's ingest route. It is deliberately self-contained: no
-package imports, so a remote computer needs only this file. The daemon's local
-status-line helper reuses its normalization so both transports share one copy
-of the Claude parsing and evidence rules.
+Runs on a machine other than the daemon's and posts observations to the
+daemon's ingest route. It is deliberately self-contained: no package imports,
+so a remote computer needs only this file. One file serves every service that
+can report remotely; each service is a mode, named on the command line. The
+daemon's local Claude export reuses the Claude parsing below, so both
+transports share one copy of the evidence rules.
+
+Modes:
+
+    claude-statusline   Claude Code's status line runs it after each response
 
 Usage::
 
-    python3 claude_statusline.py --url http://server:8787 \
+    python3 presto_collector.py claude-statusline \
+        --url http://server:8787/api/v1/ingest \
         --token-file ~/.config/presto-ai-dash/claude.token \
         --host laptop -- <previous status line command, optional>
 
-It reads status-line JSON from stdin (at most 64 KiB), builds the observation
-envelope, POSTs it with a short timeout, chains the previous command given
-after ``--`` by handing it the same stdin, and always exits 0: a status line
-must never stall or break Claude Code. A client-side throttle keeps cached
-redraws and unreachable servers from producing traffic.
+--url is the daemon's full ingest address, path included: the collector posts
+to exactly what it is given.
+
+In claude-statusline mode it reads status-line JSON from stdin (at most
+64 KiB), builds the observation envelope, POSTs it with a short timeout,
+chains the previous command given after ``--`` by handing it the same stdin,
+and always exits 0: a status line must never stall or break Claude Code. A
+client-side throttle keeps cached redraws and unreachable servers from
+producing traffic.
+
+COLLECTOR_VERSION is the version of this file as a whole. Change the file and
+it must change; tests/test_collector_version.py fails until it does.
 """
 
 import argparse
@@ -38,6 +51,9 @@ WINDOWS = (("five_hour", "5h", 300), ("seven_day", "Weekly", 10080))
 MAX_INPUT = 65536
 MAX_HOST_CHARS = 32
 COLLECTOR_NAME = "claude-statusline"
+# Every mode this file can run, by the name used on the command line and as the
+# envelope's collector name. A new service is a new entry here.
+MODES = (COLLECTOR_NAME,)
 COLLECTOR_VERSION = "1"
 SCHEMA_NAME = "presto-ai-dash.observation/1"
 WINDOW_FIELDS = ("id", "label", "period_minutes", "used_percent", "resets_at", "state")
@@ -299,7 +315,8 @@ def _status_text(envelope):
 
 def posix_snippet(script, url, token_file, host, previous=(), python="python3"):
     """The settings.json status line for a POSIX machine, safely quoted."""
-    args = [python, script, "--url", url, "--token-file", token_file, "--host", host]
+    args = [python, script, COLLECTOR_NAME, "--url", url, "--token-file", token_file,
+            "--host", host]
     if previous:
         args += ["--"] + list(previous)
     return " ".join(shlex.quote(value) for value in args)
@@ -319,7 +336,8 @@ def powershell_quote(value):
 
 def powershell_snippet(script, url, token_file, host, previous=(), python="python"):
     """The settings.json status line for Windows: encoded PowerShell, forward slashes."""
-    args = [python, script, "--url", url, "--token-file", token_file, "--host", host]
+    args = [python, script, COLLECTOR_NAME, "--url", url, "--token-file", token_file,
+            "--host", host]
     if previous:
         args += ["--"] + list(previous)
     # Encoded PowerShell avoids shell interpolation by either Git Bash or PS.
@@ -332,11 +350,16 @@ def powershell_snippet(script, url, token_file, host, previous=(), python="pytho
 
 
 def main(argv=None, state_path=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--url", required=True)
-    parser.add_argument("--token-file", required=True)
-    parser.add_argument("--host", default=socket.gethostname())
-    parser.add_argument("previous", nargs=argparse.REMAINDER,
+    parser = argparse.ArgumentParser(description=__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    # One subcommand per service. Each has its own options, so a service that
+    # is polled rather than hooked can have different ones.
+    modes = parser.add_subparsers(dest="mode", metavar="MODE", required=True)
+    claude = modes.add_parser(COLLECTOR_NAME, help="Claude Code's status line")
+    claude.add_argument("--url", required=True)
+    claude.add_argument("--token-file", required=True)
+    claude.add_argument("--host", default=socket.gethostname())
+    claude.add_argument("previous", nargs=argparse.REMAINDER,
                         help="the previous status line command, after --")
     args = parser.parse_args(argv)
     previous = list(args.previous)

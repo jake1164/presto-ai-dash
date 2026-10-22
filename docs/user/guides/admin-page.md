@@ -60,7 +60,7 @@ by default and shows, on one line:
 Opening a card shows everything the page has always shown for that account:
 the window meters, the labelled **Quota**, **Activity**, **Usage cache** and
 **Status note** lines, and that account's own actions - the Claude export
-setup, the remote token, the collector trail.
+setup, and a line saying whether remote reports are on, with a link to where they are set up.
 
 The order arrows, the **Enabled** checkbox, **Edit** and **Add source** stay
 where they were. Everything on this tab applies to one account at a time.
@@ -106,7 +106,7 @@ services*.
 | Section | What is in it |
 | --- | --- |
 | Home display | The overflow strip setting |
-| Remote reports | The ingest switch, the collector download, the plain-HTTP warning |
+| Remote reports | The ingest switch, the collector download and its SHA-256, the remote tokens, the collector trail and version, the plain-HTTP warning |
 | Alerts | The master switch, the thresholds, the sound switch (off until you turn it on), quiet hours, pop to top, the mute length |
 | Effective daemon configuration | Read-only: every value and where it came from |
 | About and help | What the sources are, the order note, where the logs and the diagnostics commands are |
@@ -143,7 +143,7 @@ Some actions belong to one account and appear inside its card:
 | Action | Which sources |
 | --- | --- |
 | Set up / Remove Claude export | Claude |
-| Create, rotate and revoke a remote token | Claude |
+| Create, rotate and revoke a remote token | Claude (on Settings, under Remote reports) |
 | Codex sign-in, sign-out and cancel | Codex (admin API routes only: the page has no buttons for them yet, so sign in with Codex itself) |
 
 These are the only actions in the whole project that change something on a

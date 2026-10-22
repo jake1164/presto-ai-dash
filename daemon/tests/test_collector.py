@@ -18,7 +18,7 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from presto_ai_dash.collectors import claude_statusline as collector
+from presto_ai_dash.collectors import presto_collector as collector
 
 NOW = datetime(2026, 10, 18, 14, 0, 0, tzinfo=timezone.utc)
 
@@ -99,7 +99,7 @@ class CollectorBase(unittest.TestCase):
         self.token_file.write_text("secret-token-value\n", encoding="utf-8")
 
     def args(self, host="laptop"):
-        return ["--url", self.server.url, "--token-file", str(self.token_file), "--host", host]
+        return ["claude-statusline", "--url", self.server.url, "--token-file", str(self.token_file), "--host", host]
 
 
 class EnvelopeTests(unittest.TestCase):
@@ -196,7 +196,7 @@ class RedirectTests(CollectorBase):
                 source = RecordingServer(redirect=(code, target.url))
                 self.addCleanup(source.close)
                 state = str(self.temp / ("redirect-%d.json" % code))
-                args = ["--url", source.url, "--token-file", str(self.token_file),
+                args = ["claude-statusline", "--url", source.url, "--token-file", str(self.token_file),
                         "--host", "laptop"]
                 output = io.StringIO()
                 self.assertEqual(run_main(args, json.dumps(payload()), state, output), 0)
@@ -314,7 +314,7 @@ class DeliveryTests(CollectorBase):
         self.assertEqual(self.server.recorded, [])
 
     def test_unreachable_server_exits_zero_and_backs_off(self):
-        args = ["--url", "http://127.0.0.1:9/ingest", "--token-file", str(self.token_file),
+        args = ["claude-statusline", "--url", "http://127.0.0.1:9/ingest", "--token-file", str(self.token_file),
                 "--host", "laptop"]
         started = time.time()
         self.assertEqual(run_main(args, json.dumps(payload()), self.state), 0)
@@ -328,7 +328,7 @@ class DeliveryTests(CollectorBase):
     def test_silent_server_times_out_quickly_and_exits_zero(self):
         slow = RecordingServer(delay=10)
         self.addCleanup(slow.close)
-        args = ["--url", slow.url, "--token-file", str(self.token_file), "--host", "laptop"]
+        args = ["claude-statusline", "--url", slow.url, "--token-file", str(self.token_file), "--host", "laptop"]
         started = time.time()
         self.assertEqual(run_main(args, json.dumps(payload()), self.state), 0)
         self.assertLess(time.time() - started, 5)
@@ -340,7 +340,7 @@ class ChainingTests(CollectorBase):
     def test_chained_stdout_is_printed_end_to_end(self):
         script = self.temp / "prior.py"
         script.write_text("import sys,json; print('kept:'+json.load(sys.stdin)['version'])")
-        command = [sys.executable, str(Path(collector.__file__).resolve()),
+        command = [sys.executable, str(Path(collector.__file__).resolve()), "claude-statusline",
                    "--url", self.server.url, "--token-file", str(self.token_file),
                    "--host", "laptop", "--", sys.executable, str(script)]
         result = subprocess.run(command, input=json.dumps(payload()).encode("utf-8"),
@@ -364,21 +364,21 @@ class ChainingTests(CollectorBase):
 
 class SnippetTests(CollectorBase):
     def test_posix_snippet_quotes_every_path(self):
-        snippet = collector.posix_snippet("/opt/presto collector/claude_statusline.py",
+        snippet = collector.posix_snippet("/opt/presto collector/presto_collector.py",
                                           "http://server:8787", "~/.config/presto token/ct",
                                           "work desk", previous=("bun", "x ccstatusline"))
         self.assertEqual(snippet,
-                         "python3 '/opt/presto collector/claude_statusline.py'"
-                         " --url http://server:8787"
+                         "python3 '/opt/presto collector/presto_collector.py'"
+                         " claude-statusline --url http://server:8787"
                          " --token-file '~/.config/presto token/ct'"
                          " --host 'work desk' -- bun 'x ccstatusline'")
 
     def test_powershell_snippet_uses_forward_slashes_and_encoded_command(self):
-        snippet = collector.powershell_snippet("C:\\presto tools\\claude_statusline.py",
+        snippet = collector.powershell_snippet("C:\\presto tools\\presto_collector.py",
                                                "http://server:8787", "C:\\tok\\ct", "laptop")
         self.assertTrue(snippet.startswith("powershell -NoProfile -NonInteractive -EncodedCommand "))
         script = base64.b64decode(snippet.rsplit(" ", 1)[1]).decode("utf-16-le")
-        self.assertIn("'C:/presto tools/claude_statusline.py'", script)
+        self.assertIn("'C:/presto tools/presto_collector.py'", script)
         self.assertIn("'--token-file' 'C:/tok/ct'", script)
         self.assertNotIn("\\", script.split("& ", 1)[1])
         self.assertIn("$prestoInput | &", script)

@@ -11,7 +11,7 @@ from unittest.mock import patch
 from urllib.request import ProxyHandler, Request, build_opener
 
 from presto_ai_dash.api import ApiServer
-from presto_ai_dash.collectors import claude_statusline
+from presto_ai_dash.collectors import presto_collector
 from presto_ai_dash.config import ingest_enabled
 from presto_ai_dash.management import ManagedCollector
 
@@ -51,9 +51,9 @@ class RoundTripTests(AdminServerBase):
                            % self.status_api.actual_port)
         # The collector's module-level opener must not inherit any proxy settings
         # from the developer's environment; keep loopback traffic direct.
-        self.addCleanup(setattr, claude_statusline, "_OPENER", claude_statusline._OPENER)
-        claude_statusline._OPENER = build_opener(
-            ProxyHandler({}), claude_statusline._NoRedirect())
+        self.addCleanup(setattr, presto_collector, "_OPENER", presto_collector._OPENER)
+        presto_collector._OPENER = build_opener(
+            ProxyHandler({}), presto_collector._NoRedirect())
         self.state_path = str(Path(self.temp.name) / "collector-state.json")
         self.token_file = Path(self.temp.name) / "claude.token"
         self.token = self.create_token()["token"]
@@ -70,8 +70,8 @@ class RoundTripTests(AdminServerBase):
     def run_collector(self, raw):
         stdin = io.TextIOWrapper(io.BytesIO(raw.encode("utf-8")))
         with patch("sys.stdin", stdin), patch("sys.stdout", io.StringIO()):
-            result = claude_statusline.main(
-                ["--url", self.ingest_url, "--token-file", str(self.token_file),
+            result = presto_collector.main(
+                ["claude-statusline", "--url", self.ingest_url, "--token-file", str(self.token_file),
                  "--host", "laptop"], state_path=self.state_path)
         self.assertEqual(result, 0)
         return result

@@ -8,12 +8,16 @@ stamped by :meth:`Storage.save_observation`, never trusted from the envelope.
 """
 
 from datetime import datetime, timedelta, timezone
+import logging
 import math
 import re
 
+from .collectors import served_version, update_state
 from .models import now_utc
 from .quotas import quota_report
 from .sources import source_type
+
+log = logging.getLogger(__name__)
 
 SCHEMA_NAME = "presto-ai-dash.observation/1"
 MAX_WINDOWS = 8
@@ -165,4 +169,23 @@ def ingest(storage, instance_id, envelope, now=None):
                              collector_version=collector["version"],
                              progress=envelope.get("progress"),
                              now=now if now is not None else now_utc())
+    _note_outdated(instance_id, collector)
     return True
+
+
+# Which (account, version) pairs have already been mentioned in this run, so a
+# collector that reports every minute is warned about once, not every minute.
+_WARNED = set()
+
+
+def _note_outdated(instance_id, collector):
+    """One warning, in the log and the Problems list, per account and old version."""
+    if update_state(collector["version"]) != "available":
+        return
+    key = (instance_id, collector["version"])
+    if key in _WARNED:
+        return
+    _WARNED.add(key)
+    log.warning("the collector on %s is version %s and version %s is available: "
+                "download it again from the Settings tab and replace the file",
+                collector["host"], collector["version"], served_version())

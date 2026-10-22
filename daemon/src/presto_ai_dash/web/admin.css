@@ -148,3 +148,10 @@ main > .panel { min-width: 0; }
   .facts { grid-template-columns: 1fr; gap: 2px 0; }
   .facts dd { margin-bottom: 8px; }
 }
+
+.remote-account { margin-top: 16px; padding-top: 14px; border-top: 1px solid #2a3b53; }
+.remote-account h5 { margin: 0 0 4px; font-size: 1rem; }
+.remote-status { margin-top: 14px; }
+.remote-status .note { margin: 0 0 6px; }
+.remote-link { color: #7ce6da; }
+#collector-info .note { margin: 10px 0 0; }

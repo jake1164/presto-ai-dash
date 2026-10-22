@@ -46,16 +46,20 @@ path. The route does not advertise itself.
 ## The flow
 
 1. Turn the feature on.
-2. Download the collector `claude_statusline.py` from the same page. It is a
+2. Download the collector `presto_collector.py` from the same panel. It is a
    single-file Python 3.8+ script, and it is the same code that drives the
-   local export.
-3. On the remote account's row, press **Create remote token**. The token is
-   shown once. Copy it into a file on the remote computer, for example
-   `~/.config/presto-ai-dash/claude.token`. The daemon stores only its
-   SHA-256 hash.
+   local export. The panel shows its SHA-256, to compare after you copy it.
+3. Under **Accounts that report remotely**, on the same panel, press **Create
+   remote token** for the account. The token is shown once. Copy it into a file
+   on the remote computer, for example `~/.config/presto-ai-dash/claude.token`.
+   The daemon stores only its SHA-256 hash.
 4. On the remote computer, set the `statusLine` command in that profile's
    Claude settings file to the snippet the page gives you, then edit the URL
-   placeholder to the daemon's real address and check the token file path.
+   placeholder to the daemon's real address, with the path
+   `/api/v1/ingest`, and check the token file path.
+
+All of it is on **Settings -> Remote reports**. The account's card on the
+Services tab only says whether remote reports are on, and links there.
 
 Claude Code then runs the collector after normal responses, exactly as it
 runs the local export.

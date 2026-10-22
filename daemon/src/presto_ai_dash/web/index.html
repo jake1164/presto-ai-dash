@@ -95,7 +95,7 @@
         </div>
       </details>
 
-      <details class="setting">
+      <details class="setting" id="remote-setting">
         <summary><span class="setting-title">Remote reports</span>
           <span class="help-slot" data-help="remote-reports" data-help-label="Remote reports"></span>
           <span class="scope-badge">Applies to all services</span></summary>
@@ -109,7 +109,12 @@
             hold no secrets.</p>
           <p class="warning">Remote reports travel over plain HTTP. On an untrusted network put the
             daemon behind a reverse proxy with TLS, or use a private network.</p>
-          <p><a id="download-collector" href="/api/admin/collector" download="claude_statusline.py">Download collector (claude_statusline.py)</a></p>
+          <p><a id="download-collector" href="/api/admin/collector" download="presto_collector.py">Download collector (presto_collector.py)</a></p>
+          <div id="collector-info" class="note"></div>
+          <h4>Accounts that report remotely</h4>
+          <p id="remote-off-note" class="note" hidden>Remote reports are off, so the daemon refuses every
+            remote collector, with or without a token. Turn them on above first.</p>
+          <div id="remote-accounts"></div>
         </div>
       </details>
 

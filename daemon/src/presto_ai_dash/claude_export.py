@@ -16,7 +16,7 @@ import tempfile
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from presto_ai_dash.collectors.claude_statusline import (MAX_INPUT, build_envelope, normalize,
+from presto_ai_dash.collectors.presto_collector import (MAX_INPUT, build_envelope, normalize,
                                                          powershell_quote)
 from presto_ai_dash.credentials import load_cipher
 from presto_ai_dash.ingest import ingest

@@ -144,10 +144,12 @@ as before.
 
 1. On the daemon's admin page, tick **Accept remote reports** (or start the
    daemon with `DASH_INGEST_ENABLED=1`; see [setup.md](setup.md)).
-2. Download the collector `claude_statusline.py` from the same page — it is
-   the single-file Python 3.8+ script that also drives the local export.
-3. In the remote account's row, click **Create remote token**. The token is
-   shown once; copy it into a file on the remote computer, for example
+2. Download the collector `presto_collector.py` from the same panel (Settings
+   tab, Remote reports) — it is the single-file Python 3.8+ script that also
+   drives the local export. The panel shows its SHA-256.
+3. Under **Accounts that report remotely**, on the same panel, click **Create
+   remote token** for the account. The token is shown once; copy it into a file
+   on the remote computer, for example
    `~/.config/presto-ai-dash/claude.token`. The daemon stores only its hash.
 4. On the remote computer, set the `statusLine` command in that profile's
    Claude settings file to the paste-ready snippet shown with the token, then

@@ -223,6 +223,8 @@
     element("ingest-enabled").checked = !!ingestState?.enabled;
     element("ingest-enabled").disabled = !!ingestState?.locked_by_environment;
     element("ingest-lock").hidden = !ingestState?.locked_by_environment;
+    renderCollectorInfo();
+    renderRemoteAccounts();
   }
   async function loadDisplay() {
     // The Home display settings travel with the status payload, so the
@@ -844,6 +846,128 @@
     box.append(dismiss);
     return box;
   }
+  // -- remote reports: one home, on the Settings tab ---------------------------
+
+  function lastReportText(source) {
+    return source.ingest.collector_seen_at ?
+      "Last report: " + new Date(source.ingest.collector_seen_at).toLocaleString() +
+      " from " + (source.ingest.collector_host || "unknown") : "No reports yet";
+  }
+  function collectorUpdateText(source) {
+    // The version is the collector's own, reported with every message; the one
+    // to compare it with is the file this daemon serves.
+    const ingest = source.ingest;
+    if (!ingest.collector_seen_at) return null;
+    if (ingest.collector_update === "available") {
+      return "The collector on " + (ingest.collector_host || "that computer") + " is version " +
+        ingest.collector_version + " and version " + ingest.collector_latest + " is available. " +
+        "Download it above and replace the file there; the status line command does not change.";
+    }
+    if (ingest.collector_update === "newer") {
+      return "The collector on " + (ingest.collector_host || "that computer") + " is version " +
+        ingest.collector_version + ", newer than the version " + ingest.collector_latest +
+        " this daemon serves.";
+    }
+    return null;
+  }
+  function openRemoteSettings() {
+    showTab("settings");
+    const panel = element("remote-setting");
+    panel.open = true;
+    loadIngest();
+    panel.scrollIntoView({block: "start"});
+    element("ingest-enabled").focus({preventScroll: true});
+  }
+  function remoteStatus(source) {
+    // Read-only: where this account stands, and the way to the one place that
+    // turns remote reports on and manages the tokens.
+    const box = el("div", "remote-status");
+    const known = ingestState !== null;
+    const on = !!ingestState?.enabled;
+    box.append(el("p", "note", [
+      "Remote reports: " + (known ? (on ? "on" : "off") : "unknown"),
+      source.ingest.token_exists ? "token set" : "no token yet",
+      lastReportText(source).replace(/^Last report/, "last report").replace(/^No reports yet/, "no reports yet")
+    ].concat(source.ingest.collector_update === "available" ? ["collector update available"] : []).join(" · ")));
+    const link = el("a", "remote-link", on ? "Manage remote reports" : "Set up remote reports");
+    link.href = "#settings";
+    link.addEventListener("click", (event) => { event.preventDefault(); openRemoteSettings(); });
+    box.append(link);
+    return box;
+  }
+  function renderCollectorInfo() {
+    const box = element("collector-info");
+    box.replaceChildren();
+    const info = ingestState?.collector;
+    if (!info) return;
+    box.append(el("p", "note", info.file + " · version " + info.version + " · " +
+      Math.max(1, Math.round(info.size / 1024)) + " KB. Compare this SHA-256 with the file after " +
+      "you copy it to the other computer:"));
+    box.append(copyCell(info.sha256));
+  }
+  function buildRemoteAccount(source) {
+    const row = el("div", "remote-account");
+    row.dataset.id = source.id;
+    row.append(el("h5", "", source.name));
+    row.append(el("p", "note", lastReportText(source)));
+    const update = collectorUpdateText(source);
+    if (update) row.append(el("p", "warning", update));
+    if (source.export_installed && source.ingest.token_exists) {
+      row.append(el("p", "warning",
+        "This account also uses the local Claude export. Use the export or a remote collector, not both."));
+    }
+    const controls = document.createElement("div"); controls.className = "actions";
+    const create = document.createElement("button"); create.type = "button";
+    create.textContent = source.ingest.token_exists ? "Rotate remote token" : "Create remote token";
+    create.addEventListener("click", async () => {
+      if (busy) return;
+      busy = true; create.disabled = true;
+      try {
+        tokenReveal = await request("/api/admin/sources/" + source.id + "/ingest-token", "POST");
+        tokenReveal.id = source.id;
+        await reload();
+        message("Remote token ready. Copy it now: it is shown only once.");
+      } catch (error) { message(error.message, true); }
+      finally { busy = false; create.disabled = false; renderList(); }
+    });
+    controls.append(create);
+    if (source.ingest.token_exists) {
+      const revoke = document.createElement("button"); revoke.type = "button";
+      revoke.className = "danger"; revoke.textContent = "Revoke";
+      revoke.addEventListener("click", async () => {
+        if (!window.confirm("Revoke this account's remote token? Collectors using it are refused.")) return;
+        if (busy) return;
+        busy = true; revoke.disabled = true;
+        try {
+          await request("/api/admin/sources/" + source.id + "/ingest-token", "DELETE");
+          tokenReveal = null;
+          await reload();
+          message("Remote token revoked. Install a new one to report again.");
+        } catch (error) { message(error.message, true); }
+        finally { busy = false; revoke.disabled = false; }
+      });
+      controls.append(revoke);
+    }
+    row.append(controls);
+    // The guide for the remote token, beside the buttons that manage it.
+    const tokenHelp = helpLink("remote-token", "Remote tokens");
+    if (tokenHelp) row.append(tokenHelp);
+    const reveal = revealToken(source);
+    if (reveal) row.append(reveal);
+    return row;
+  }
+  function renderRemoteAccounts() {
+    const box = element("remote-accounts");
+    if (!box) return;
+    element("remote-off-note").hidden = !ingestState || ingestState.enabled;
+    box.replaceChildren();
+    const accounts = sources.filter((source) => source.ingest);
+    if (!accounts.length) {
+      box.append(el("p", "note", "No account can report remotely yet. Add a Claude account on the Services tab."));
+      return;
+    }
+    for (const source of accounts) box.append(buildRemoteAccount(source));
+  }
   function renderList() {
     const list = element("source-list"), active = document.activeElement;
     const focusedId = list.contains(active) ? active.closest(".source")?.dataset.id : null;
@@ -861,6 +985,7 @@
     }
     if (focusedId && focusedAction) focusAccount(focusedId, focusedAction);
     else if (focusedField) document.getElementById(focusedField)?.focus({preventScroll: true});
+    renderRemoteAccounts();
   }
   function buildCard(source, index) {
     const card = document.createElement("article");
@@ -975,51 +1100,9 @@
       const exportHelp = helpLink("claude-export", "The Claude export");
       if (exportHelp) detail.append(exportHelp);
     }
-    if (source.ingest) {
-      const reported = document.createElement("p"); reported.className = "note";
-      reported.textContent = source.ingest.collector_seen_at ?
-        "Last report: " + new Date(source.ingest.collector_seen_at).toLocaleString() +
-        " from " + source.ingest.collector_host : "No reports yet";
-      detail.append(reported);
-      const controls = document.createElement("div"); controls.className = "actions";
-      const create = document.createElement("button"); create.type = "button";
-      create.textContent = source.ingest.token_exists ? "Rotate remote token" : "Create remote token";
-      create.addEventListener("click", async () => {
-        if (busy) return;
-        busy = true; create.disabled = true;
-        try {
-          tokenReveal = await request("/api/admin/sources/" + source.id + "/ingest-token", "POST");
-          tokenReveal.id = source.id;
-          await reload();
-          message("Remote token ready. Copy it now: it is shown only once.");
-        } catch (error) { message(error.message, true); }
-        finally { busy = false; create.disabled = false; renderList(); }
-      });
-      controls.append(create);
-      if (source.ingest.token_exists) {
-        const revoke = document.createElement("button"); revoke.type = "button";
-        revoke.className = "danger"; revoke.textContent = "Revoke";
-        revoke.addEventListener("click", async () => {
-          if (!window.confirm("Revoke this account's remote token? Collectors using it are refused.")) return;
-          if (busy) return;
-          busy = true; revoke.disabled = true;
-          try {
-            await request("/api/admin/sources/" + source.id + "/ingest-token", "DELETE");
-            tokenReveal = null;
-            await reload();
-            message("Remote token revoked. Install a new one to report again.");
-          } catch (error) { message(error.message, true); }
-          finally { busy = false; revoke.disabled = false; }
-        });
-        controls.append(revoke);
-      }
-      detail.append(controls);
-      // The guide for the remote token, beside the buttons that manage it.
-      const tokenHelp = helpLink("remote-token", "Remote tokens");
-      if (tokenHelp) detail.append(tokenHelp);
-      const reveal = revealToken(source);
-      if (reveal) detail.append(reveal);
-    }
+    // Remote reports are set up in one place, on the Settings tab: the card only
+    // says where this account stands and links there.
+    if (source.ingest) detail.append(remoteStatus(source));
     if (source.quota) {
       for (const quota of source.quota.windows) {
         const meter = document.createElement("div"); meter.className = "quota " + quota.state;
@@ -1147,9 +1230,9 @@
       }
       if (collectors.length) {
         readerBox.append(el("h4", "", "Remote collectors"));
-        readerBox.append(buildTable(["Account", "Host", "Last seen", "State"],
+        readerBox.append(buildTable(["Account", "Host", "Last seen", "Version", "State"],
           collectors.map(collector => [collector.account, collector.host,
-            whenText(collector.last_seen), collector.state])));
+            whenText(collector.last_seen), collector.version || "unknown", collector.state])));
       }
     }
     const alertBox = element("status-alerts");
@@ -1203,6 +1286,8 @@
     statusState = null; configState = null; expanded.clear();
     element("admin-token").value = ""; element("source-form").reset();
     element("source-list").replaceChildren(); element("source-fields").replaceChildren();
+    // A token that was shown once must not stay in a page that is locked.
+    element("remote-accounts").replaceChildren(); element("collector-info").replaceChildren();
     element("workspace").hidden = true; element("login-panel").hidden = false;
     element("logout").hidden = true; element("editor-modal").hidden = true; message("Configuration locked.");
   }
@@ -1288,10 +1373,11 @@
       ingestState = await request("/api/admin/ingest", "PUT",
         {enabled: element("ingest-enabled").checked});
       message(element("ingest-enabled").checked ?
-        "Remote reports accepted. Each remote account needs its own token on the Services tab." :
+        "Remote reports accepted. Create a token for each account that will report, below." :
         "Remote reports refused. Existing tokens are kept.");
     } catch (error) { message(error.message, true); }
-    finally { busy = false; renderIngest(); }
+    // The account cards say whether remote reports are on, so they follow the switch.
+    finally { busy = false; renderIngest(); renderList(); }
   });
   element("overflow-rows").addEventListener("change", async () => {
     if (busy) { renderDisplay(); return; }

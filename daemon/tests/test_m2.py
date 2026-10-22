@@ -48,10 +48,10 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(load_config()["daemon"]["port"], 8787)
 
     def test_toml_and_env_precedence(self):
-        with patch.dict(os.environ, {"DASH_PORT": "9001", "DASH_SHARED_TOKEN": "env-token"}):
-            config = self.load('[daemon]\nport = 9000\nshared_token = "file-token"\n')
+        with patch.dict(os.environ, {"DASH_PORT": "9001", "DASH_SHARED_TOKEN": "env-token-0123456789"}):
+            config = self.load('[daemon]\nport = 9000\nshared_token = "file-token-0123456789"\n')
         self.assertEqual(config["daemon"]["port"], 9001)
-        self.assertEqual(config["daemon"]["shared_token"], "env-token")
+        self.assertEqual(config["daemon"]["shared_token"], "env-token-0123456789")
 
     def test_example_loads(self):
         config = load_config(SRC.parents[1] / "examples" / "config.example.toml")
@@ -103,8 +103,8 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(resolve_shared_token(config), token)
 
     def test_configured_token_is_preserved(self):
-        config = self.load('[daemon]\nshared_token = "test-token"')
-        self.assertEqual(resolve_shared_token(config), "test-token")
+        config = self.load('[daemon]\nshared_token = "test-token-0123456789"')
+        self.assertEqual(resolve_shared_token(config), "test-token-0123456789")
 
 
 class FakeTests(unittest.TestCase):

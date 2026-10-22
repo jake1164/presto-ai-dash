@@ -141,11 +141,61 @@ class _TimedWriter(io.RawIOBase):
         return len(data)
 
 
+class _AuthFailures:
+    """Counts failed sign-ins per address and says when one is worth a log line.
+
+    A guessing client makes thousands of failures, so a line per failure
+    would flood the log and the Problems list. The first failure in a minute
+    is reported, then the 10th, 100th and so on. The table is bounded.
+    """
+
+    WINDOW_SECONDS = 60.0
+    MAX_ADDRESSES = 256
+    REPORT_AT = (1, 10, 100, 1000, 10000, 100000)
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._entries = {}
+
+    def record(self, address, now):
+        """The count to report for this failure, or None to stay quiet."""
+        with self._lock:
+            entry = self._entries.get(address)
+            if entry is None or now - entry[0] >= self.WINDOW_SECONDS:
+                if entry is None and len(self._entries) >= self.MAX_ADDRESSES:
+                    oldest = min(self._entries, key=lambda key: self._entries[key][0])
+                    del self._entries[oldest]
+                entry = self._entries[address] = [now, 0]
+            entry[1] += 1
+            return entry[1] if entry[1] in self.REPORT_AT else None
+
+
 class BoundedRequestHandler(BaseHTTPRequestHandler):
     """A handler whose whole request must arrive within ``request_deadline``."""
 
     request_deadline = 10.0
     io_timeout = 3.0
+    # Pause before answering a bearer token that did not match. It caps how
+    # fast one connection can guess, and a correct client never waits.
+    auth_failure_delay = 0.25
+    server_label = "status"
+    auth_failures = _AuthFailures()
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        cls.auth_failures = _AuthFailures()
+
+    def note_failed_auth(self):
+        """Record and slow down a bearer token that did not match.
+
+        Only the address is logged, never the token or the header.
+        """
+        count = self.auth_failures.record(self.client_address[0], time.monotonic())
+        if count:
+            log.warning("failed %s sign-in from %s (%d in the last minute)",
+                        self.server_label, self.client_address[0], count)
+        if self.auth_failure_delay:
+            time.sleep(self.auth_failure_delay)
 
     def setup(self):
         super().setup()
@@ -184,9 +234,12 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
         def _authorized(self):
             """The shared bearer token, compared in constant time."""
             parts = self.headers.get("Authorization", "").split()
-            return (len(parts) == 2 and parts[0].lower() == "bearer" and
-                    hmac.compare_digest(parts[1].encode("utf-8"),
-                                        shared_token.encode("utf-8")))
+            matched = (len(parts) == 2 and parts[0].lower() == "bearer" and
+                       hmac.compare_digest(parts[1].encode("utf-8"),
+                                           shared_token.encode("utf-8")))
+            if parts and not matched:
+                self.note_failed_auth()
+            return matched
 
         def _client_name(self):
             """The client's own name for itself, sanitised."""
@@ -317,6 +370,8 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
             instance_id = storage.instance_for_ingest_token(token)
             if instance_id is None:
                 # Unknown, revoked or malformed bearer: the input is never echoed.
+                if token:
+                    self.note_failed_auth()
                 self._send_json(401, {"error": "unauthorised"})
                 return
             key = hashlib.sha256(token.encode("utf-8")).hexdigest()

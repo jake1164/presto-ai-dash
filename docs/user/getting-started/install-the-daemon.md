@@ -47,17 +47,29 @@ The daemon reads a TOML file. Copy the example and edit it:
 cp ../examples/config.example.toml dash.toml
 ```
 
-At a minimum, set `daemon.shared_token` to something long and random. That
-token is the key the Presto presents to the daemon. If you leave it empty the
-daemon generates one at startup and prints it to the log once.
+At a minimum, set `daemon.shared_token`. That token is the key the Presto
+presents to the daemon. If you leave it empty the daemon generates a strong
+one at startup and prints it to the log once. To choose your own, generate it
+rather than inventing it:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(24))"
+```
 
 ```toml
 [daemon]
 host = "0.0.0.0"
 port = 8787
-shared_token = "a-long-random-string-here"
+shared_token = "<paste the generated token>"
 poll_interval = 15
 ```
+
+A token you choose must be at least 16 characters long, must not be a
+placeholder from this documentation, and must not be one repeated character
+or two. The daemon refuses to start with a weaker one and says which setting
+to fix. The same rule applies to `admin.token`. Anyone on your network can
+reach the status port, so a guessable token is the only thing between them and
+your usage data.
 
 `dash.toml` holds tokens, so keep it out of version control. The repository
 already ignores it.

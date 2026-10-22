@@ -48,7 +48,7 @@ scenario_interval = 20
 | --- | --- | --- |
 | `host` | `0.0.0.0` | The address the status listener binds to. All interfaces, so the Presto can reach it on the LAN |
 | `port` | `8787` | The status port. The Presto polls this one |
-| `shared_token` | `""` | The bearer token the Presto presents. Empty means one is generated at startup and printed once |
+| `shared_token` | `""` | The bearer token the Presto presents. Empty means one is generated at startup and printed once. One you choose needs at least 16 characters, at least 6 different ones, and must not be a documentation placeholder, or the daemon will not start |
 | `poll_interval` | `15` | Seconds between collections |
 | `database` | `dash.db` | The SQLite file |
 | `retention_hours` | `72` | How long snapshots and alert observations are kept |
@@ -69,7 +69,7 @@ scenario_interval = 20
 | `host` | `127.0.0.1` | The address the admin page listens on. A non-loopback address needs an explicit `token` and `allowed_hosts`, or the daemon will not start the page |
 | `port` | `8788` | The admin port |
 | `allowed_hosts` | `[]` | The names the page is reached by (for example `admin.example.lan:8788`), checked against the `Host` and `Origin` headers. The loopback names on the admin port always work |
-| `token` | `""` | The admin token. Empty means a fresh one at every start, printed once |
+| `token` | `""` | The admin token. Empty means a fresh one at every start, printed once. The same strength rule as `shared_token` applies to one you choose |
 | `key_file` | `""` | Where the encryption master key lives. Empty means `<database>.key` |
 
 ## `[display]`

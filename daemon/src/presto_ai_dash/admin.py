@@ -104,6 +104,8 @@ def make_admin_handler(manager, token, allowed_hosts=()):
     allowed = tuple(allowed_hosts or ())
 
     class AdminHandler(BoundedRequestHandler):
+        server_label = "admin"
+
         def log_message(self, *_):
             pass
 
@@ -187,6 +189,8 @@ def make_admin_handler(manager, token, allowed_hosts=()):
                             self._send(403, {"error": "reload configuration before making changes"})
                             return False
                     return True
+            if parts:
+                self.note_failed_auth()
             self._send(401, {"error": "admin token required; browser session absent or expired"})
             return False
 

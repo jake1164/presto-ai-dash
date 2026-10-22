@@ -74,6 +74,38 @@ DEFAULT_OVERFLOW_ROWS = 1
 _warned_overflow = False
 
 
+# A token somebody chose, rather than one the daemon generated, is the only
+# kind that can be guessed. The generated ones are 192 and 256 bits.
+MIN_TOKEN_LENGTH = 16
+MIN_TOKEN_DISTINCT_CHARACTERS = 6
+# Values that appear in the documentation and the example files. Anyone can
+# look them up, so they are as good as no token.
+PLACEHOLDER_TOKENS = frozenset({"change-me", "changeme", "replace-me",
+                                "a-long-random-string-here"})
+TOKEN_ADVICE = ('generate one with: python -c "import secrets; '
+                'print(secrets.token_urlsafe(24))"')
+
+
+def check_token_strength(name, token):
+    """Refuse a chosen token that is short, repetitive or a published example.
+
+    An empty token is fine: the daemon then generates a strong one. The error
+    never repeats the token.
+    """
+    if not token:
+        return
+    if token.lower() in PLACEHOLDER_TOKENS:
+        raise ConfigError("%s is a placeholder from the documentation, which "
+                          "anyone can look up; %s" % (name, TOKEN_ADVICE))
+    if len(token) < MIN_TOKEN_LENGTH:
+        raise ConfigError("%s is too short: use at least %d characters; %s" %
+                          (name, MIN_TOKEN_LENGTH, TOKEN_ADVICE))
+    if len(set(token)) < MIN_TOKEN_DISTINCT_CHARACTERS:
+        raise ConfigError("%s is too repetitive: it needs at least %d different "
+                          "characters; %s" % (name, MIN_TOKEN_DISTINCT_CHARACTERS,
+                                              TOKEN_ADVICE))
+
+
 def parse_flag(value, name):
     """Parse a boolean environment flag, rejecting anything ambiguous."""
     lowered = value.strip().lower() if isinstance(value, str) else ""
@@ -372,6 +404,7 @@ def load_config(path=None):
     token = config["daemon"]["shared_token"]
     if token and (not token.isascii() or any(char.isspace() for char in token)):
         raise ConfigError("daemon.shared_token must be ASCII without whitespace")
+    check_token_strength("daemon.shared_token", token)
     if type(config["admin"]["enabled"]) is not bool:
         raise ConfigError("admin.enabled must be a boolean")
     for key in ("token", "key_file"):
@@ -386,6 +419,7 @@ def load_config(path=None):
     admin_token = config["admin"]["token"]
     if admin_token and (not admin_token.isascii() or any(char.isspace() for char in admin_token)):
         raise ConfigError("admin.token must be ASCII without whitespace")
+    check_token_strength("admin.token", admin_token)
     if token and admin_token == token:
         raise ConfigError("admin token must be different from the device shared token")
     if type(config["sources"]["fake"]["enabled"]) is not bool:

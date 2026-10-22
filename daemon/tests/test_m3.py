@@ -232,7 +232,7 @@ class ConfigM3Tests(unittest.TestCase):
         self.assertEqual(config["daemon"]["cleanup_interval"], 300)
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "old.toml"
-            path.write_text('[daemon]\nshared_token="token"\n', encoding="utf-8")
+            path.write_text('[daemon]\nshared_token="token-0123456789abc"\n', encoding="utf-8")
             self.assertEqual(load_config(path)["daemon"]["retention_hours"], 72)
             for key, value in (("retention_hours", "true"), ("retention_hours", "0"),
                                ("cleanup_interval", "false"), ("cleanup_interval", "-1")):
@@ -372,7 +372,7 @@ class DaemonM3Tests(unittest.TestCase):
             port = reservation.getsockname()[1]
             reservation.close()
             config_path.write_text(
-                '[daemon]\nhost="127.0.0.1"\nport=%d\nshared_token="smoke-token"\n'
+                '[daemon]\nhost="127.0.0.1"\nport=%d\nshared_token="smoke-token-0123456789"\n'
                 'database=%s\npoll_interval=60\nretention_hours=72\ncleanup_interval=60\n'
                 % (port, json.dumps(str(database))), encoding="utf-8")
             child = (
@@ -399,7 +399,7 @@ class DaemonM3Tests(unittest.TestCase):
                         opener.open(url, timeout=3)
                     self.assertEqual(response.exception.code, 401)
                     response.exception.close()
-                    request = Request(url, headers={"Authorization": "Bearer smoke-token"})
+                    request = Request(url, headers={"Authorization": "Bearer smoke-token-0123456789"})
                     with opener.open(request, timeout=3) as response:
                         payload = json.loads(response.read())
                     self.assertEqual([card["id"] for card in payload["cards"]],

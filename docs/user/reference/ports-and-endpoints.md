@@ -111,6 +111,13 @@ cookie-authenticated change also needs the exact page `Origin` and the
 | The admin token | You, from the startup log | Everything on the admin port |
 | A remote token | A collector on another machine | Write readings for one account, and nothing else |
 
+A bearer token that does not match is answered `401` after a pause of a
+quarter of a second, so one connection cannot guess quickly; a correct token
+is never delayed. The daemon logs the address of the client (never the token)
+as a warning, which also appears in the admin page's Problems list. It writes
+one line for a client's first failure in a minute and then one at the 10th,
+100th and 1,000th, so a guessing run is visible without flooding the log.
+
 The shared token is a bearer token with no identity and no expiry, and it
 travels over plain HTTP. On an untrusted network, put the daemon behind a
 reverse proxy with TLS or use a private network such as Tailscale.

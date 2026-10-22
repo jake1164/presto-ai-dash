@@ -184,3 +184,4 @@ The full list, with every key and its default, is in
 
 - [Set up the Presto](set-up-the-presto.md)
 - [Add the first source](add-the-first-source.md)
+- [Securing a deployment](../guides/securing-a-deployment.md)

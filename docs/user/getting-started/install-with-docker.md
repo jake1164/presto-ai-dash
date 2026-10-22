@@ -205,6 +205,9 @@ the daemon does not look at the `Host` header there.
 
 ## Security notes
 
+[Securing a deployment](../guides/securing-a-deployment.md) covers these in
+full, including publishing the status port on one LAN address only.
+
 - **The admin page is on the loopback address of the host by default.**
   `127.0.0.1:8788` is reachable from the machine and from nowhere else.
 - **The shared token is plain HTTP on the LAN.** The Presto device and the

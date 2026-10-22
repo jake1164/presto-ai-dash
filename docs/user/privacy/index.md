@@ -123,7 +123,9 @@ network.
 
 The shared token is a bearer token with no per-user identity and no expiry.
 It is meant for a trusted LAN and nothing else. Do not expose the daemon's
-port to the internet.
+port to the internet. [Securing a deployment](../guides/securing-a-deployment.md)
+says how to narrow who can reach it, where to keep the database, and what to
+do if a token leaks.
 
 ## See also
 

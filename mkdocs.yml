@@ -89,6 +89,7 @@ nav:
       - Ollama: guides/ollama.md
       - LiteLLM: guides/litellm.md
       - The Admin Page: guides/admin-page.md
+      - Securing a Deployment: guides/securing-a-deployment.md
       - Home Display and the Overflow Strip: guides/home-display.md
       - Alerts and the Card Bell: guides/alerts-and-the-bell.md
       - Tapping Rows and Dots: guides/tapping.md

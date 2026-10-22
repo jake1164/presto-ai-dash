@@ -2,13 +2,14 @@
 
 import argparse
 import logging
+import os
 import signal
 import sqlite3
 import sys
 import threading
 import time
 
-from . import __version__
+from . import __version__, private_files
 from .api import ApiServer
 from .admin import AdminServer
 from .clients import ClientRegistry
@@ -79,6 +80,18 @@ class Daemon:
         """The route's live switch, so an admin toggle applies without a restart."""
         return ingest_enabled(self.config, self.storage.ingest_enabled_setting())
 
+    def _check_private_files(self):
+        """Warn when other accounts could replace the database or its key.
+
+        After the problems list is attached, so the warning shows in the admin
+        page as well as in the log.
+        """
+        database = self.config["daemon"]["database"]
+        paths = [database]
+        if not os.environ.get("DASH_ENCRYPTION_KEY"):
+            paths.append(self.config["admin"].get("key_file") or (str(database) + ".key"))
+        private_files.check_private_files(paths)
+
     def _attach_problems(self):
         """Keep the recent warnings and errors, in memory only."""
         logging.getLogger().addHandler(self.problems)
@@ -109,6 +122,7 @@ class Daemon:
                 self.clients = ClientRegistry()
                 self.problems = ProblemBuffer()
             self._attach_problems()
+            self._check_private_files()
             self.api = ApiServer(self.config["daemon"]["host"], self.config["daemon"]["port"],
                                  self.storage, self.shared_token,
                                  source_ids=([collector.source.id for collector in self.collectors]

@@ -120,6 +120,11 @@ Everything that has to survive an upgrade lives in one named volume,
 | `/data/dash.db` | The SQLite database: the accounts, the history, the encrypted provider keys, the browser sessions. |
 | `/data/dash.db.key` | The encryption master key, in an owner-only file. |
 
+Both files belong to the container's `dash` user and are readable by that user
+only. To read or back them up from the host, use `docker cp` or a container
+running as the same user; a bind mount owned by another host user will not
+let the daemon create them.
+
 **Losing the key file loses the stored provider keys.** The database still
 opens and every other setting is still there, but the encrypted keys cannot
 be read any more, and they are never restored by guessing: the daemon

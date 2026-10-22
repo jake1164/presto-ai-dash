@@ -8,6 +8,8 @@ import stat
 
 from cryptography.fernet import Fernet, InvalidToken
 
+from . import private_files
+
 
 def _dpapi(data, decrypt=False):
     """Protect a Windows key file for the current user, without showing UI."""
@@ -84,6 +86,11 @@ def load_cipher(database, key_file="", existing=False):
             handle.write(contents)
             handle.flush()
             os.fsync(handle.fileno())
+        # The mode above is owner-only on POSIX. Windows has no mode, so the
+        # file would inherit whatever its folder allows.
+        private_files.protect(path)
+    elif os.name == "nt":
+        private_files.protect(path)
     if os.name != "nt" and stat.S_IMODE(path.stat().st_mode) & 0o077:
         raise ValueError("encryption key file must have owner-only permissions (chmod 600)")
     contents = path.read_bytes()

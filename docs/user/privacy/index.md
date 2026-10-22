@@ -66,7 +66,7 @@ path that could spend one.
 | --- | --- |
 | Your accounts and their settings | SQLite, in plain text |
 | Your provider keys | SQLite, encrypted with Fernet, bound to their account |
-| The encryption master key | Outside SQLite: a DPAPI-protected file on Windows, an owner-only file elsewhere, or `DASH_ENCRYPTION_KEY` |
+| The encryption master key | Outside SQLite: a DPAPI-protected file on Windows, an owner-only file elsewhere, or `DASH_ENCRYPTION_KEY`. The database and the key file are created readable and writable by your account only |
 | Your readings and a short history | SQLite, in plain text |
 | Your Claude status-line command | Claude Code's own settings file, the provider's file, with the previous value kept encrypted in SQLite |
 | The usage cache's account ID | In memory only, as a hash, and never stored |

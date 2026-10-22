@@ -137,6 +137,17 @@ fails instead of two daemons answering on the same ports.
 | `dash.db` | SQLite: accounts, encrypted keys, readings, history. |
 | `dash.db.key` | The encryption master key, outside the database. |
 
+The daemon creates `dash.db` and `dash.db.key` so that only your account (and
+on Windows the system and the administrators) can read or change them, and it
+tightens an existing database the same way when it starts. That protects the
+files, not the folder: anyone who can write to the folder can delete the
+database and put their own there, and a database they control decides which
+address your saved keys are sent to. So the daemon warns, in its log and in the
+admin page's Problems list, when the folder is writable by Everyone,
+Authenticated Users or Users (Windows) or by group or other users (Linux and
+macOS). The fix is to keep the database somewhere only you can write, for
+example `%LOCALAPPDATA%\presto-ai-dash\dash.db`, set with `daemon.database`.
+
 On Windows the key file is protected with DPAPI for your Windows account. On
 Linux and macOS it is an owner-only file. If you need to move the install to
 another machine, generate an external key instead:

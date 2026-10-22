@@ -8,6 +8,7 @@ import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
 
+from . import private_files
 from .models import STATUS_ORDER, SourceSnapshot, now_utc
 from .sources import source_type
 
@@ -95,12 +96,16 @@ class Storage:
 
     def __init__(self, path):
         self._lock = threading.RLock()
+        # A new database is born owner-only, not made so after the fact.
+        private_files.create_private(path)
         self._conn = sqlite3.connect(path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._closed = False
         try:
             self._conn.execute("PRAGMA foreign_keys = ON")
             self._migrate()
+            # One made by an earlier version took its permissions from its folder.
+            private_files.protect(path)
         except Exception:
             self._conn.close()
             self._closed = True

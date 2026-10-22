@@ -39,3 +39,6 @@ Thumbs.db
 # Presto preview renders and Playwright MCP output
 .preview/
 .playwright-mcp/
+
+# Agent scratch notes and reviews, never published
+.ai_docs/

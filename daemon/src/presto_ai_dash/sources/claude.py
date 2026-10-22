@@ -1,7 +1,7 @@
 """Claude Code subscription windows: the status-line export and the usage cache."""
 
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from ..collectors.claude_activity import ActivityReader
@@ -24,6 +24,10 @@ NOTE_CACHE = ("Claude Code terminal export and its local usage cache; idle readi
               "become stale. The VS Code panel does not run the status line, so quota "
               "arrives from terminal sessions and from the usage cache Claude Code "
               "writes for its /usage dialog (opening /usage refreshes it).")
+# A pushed activity summary older than this is no longer a reading: the
+# collector that sent it has stopped, and its token totals would stand still.
+PUSHED_ACTIVITY_SECONDS = 600
+
 NOTE_AWAITING = "Awaiting quota export from normal Claude Code terminal use"
 NOTE_AWAITING_CACHE = ("Awaiting quota export from normal Claude Code terminal use "
                        "or its local usage cache")
@@ -39,6 +43,10 @@ class ClaudeSource(Source):
     report_note = NOTE_EXPORT
     accepts_push = True
     push_window_ids = ("five_hour", "seven_day")
+    # A collector may also push what the local readers would find on its own
+    # machine, and may do so before any quota has been reported.
+    push_extras = frozenset(("activity", "usage_cache"))
+    push_default_windows = WINDOWS
     config_fields = (
         {"key": "settings_path", "label": "Claude Code settings file (one profile per account)",
          "type": "string", "default": str(Path.home() / ".claude" / "settings.json")},
@@ -89,6 +97,33 @@ class ClaudeSource(Source):
                                          override or None)
             self._usage_reader = UsageCacheReader(candidates)
         return self._usage_reader.refresh(now)
+
+    @staticmethod
+    def _pushed_usage_cache(stored, host):
+        """The usage-cache reading a collector pushed, in the shape the local reader returns."""
+        pushed = stored.get("pushed_usage_cache") if stored else None
+        if not isinstance(pushed, dict):
+            return None
+        cache = {key: value for key, value in pushed.items() if key != "received_at"}
+        cache["path"] = None
+        cache["message"] = None if cache.get("available") else (
+            "Claude usage cache on %s: %s" % (host or "the collector",
+                                              cache.get("reason") or "unavailable"))
+        cache["reported_by"] = host
+        return cache
+
+    @staticmethod
+    def _pushed_activity(stored, now):
+        """The activity summary a collector pushed, or an unavailable one once it has gone quiet."""
+        pushed = stored.get("pushed_activity") if stored else None
+        if not isinstance(pushed, dict):
+            return None
+        received = timestamp(pushed["received_at"])
+        if now - received > timedelta(seconds=PUSHED_ACTIVITY_SECONDS):
+            return {"available": False, "reason": "the collector stopped reporting",
+                    "complete": False, "last_request_at": None, "last_model": None,
+                    "last_entrypoint": "?", "requests_5h": 0, "tokens_5h": 0, "tokens_7d": 0}
+        return {key: value for key, value in pushed.items() if key != "received_at"}
 
     def _merge_cache(self, report, cache):
         """The newest reading per window wins; the terminal export wins a tie.
@@ -145,14 +180,22 @@ class ClaudeSource(Source):
     def collect(self):
         now = now_utc()
         observation = self.storage.observation(self.id) if hasattr(self, "storage") else None
+        stored = observation["report"] if observation else None
+        host = observation["collector_host"] if observation else None
         cache = self._usage_cache(now)
-        if observation is None:
+        pushed_cache = self._pushed_usage_cache(stored, host)
+        if pushed_cache is not None and (cache is None or not cache.get("available")):
+            cache = pushed_cache  # the daemon's own reader has nothing; the collector's does
+        if stored is None:
             report = quota_report(self.provider, self.product, [
                 quota_window(key, label, None, None, now, minutes, state="unavailable",
                              source=SOURCE_EXPORT)
                 for key, label, minutes in WINDOWS])
         else:
-            report = deepcopy(observation["report"])
+            report = deepcopy(stored)
+        # What a collector pushed is the source's input, not part of its report.
+        for key in ("pushed_activity", "pushed_usage_cache"):
+            report.pop(key, None)
         # Every window says where it came from.
         for window in report["windows"]:
             window.setdefault("source", SOURCE_EXPORT)
@@ -172,8 +215,11 @@ class ClaudeSource(Source):
         for key in ("collector_seen_at", "collector_host", "collector_version", "last_progress_at"):
             report[key] = observation[key] if observation else None
         available = [w for w in report["windows"] if w["state"] == "available"]
-        if self.config.get("activity_logs"):
-            activity = self._activity(now)
+        activity = self._activity(now) if self.config.get("activity_logs") else None
+        pushed_activity = self._pushed_activity(stored, now)
+        if pushed_activity is not None and (activity is None or not activity["available"]):
+            activity = pushed_activity
+        if activity is not None:
             report["local_activity"] = activity
             if activity["available"]:
                 # Assumption D: while the reader works, stale or missing quota
@@ -191,7 +237,7 @@ class ClaudeSource(Source):
                                for w in report["windows"])
                 return SourceSnapshot(self.id, status, updated_at=observed,
                                       metrics={"quota": report})
-        if observation is None and not available:
+        if stored is None and not available:
             return self.snapshot("warning", metrics={"quota": report})
         status = ("rate_limited" if any(w["used_percent"] >= 100 for w in available)
                   else "ok" if available else "warning")

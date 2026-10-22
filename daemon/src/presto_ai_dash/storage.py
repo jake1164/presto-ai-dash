@@ -242,8 +242,13 @@ class Storage:
                 "progress": row["progress"],
                 "last_activity_at": row["last_activity_at"]}
 
+    # Readings a collector pushes beside the quota windows. A later push of the
+    # windows alone (a status line after a response) must not erase them.
+    PUSHED_KEYS = ("pushed_activity", "pushed_usage_cache")
+
     def save_observation(self, instance_id, report, evidence, collector_host=None,
-                         collector_version=None, progress=None, now=None):
+                         collector_version=None, progress=None, now=None, extras=None,
+                         base_report=None):
         """Atomic account routing and freshness preservation across helper processes.
 
         The daemon owns time: a window's observed_at becomes this receive time
@@ -251,7 +256,9 @@ class Storage:
         timestamp, and collector_seen_at is this receive time too — never the
         client's clock. A changed progress hash updates last_progress_at. A
         None report is a heartbeat: collector connectivity only, quota
-        untouched.
+        untouched. A heartbeat may carry ``extras``, readings that belong in the
+        stored report (``base_report``, with every window unavailable, stands in
+        when nothing has been stored yet); the quota windows stay as they are.
         """
         result = deepcopy(report)
         with self._lock:
@@ -266,6 +273,30 @@ class Storage:
                     "SELECT report, evidence, progress, last_progress_at FROM observations"
                     " WHERE instance_id = ?", (instance_id,)).fetchone()
                 observed = _stored_time(now) if now is not None else _stored_time(now_utc())
+                if result is None and extras:
+                    # Readings with no new quota: merged into the report as it is.
+                    if previous is not None and previous["report"]:
+                        merged = json.loads(previous["report"])
+                    else:
+                        merged = deepcopy(base_report)
+                        for window in merged["windows"]:
+                            window["observed_at"] = observed
+                    merged.update(extras)
+                    if previous is None:
+                        self._conn.execute(
+                            "INSERT INTO observations (instance_id, report, evidence,"
+                            " collector_seen_at, collector_host, collector_version)"
+                            " VALUES (?, ?, ?, ?, ?, ?)",
+                            (instance_id, json.dumps(merged), "{}", observed,
+                             collector_host, collector_version))
+                    else:
+                        self._conn.execute(
+                            "UPDATE observations SET report = ?, collector_seen_at = ?,"
+                            " collector_host = ?, collector_version = ? WHERE instance_id = ?",
+                            (json.dumps(merged), observed, collector_host,
+                             collector_version, instance_id))
+                    self._conn.commit()
+                    return True
                 if result is None:
                     # Heartbeat: the collector is alive; quota is untouched.
                     if previous is None:
@@ -290,6 +321,11 @@ class Storage:
                         window["observed_at"] = old_windows[key]["observed_at"]
                     else:
                         window["observed_at"] = observed
+                if previous and previous["report"]:
+                    kept = json.loads(previous["report"])
+                    for key in self.PUSHED_KEYS:
+                        if key in kept and key not in result:
+                            result[key] = kept[key]
                 last_progress_at = previous["last_progress_at"] if previous else None
                 if progress is not None and progress != (previous["progress"] if previous else None):
                     last_progress_at = observed

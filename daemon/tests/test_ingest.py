@@ -230,14 +230,14 @@ class ValidatorTests(unittest.TestCase):
 
 
 class PushDeclarationTests(unittest.TestCase):
-    def test_only_claude_accepts_push(self):
+    def test_only_claude_and_codex_accept_push(self):
         self.assertTrue(ClaudeSource.accepts_push)
         self.assertEqual(ClaudeSource.push_window_ids, ("five_hour", "seven_day"))
         self.assertFalse(Source.accepts_push)
         self.assertIsNone(Source.push_window_ids)
         for type_id in available_sources():
-            if type_id == "claude":
-                continue  # asserted above
+            if type_id in ("claude", "codex"):
+                continue  # asserted above and in test_pushed_readings
             with self.subTest(source=type_id):
                 self.assertFalse(source_type(type_id).accepts_push)
                 self.assertIsNone(source_type(type_id).push_window_ids)

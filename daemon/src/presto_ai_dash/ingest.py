@@ -13,6 +13,7 @@ import math
 import re
 
 from .collectors import served_version, update_state
+from .ingest_extras import clean_activity, clean_credits, clean_reset_credits, clean_usage_cache
 from .models import now_utc
 from .quotas import quota_report
 from .sources import source_type
@@ -34,7 +35,8 @@ _TOP_LEVEL_KEYS = frozenset(("schema", "collector", "provider_version", "client_
                              "windows", "evidence", "progress"))
 _COLLECTOR_KEYS = frozenset(("name", "version", "host"))
 _WINDOW_KEYS = frozenset(("id", "label", "period_minutes", "used_percent", "resets_at", "state"))
-_WINDOW_ID = re.compile(r"[a-z0-9_]{1,32}\Z")
+# Letters, digits and _ . : (a Codex bucket id is part of its window id).
+_WINDOW_ID = re.compile(r"[a-z0-9_.:]{1,32}\Z")
 _HASH = re.compile(r"[0-9a-f]{64}\Z")
 _STATES = frozenset(("available", "unavailable", "unlimited"))
 
@@ -63,7 +65,7 @@ def _check_window(window, seen_ids, allowed_ids, now):
         raise ValueError("window must have exactly the quota window fields")
     window_id = window["id"]
     if not isinstance(window_id, str) or not _WINDOW_ID.match(window_id):
-        raise ValueError("window id must be 1-32 lowercase letters, digits or underscores")
+        raise ValueError("window id must be 1-32 lowercase letters, digits or _ . :")
     if window_id in seen_ids:
         raise ValueError("duplicate window id: %s" % window_id)
     if allowed_ids is not None and window_id not in allowed_ids:
@@ -98,7 +100,7 @@ def validate(envelope, source_class):
     """
     if not isinstance(envelope, dict):
         raise ValueError("envelope must be a JSON object")
-    unknown = set(envelope) - _TOP_LEVEL_KEYS
+    unknown = set(envelope) - _TOP_LEVEL_KEYS - set(getattr(source_class, "push_extras", ()))
     if unknown:
         raise ValueError("unknown top-level key: %s" % ", ".join(sorted(unknown)))
     if envelope.get("schema") != SCHEMA_NAME:
@@ -118,6 +120,7 @@ def validate(envelope, source_class):
                          MAX_PROVIDER_VERSION_CHARS)
     if "client_time" in envelope:
         _moment(envelope["client_time"], "client_time")
+    report_extras(envelope, source_class)
     windows = envelope.get("windows")
     if windows is not None:
         if not isinstance(windows, list):
@@ -142,6 +145,54 @@ def validate(envelope, source_class):
     _check_hash(envelope.get("progress"), "progress")
 
 
+# Which report key each pushed reading is stored under. The two Claude readings
+# are kept apart from the daemon's own readers' output, so the source can tell
+# a reading pushed from another machine from one it read itself.
+_EXTRA_KEYS = {"activity": "pushed_activity", "usage_cache": "pushed_usage_cache",
+               "reset_credits": "reset_credits", "credits": "credits"}
+
+
+def report_extras(envelope, source_class, now=None):
+    """The cleaned optional readings of an envelope, under the keys they are stored by.
+
+    Raises ValueError for one the source does not take, or one that is not
+    what it says. Each carries ``received_at``, the daemon's own time.
+    """
+    now = now or datetime.now(timezone.utc)
+    allowed = set(getattr(source_class, "push_extras", ()))
+    result = {}
+    for name in ("activity", "usage_cache", "reset_credits", "credits"):
+        if name not in envelope:
+            continue
+        if name not in allowed:
+            raise ValueError("this source does not take %s" % name)
+        value = envelope[name]
+        if name == "activity":
+            cleaned = clean_activity(value, now)
+        elif name == "usage_cache":
+            cleaned = clean_usage_cache(value, now, _check_window)
+        elif name == "reset_credits":
+            cleaned = clean_reset_credits(value, now)
+        else:
+            cleaned = clean_credits(value)
+        if name in ("activity", "usage_cache"):
+            cleaned["received_at"] = now.isoformat()
+        result[_EXTRA_KEYS[name]] = cleaned
+    return result
+
+
+def _default_report(source_class):
+    """A report with every window unavailable, for readings that arrive before any quota."""
+    windows = [{"id": key, "label": label, "period_minutes": minutes, "used_percent": None,
+                "resets_at": None, "state": "unavailable"}
+               for key, label, minutes in source_class.push_default_windows]
+    report = quota_report(source_class.provider, source_class.product, windows,
+                          source_class.stale_after_seconds)
+    if source_class.report_note:
+        report["note"] = source_class.report_note
+    return report
+
+
 def ingest(storage, instance_id, envelope, now=None):
     """Validate and store one observation for a source instance.
 
@@ -156,19 +207,27 @@ def ingest(storage, instance_id, envelope, now=None):
     if not source_class.accepts_push:
         return False
     validate(envelope, source_class)
-    report = None
+    received = now if now is not None else now_utc()
+    extras = report_extras(envelope, source_class, received)
+    report, base_report = None, None
     if "windows" in envelope:  # Present-but-empty is data too; only absence is a heartbeat.
         report = quota_report(source_class.provider, source_class.product,
                               [dict(window) for window in envelope["windows"]],
                               source_class.stale_after_seconds)
         if source_class.report_note:
             report["note"] = source_class.report_note
+        report.update(extras)
+    elif extras:
+        if not getattr(source_class, "push_default_windows", None):
+            raise ValueError("these readings need quota windows with them")
+        base_report = _default_report(source_class)
     collector = envelope.get("collector")
     storage.save_observation(instance_id, report, envelope.get("evidence"),
                              collector_host=collector["host"],
                              collector_version=collector["version"],
                              progress=envelope.get("progress"),
-                             now=now if now is not None else now_utc())
+                             now=received, extras=None if report is not None else extras,
+                             base_report=base_report)
     _note_outdated(instance_id, collector)
     return True
 

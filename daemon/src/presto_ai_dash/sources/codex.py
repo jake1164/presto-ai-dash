@@ -2,120 +2,40 @@
 
 from copy import deepcopy
 from datetime import datetime, timezone
-import decimal
 import time
 
-from ..models import iso, now_utc
+from ..collectors.codex_report import (MAX_BALANCE_CHARS, MAX_RESET_COUNT,
+                                       MAX_RESET_EXPIRIES, balance, credits, period_label,
+                                       reset_credits)
+from ..models import now_utc
 from ..quotas import quota_report, quota_window
 from . import Source, register
 from ._codex_rpc import (CodexReportingError, executable_setting_problem, find_executable,
                          read_subscription)
 
-# Banked reset credits (Phase 9). The provider's count is authoritative; the
-# rows only supply expiries. Missing or malformed data means "not reported".
-MAX_RESET_COUNT = 99
-MAX_RESET_EXPIRIES = 8
-# A Unix timestamp outside this range is not a real expiry.
-EARLIEST_EXPIRY = 1000000000  # 2001-09-09
-LATEST_EXPIRY = 4102444800    # 2100-01-01
-# The credit balance is a short decimal string on the detail card.
-MAX_BALANCE_CHARS = 16
+# The rules for reading Codex's answer are shared with the one-file collector.
+_balance = balance
+_reset_credits = reset_credits
+_credits = credits
 
 
-def period_label(minutes):
-    if minutes == 10080:
-        return "Weekly"
-    if minutes == 1440:
-        return "Daily"
-    if minutes is None:
-        return "Reported window"
-    if minutes % 1440 == 0:
-        return "%dd" % (minutes // 1440)
-    if minutes % 60 == 0:
-        return "%dh" % (minutes // 60)
-    return "%dm" % minutes
-
-
-def _balance(value):
-    """A credit balance as a plain decimal string, or None when unusable.
-
-    The provider reports it in exponent notation ("0E-10"), which must never
-    reach the screen: Decimal turns it into "0". At most 16 characters.
-    """
-    if not isinstance(value, str):
-        return None
-    text = value.strip()
-    if not text:
-        return None
-    try:
-        amount = decimal.Decimal(text)
-    except (decimal.InvalidOperation, ValueError, ArithmeticError):
-        return None
-    if not amount.is_finite():
-        return None
-    if amount == 0:
-        return "0"
-    try:
-        amount = amount.normalize()
-        if amount.as_tuple().exponent > 0:
-            amount = amount.quantize(decimal.Decimal(1))
-    except (decimal.InvalidOperation, ArithmeticError):
-        return None
-    result = format(amount, "f")
-    if len(result) > MAX_BALANCE_CHARS:
-        return None
-    return result
-
-
-def _reset_credits(summary):
-    """The banked reset credits: a count and the expiries of the available ones.
-
-    ``available`` is the provider's own count when it is a real integer in
-    range, and None otherwise: an unknown count is never shown as zero. Only
-    rows whose status is exactly "available" supply an expiry.
-    """
-    available, expiries = None, []
-    if isinstance(summary, dict):
-        count = summary.get("availableCount")
-        if type(count) is int and 0 <= count <= MAX_RESET_COUNT:
-            available = count
-        rows = summary.get("credits")
-        if isinstance(rows, list):
-            seen = set()
-            for row in rows:
-                if not isinstance(row, dict) or row.get("status") != "available":
-                    continue
-                expires = row.get("expiresAt")
-                if type(expires) is not int:
-                    continue
-                if expires < EARLIEST_EXPIRY or expires > LATEST_EXPIRY:
-                    continue
-                moment = iso(datetime.fromtimestamp(expires, timezone.utc))
-                if moment in seen:
-                    continue
-                seen.add(moment)
-                expiries.append(moment)
-            expiries.sort()
-            expiries = expiries[:MAX_RESET_EXPIRIES]
-    return {"available": available, "expires_at": expiries}
-
-
-def _credits(bucket):
-    """The bucket's credit balance, or None when the provider reports none."""
-    balance, unlimited = None, None
-    if isinstance(bucket, dict):
-        reported = bucket.get("credits")
-        if isinstance(reported, dict):
-            balance = _balance(reported.get("balance"))
-            if type(reported.get("unlimited")) is bool:
-                unlimited = reported["unlimited"]
-    return {"balance": balance, "unlimited": unlimited}
+# A pushed reading this recent is used instead of starting a local app-server.
+PUSHED_FRESH_SECONDS = 300
 
 
 @register
 class CodexSource(Source):
     id = "codex"
     name = "OpenAI / Codex"
+    provider = "openai"
+    product = "Codex"
+    stale_after_seconds = 180
+    report_note = "Codex rate limits, read on another computer and pushed by its collector."
+    # A collector on the machine where Codex is signed in may push the same
+    # reading this source takes itself: the daemon can then run in a container,
+    # which has neither Codex nor a login.
+    accepts_push = True
+    push_extras = frozenset(("reset_credits", "credits"))
     config_fields = (
         {"key": "executable", "label": "Codex executable (blank: automatic discovery)",
          "type": "string", "default": ""},
@@ -138,6 +58,29 @@ class CodexSource(Source):
         self._last_quota = None
         self._last_snapshot = None
         self._next_probe = 0
+
+    def attach_storage(self, storage):
+        self.storage = storage
+
+    def _pushed(self):
+        """The newest pushed reading and whether it is recent enough to use, or (None, False)."""
+        observation = (self.storage.observation(self.id)
+                       if getattr(self, "storage", None) is not None else None)
+        if not observation or not observation.get("report"):
+            return None, False
+        report = deepcopy(observation["report"])
+        seen = observation.get("collector_seen_at")
+        fresh = False
+        if seen:
+            age = (now_utc() - datetime.fromisoformat(seen)).total_seconds()
+            fresh = age <= PUSHED_FRESH_SECONDS
+        report["error"] = None
+        return report, fresh
+
+    def _from_push(self, report):
+        limited = any(window.get("used_percent") is not None and window["used_percent"] >= 100
+                      for window in report.get("windows", []))
+        return self.snapshot("rate_limited" if limited else "ok", metrics={"quota": report})
 
     def parse(self, data, observed):
         if not isinstance(data, dict):
@@ -196,6 +139,10 @@ class CodexSource(Source):
         if self._last_snapshot is not None and now < self._next_probe:
             return deepcopy(self._last_snapshot)
         self._next_probe = now + self.config.get("refresh_seconds", 60)
+        pushed, fresh = self._pushed()
+        if fresh:
+            self._last_snapshot = self._from_push(pushed)
+            return deepcopy(self._last_snapshot)
         error, status = None, "offline"
         try:
             executable = find_executable(self.config.get("executable", ""))
@@ -207,6 +154,11 @@ class CodexSource(Source):
             error = str(exc)
         except (ValueError, TypeError, OverflowError, OSError):
             error = "Codex usage unavailable; reporting schema changed or local process failed"
+        if error and pushed is not None:
+            # This machine cannot read Codex (a container, say) and the collector
+            # has gone quiet: its last reading is shown, and ages as stale.
+            self._last_snapshot = self._from_push(pushed)
+            return deepcopy(self._last_snapshot)
         report = deepcopy(self._last_quota) if self._last_quota else quota_report(
             "openai", "Codex", [quota_window("codex:primary", "Subscription usage", None,
                                             None, now_utc(), state="unavailable")])

@@ -164,7 +164,7 @@ class CodexProtocolTests(unittest.TestCase):
         self.assertEqual([r["method"] for r in rows],
                          ["initialize", "initialized", "account/read", "account/rateLimits/read"] * 2)
         self.assertEqual([r["home"] for r in rows], [profiles[0]] * 4 + [profiles[1]] * 4)
-        self.assertEqual(rows[2]["params"], {"refreshToken": True})
+        self.assertEqual(rows[2]["params"], {"refreshToken": False})
 
     def test_no_subscription_login_and_api_key_login_are_rejected(self):
         for mode in ("signedout", "apikey"):

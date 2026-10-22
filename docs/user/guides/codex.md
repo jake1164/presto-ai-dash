@@ -42,8 +42,8 @@ subscription allowances.
 ## What it reads
 
 Each fresh probe starts a bounded local app-server process, initialises it,
-asks `account/read` to use the supported token refresh, and then reads
-`account/rateLimits/read`. It closes and reaps only its own process
+asks `account/read` who is signed in (without asking Codex to refresh its
+token), and then reads `account/rateLimits/read`. It closes and reaps only its own process
 afterwards.
 
 No thread, turn, model prompt, credit purchase or quota-reset action is

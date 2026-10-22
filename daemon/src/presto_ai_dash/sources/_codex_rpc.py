@@ -132,7 +132,7 @@ def read_subscription(executable, home="", timeout=15):
         session.request("initialize", {"clientInfo": {
             "name": "presto_ai_dash", "title": "Presto AI Dash", "version": "0.1.0"}})
         session._send({"method": "initialized"})
-        account = session.request("account/read", {"refreshToken": True}).get("account")
+        account = session.request("account/read", {"refreshToken": False}).get("account")
         if not isinstance(account, dict) or account.get("type") != "chatgpt":
             raise CodexReportingError("Sign into Codex with ChatGPT in this profile; API keys do not report subscription limits")
         # Never return account identity, tokens, prompts, or raw error payloads.

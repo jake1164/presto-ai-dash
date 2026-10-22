@@ -1,0 +1,55 @@
+# Runs the daemon's unit tests on every push to main and every pull request.
+#
+# The suite is pure Python and touches only loopback and temporary files, so
+# it needs nothing but the daemon's one dependency. Nothing here deploys,
+# publishes or reads a secret, and the token can only read the repository.
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: Python ${{ matrix.python }} on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The oldest Python the daemon supports, and the one the image uses,
+          # on Linux; and the development machine's system.
+          - os: ubuntu-latest
+            python: "3.11"
+          - os: ubuntu-latest
+            python: "3.13"
+          - os: windows-latest
+            python: "3.13"
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install the daemon's dependency
+        run: python -m pip install "cryptography>=46"
+
+      - name: Run the tests
+        working-directory: daemon
+        run: python -m unittest discover -s tests -q

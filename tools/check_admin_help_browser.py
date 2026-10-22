@@ -88,16 +88,22 @@ def start_daemon(directory, device_port, admin_port):
                os.path.join(directory, "throwaway.key").replace("\\", "/")))
     environment = dict(os.environ)
     environment["PYTHONPATH"] = os.path.join(REPO_ROOT, "daemon", "src")
-    process = subprocess.Popen(
-        [os.path.join(REPO_ROOT, ".venv", "Scripts", "python.exe"), "-m",
-         "presto_ai_dash.app", "--config", config, "--admin"],
-        cwd=REPO_ROOT, env=environment,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    # The daemon's output goes to a file in the temporary directory: a pipe
+    # nobody reads would fill up and stop the daemon.
+    log_path = os.path.join(directory, "daemon.log")
+    python = (os.path.join(REPO_ROOT, ".venv", "Scripts", "python.exe") if os.name == "nt"
+              else os.path.join(REPO_ROOT, ".venv", "bin", "python"))
+    with open(log_path, "wb") as log_file:
+        process = subprocess.Popen(
+            [python, "-m", "presto_ai_dash.app", "--config", config, "--admin"],
+            cwd=REPO_ROOT, env=environment,
+            stdout=log_file, stderr=subprocess.STDOUT)
     url = "http://127.0.0.1:%d/" % admin_port
     for _ in range(80):
         if process.poll() is not None:
-            raise SystemExit("the throwaway daemon stopped: %s" %
-                             process.stdout.read().decode("utf-8", "replace"))
+            with open(log_path, "rb") as log_file:
+                raise SystemExit("the throwaway daemon stopped: %s" %
+                                 log_file.read().decode("utf-8", "replace"))
         try:
             with urlopen(url, timeout=1):
                 return process, url

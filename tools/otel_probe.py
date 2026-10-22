@@ -20,12 +20,16 @@ loopback address only. Use the HTTP/JSON protocol: it needs no extra library.
 """
 
 import argparse
-import gzip
 import json
 import sys
+import zlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MAX_BODY = 5 * 1024 * 1024
+# A compressed body is held to the same size once it is expanded; a few
+# kilobytes of gzip can otherwise stand for gigabytes.
+MAX_EXPANDED = MAX_BODY
+MAX_LINE = 400
 PATHS = {"/v1/metrics": "metrics", "/v1/logs": "logs", "/v1/traces": "traces"}
 
 # Values that are safe to show: no identity, no content.
@@ -80,6 +84,28 @@ def _attributes(items):
         if isinstance(item, dict) and isinstance(item.get("key"), str):
             pairs.append((item["key"], _plain(item.get("value"))))
     return pairs
+
+
+def printable(text):
+    """``text`` with everything but printable ASCII replaced, and one line long.
+
+    Names and values come from whatever sent the request. A control character
+    in one (an escape sequence, say) would otherwise be interpreted by the
+    terminal that shows it.
+    """
+    clean = "".join(ch if " " <= ch <= "~" else "?" for ch in str(text))
+    return clean if len(clean) <= MAX_LINE else clean[:MAX_LINE - 3] + "..."
+
+
+def inflate(raw, limit=MAX_EXPANDED):
+    """The gunzipped ``raw``; ValueError when it would expand past ``limit``."""
+    expander = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    data = expander.decompress(raw, limit + 1)
+    if len(data) > limit or expander.unconsumed_tail:
+        raise ValueError("expands to more than %d bytes" % limit)
+    if not expander.eof:
+        raise EOFError("the compressed data ends early")
+    return data
 
 
 class Tally(object):
@@ -286,9 +312,9 @@ class ProbeHandler(BaseHTTPRequestHandler):
             return
         try:
             if (self.headers.get("Content-Encoding") or "").lower() == "gzip":
-                raw = gzip.decompress(raw)
+                raw = inflate(raw)
             payload = json.loads(raw.decode("utf-8"))
-        except (OSError, ValueError, EOFError, UnicodeError):
+        except (OSError, ValueError, EOFError, UnicodeError, zlib.error, RecursionError):
             self.server.out("%s: the body was not valid JSON (or gzip)" % header)
             self._reply(400, b'{"error":"invalid body"}')
             return
@@ -302,7 +328,8 @@ def make_server(port, out=print):
     """The listener on the loopback address. ``out`` receives each line shown."""
     import time
     server = ThreadingHTTPServer(("127.0.0.1", port), ProbeHandler)
-    server.out = out
+    # Everything shown passes the filter, whatever a request put in a name.
+    server.out = lambda text: out(printable(text))
     server.counts = {}
     server.clock = lambda: time.strftime("%H:%M:%S")
     return server

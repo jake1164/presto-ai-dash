@@ -5,6 +5,7 @@ Private device configuration and firmware files are deliberately outside it.
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -17,13 +18,27 @@ REVISION_TARGET = "/ai_dash_files/revision.txt"
 REVISION_CHARS = 12
 
 
+_MODULE_NAME = re.compile(r"^[A-Za-z0-9_]+\.py$")
+
+
+def is_private_name(name):
+    """Whether a file in ``presto/`` could hold the device's private settings.
+
+    Not just ``secrets.py`` and ``config.py``: a copy or a backup of either
+    (``secrets_old.py``, ``my_secrets.py``, ``config-backup.py``) is private
+    too, and is never uploaded.
+    """
+    lowered = name.lower()
+    return "secret" in lowered or lowered.startswith("config")
+
+
 def app_files(root=ROOT):
     """Source -> installed path; new public app modules join automatically."""
     folder = Path(root) / "presto"
     result = {}
     for source in sorted(folder.glob("*.py")):
-        name = source.name.lower()
-        if name == "secrets.py" or name.startswith("config."):
+        # Only plain module names; nothing an editor or a person left behind.
+        if not _MODULE_NAME.match(source.name) or is_private_name(source.name):
             continue
         if source.is_symlink():
             raise ValueError("app files must not be symbolic links")

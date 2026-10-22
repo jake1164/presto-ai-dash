@@ -214,9 +214,39 @@ def watch(runner):
             runner.publish(runner.pixels, runner.led, runner.error)
 
 
+def request_refusal(host, origin, content_type, port, method):
+    """Why a request must be refused, or ``None`` when it may proceed.
+
+    The preview holds the real device token and drives the real daemon, so a
+    web page the developer happens to visit must not be able to drive it:
+    only the preview's own address is answered (which defeats DNS rebinding,
+    where a hostile name resolves to 127.0.0.1), a browser's cross-site
+    request is turned away by its Origin, and a write must be JSON, which a
+    cross-site form or ``text/plain`` request cannot be.
+    """
+    names = ("127.0.0.1:%d" % port, "localhost:%d" % port)
+    if (host or "").lower() not in names:
+        return "unexpected Host"
+    if origin is not None and origin not in tuple("http://" + name for name in names):
+        return "foreign Origin"
+    if method == "POST" and (content_type or "").split(";")[0].strip().lower() != "application/json":
+        return "a POST must be application/json"
+    return None
+
+
 def make_handler(runner):
     class Handler(BaseHTTPRequestHandler):
+        def _refused(self):
+            reason = request_refusal(self.headers.get("Host"), self.headers.get("Origin"),
+                                     self.headers.get("Content-Type"),
+                                     self.server.server_address[1], self.command)
+            if reason:
+                self._send(403, reason.encode("ascii"), "text/plain")
+            return bool(reason)
+
         def do_GET(self):
+            if self._refused():
+                return
             parts = urlsplit(self.path)
             query = parse_qs(parts.query)
             if parts.path == "/":
@@ -234,6 +264,8 @@ def make_handler(runner):
             self._send(404, b"not found", "text/plain")
 
         def do_POST(self):
+            if self._refused():
+                return
             try:
                 length = int(self.headers.get("Content-Length", "0"))
                 body = json.loads(self.rfile.read(min(length, 65536)) or b"{}")

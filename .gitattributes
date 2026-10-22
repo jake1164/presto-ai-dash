@@ -1,0 +1,13 @@
+# Text files are LF in the repository and in every checkout, so a Windows
+# checkout is byte-for-byte the same as a Linux one (the device bundle's
+# revision is a hash of these bytes).
+* text=auto eol=lf
+
+# Binary files are never converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary

@@ -175,6 +175,43 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("api_request", "\n".join(self.lines))
 
+    def test_a_gzip_bomb_is_refused_and_the_server_carries_on(self):
+        # A few kilobytes that expand past the limit.
+        bomb = gzip.compress(b" " * (probe.MAX_EXPANDED + 1024))
+        self.assertLess(len(bomb), probe.MAX_BODY)
+        status, _ = self.post("/v1/metrics", bomb, {"Content-Encoding": "gzip"}, raw=True)
+        self.assertEqual(status, 400)
+        status, _ = self.post("/v1/metrics", metrics_payload())
+        self.assertEqual(status, 200)
+
+    def test_a_body_just_inside_the_limit_is_expanded(self):
+        data = probe.inflate(gzip.compress(b"x" * 1000), limit=1000)
+        self.assertEqual(len(data), 1000)
+        with self.assertRaises(ValueError):
+            probe.inflate(gzip.compress(b"x" * 1001), limit=1000)
+
+    def test_a_truncated_gzip_body_is_a_400(self):
+        body = gzip.compress(json.dumps(logs_payload()).encode("utf-8"))[:-6]
+        status, _ = self.post("/v1/logs", body, {"Content-Encoding": "gzip"}, raw=True)
+        self.assertEqual(status, 400)
+
+    def test_control_characters_in_names_never_reach_the_terminal(self):
+        escape = chr(27)
+        payload = {"resourceMetrics": [{"scopeMetrics": [{"metrics": [
+            {"name": "evil" + escape + "[2J" + chr(7) + "name",
+             "sum": {"dataPoints": [{"asInt": "1", "attributes": [
+                 {"key": "key" + escape + "[31m", "value": {"stringValue": "v"}}]}]}}]}]}]}
+        status, _ = self.post("/v1/metrics", payload)
+        self.assertEqual(status, 200)
+        text = "".join(self.lines)
+        self.assertIn("evil", text)
+        for character in text:
+            self.assertTrue(" " <= character <= "~", repr(character))
+
+    def test_one_line_is_never_longer_than_the_limit(self):
+        self.server.out("x" * 5000)
+        self.assertEqual(len(self.lines[-1]), probe.MAX_LINE)
+
     def test_protobuf_is_counted_not_decoded_and_the_hint_names_the_fix(self):
         status, _ = self.post("/v1/metrics", b"\x0a\x00", {"Content-Type": "application/x-protobuf"},
                               raw=True)

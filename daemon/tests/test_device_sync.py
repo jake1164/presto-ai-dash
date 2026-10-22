@@ -44,6 +44,32 @@ class BundleTests(unittest.TestCase):
         self.assertNotEqual(changed["revision"], first["revision"])
         self.assertNotIn("/main.py", changed["files"])
 
+    def test_copies_and_backups_of_private_files_are_never_uploaded(self):
+        before = bundle.snapshot(self.root)
+        for name in ("secrets_old.py", "my_secrets.py", "config-backup.py",
+                     "config_old.py", "Secrets.PY", "SECRETS.py", "ConfigCopy.py"):
+            (self.root / "presto" / name).write_text("token = 'private'", encoding="utf-8")
+        after = bundle.snapshot(self.root)
+        self.assertEqual(set(after["files"]), set(before["files"]))
+        self.assertEqual(after["revision"], before["revision"])
+        for name, data in after["files"].items():
+            self.assertNotIn(b"private", data, name)
+
+    def test_only_plain_module_names_are_uploaded(self):
+        before = bundle.snapshot(self.root)
+        for name in ("helper.py.bak", "notes.txt", "my helper.py", "edit~.py", ".hidden.py",
+                     "new-helper.py"):
+            (self.root / "presto" / name).write_text("value = 5", encoding="utf-8")
+        self.assertEqual(set(bundle.snapshot(self.root)["files"]), set(before["files"]))
+
+    def test_the_real_app_inventory_is_what_the_device_runs(self):
+        files = set(bundle.snapshot()["files"])
+        for name in ("main", "ui", "home", "cards", "net", "gestures", "popup", "alerts", "ticks"):
+            target = "/ai_dash_files/ai_dash_app.py" if name == "main" else "/ai_dash_files/%s.py" % name
+            self.assertIn(target, files)
+        self.assertFalse([target for target in files
+                          if "secret" in target.lower() or "config" in target.lower()])
+
     def test_the_revision_file_carries_the_revision_and_is_not_part_of_it(self):
         current = bundle.snapshot(self.root)
         written = current["files"][bundle.REVISION_TARGET].decode("ascii").strip()

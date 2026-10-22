@@ -1,3 +1,11 @@
+> Public, user-facing version: <https://jake1164.github.io/presto-ai-dash/concepts/quotas-and-provenance/>, <https://jake1164.github.io/presto-ai-dash/reference/status-payload/>. This file is the internal reference and may go into more detail.
+>
+> Corrections (2026-10-21):
+>
+> - Codex: the login routes exist in the admin API without controls on the page (the table below says "pending").
+> - Claude: graphical-panel coverage was settled on 2026-10-20 (the panel does not run the status line); the usage cache reader gives panel users quota.
+> - The Presto Home no longer puts quota accounts first: rows follow the saved account order, and a local service among quota accounts is a compact one-line row (2026-10-20).
+
 # Cloud accounts and quota readings
 
 Add and manage accounts at **http://127.0.0.1:8788**. Each account has its own

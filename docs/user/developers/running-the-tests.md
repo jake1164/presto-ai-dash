@@ -73,9 +73,11 @@ environment so the project environment is untouched:
 
 ```bash
 python -m venv .venv-docs
-.venv/Scripts/python -m pip install -r docs/requirements.txt
-.venv/Scripts/python -m mkdocs build --strict
+.venv-docs/Scripts/python -m pip install -r docs/requirements.txt
+.venv-docs/Scripts/mkdocs build --strict
 ```
+
+On macOS or Linux use `.venv-docs/bin/` in place of `.venv-docs/Scripts/`.
 
 The strict build fails on a broken internal link, a page that is not in the
 navigation, or any warning at all. The site is written from
@@ -87,6 +89,32 @@ in CI. Locally, if lychee is installed:
 ```bash
 lychee --no-progress --timeout 20 --max-retries 1 --exclude-loopback "docs/user/**/*.md"
 ```
+
+After a build, `tools/check_doc_anchors.py` checks that every help link of
+the admin page points at an anchor that exists in the built site:
+
+```bash
+.venv/Scripts/python tools/check_doc_anchors.py
+```
+
+## The browser checks
+
+`tools/check_admin_help_browser.py` opens the admin page in a real browser,
+against a throwaway daemon on a temporary database, and checks the help
+links, the keyboard, the phone-width layout and the alert settings. The
+browser checks need Playwright, which is NOT needed for the test suite and
+is not a dependency of the project. Install it into a throwaway environment
+rather than into `.venv`:
+
+```bash
+python -m venv .venv-browser
+.venv-browser/Scripts/python -m pip install playwright
+.venv-browser/Scripts/python -m playwright install chromium
+.venv-browser/Scripts/python tools/check_admin_help_browser.py
+```
+
+The throwaway daemon itself still runs with the repository's `.venv`; only
+the checker needs Playwright. Delete `.venv-browser` when you are done.
 
 ## Before you call the work done
 

@@ -1,3 +1,11 @@
+> Public, user-facing version: <https://jake1164.github.io/presto-ai-dash/concepts/sources/>, <https://jake1164.github.io/presto-ai-dash/developers/how-a-source-works/>. This file is the internal reference and may go into more detail.
+>
+> Corrections (2026-10-21):
+>
+> - Seven source types are registered, not five: `fake`, `ollama`, `litellm`, `opencode_go`, `ollama_cloud`, `codex` and `claude`.
+> - Claude's terminal export is live verified (M9), not pending.
+> - "Adding a source" now has a full guide and a template that runs (`daemon/templates/source_template.py`, kept honest by `daemon/tests/test_source_template.py`): see How a source works and The worked example on the site.
+
 # Sources
 
 The daemon ships five registered sources: `fake`, `ollama`, `litellm`,

@@ -1,3 +1,11 @@
+> Historical planning document (written about 2026-10-09, before Milestone 0, with later updates to 2026-10-20); the current state is in [docs/milestones.md](milestones.md) and the [documentation site](https://jake1164.github.io/presto-ai-dash/).
+>
+> Corrections (2026-10-21):
+>
+> - Codex, Claude and OpenCode Go subscription monitoring, described below as "now planned in M6-M11", is built (M7 to M11).
+> - The optional Docker image ("v0.1" below) is built: `Dockerfile` and `compose.yaml`.
+> - Ollama tokens/sec arithmetic, described below as planned and not implemented, was implemented in M4.
+
 # Implementation Readiness
 
 Status of the readiness pass against `presto_ai_dash_project_plan.md`.

@@ -16,11 +16,12 @@ one service in detail, or tap a row to jump straight to its card.
 
 ![The Presto showing the Home list: OpenCode Go, Codex and Claude with their quota percentages and bars, then Ollama Cloud, Ollama and LiteLLM](../images/device-home.jpg){ width="420" }
 
-| | |
-| --- | --- |
-| ![The OpenCode Go card: 5-hour, weekly and monthly windows with percentages, bars with warning and critical marks, and reset countdowns](../images/device-opencode-go.jpg){ width="300" } | ![The Codex card: the weekly window at 36 percent, reset countdown, banked reset credits and the next expiry](../images/device-codex.jpg){ width="300" } |
-| ![The Claude card in a near-limit state: 5-hour and weekly bars, last use, token totals and included credit](../images/device-claude.jpg){ width="300" } | ![The Ollama Cloud card: requests, tokens and spend for the period](../images/device-ollama-cloud.jpg){ width="300" } |
-| ![The Ollama card: no model loaded and seven models available](../images/device-ollama.jpg){ width="300" } | ![The LiteLLM card: requests, tokens, spend, errors and the top model for today](../images/device-litellm.jpg){ width="300" } |
+![The OpenCode Go card: 5-hour, weekly and monthly windows with percentages, bars with warning and critical marks, and reset countdowns](../images/device-opencode-go.jpg){ width="300" }
+![The Codex card: the weekly window at 36 percent, reset countdown, banked reset credits and the next expiry](../images/device-codex.jpg){ width="300" }
+![The Claude card in a near-limit state: 5-hour and weekly bars, last use, token totals and included credit](../images/device-claude.jpg){ width="300" }
+![The Ollama Cloud card: requests, tokens and spend for the period](../images/device-ollama-cloud.jpg){ width="300" }
+![The Ollama card: no model loaded and seven models available](../images/device-ollama.jpg){ width="300" }
+![The LiteLLM card: requests, tokens, spend, errors and the top model for today](../images/device-litellm.jpg){ width="300" }
 
 These are photographs of a real Presto, so reflections and the camera's colour
 rendering show; the display itself is sharper and its purple is more purple.

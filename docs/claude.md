@@ -1,3 +1,5 @@
+> Public, user-facing version: <https://jake1164.github.io/presto-ai-dash/guides/claude/>. This file is the internal reference and may go into more detail.
+
 # Claude subscription source
 
 Claude is a reusable, UI-managed source for Claude Code's documented 5-hour

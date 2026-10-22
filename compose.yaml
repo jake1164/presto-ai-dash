@@ -5,7 +5,9 @@
 #
 # The device port (8787) is published on the LAN, so the Presto can poll it.
 # The admin page is published on 127.0.0.1 only: it is reachable from this
-# machine and from nowhere else. See docs/docker.md.
+# machine and from nowhere else. See
+# https://jake1164.github.io/presto-ai-dash/getting-started/install-with-docker/
+# (source: docs/user/getting-started/install-with-docker.md).
 
 services:
   dash:

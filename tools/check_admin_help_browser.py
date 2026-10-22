@@ -5,13 +5,23 @@ temporary database and a temporary key file, all in a temporary directory,
 on ports that nothing else uses. The live dash.toml and dash.db are never
 read or written.
 
-    .venv/Scripts/python tools/check_admin_help_browser.py
+    .venv-browser/Scripts/python tools/check_admin_help_browser.py
 
 It checks that every help link points at the right page and anchor (the
 href is asserted; the live site is never needed), that the links can be
 reached with the keyboard, that the page has no horizontal overflow at
 phone width, that the sound switch is off by default and that the new
 mute length validates and saves.
+
+The browser checks need Playwright, which is NOT needed for the test suite
+and is not a dependency of the project. Install it into a throwaway
+environment rather than into .venv, and run this script with that
+environment's Python (the throwaway daemon still runs with .venv):
+
+    python -m venv .venv-browser
+    .venv-browser/Scripts/python -m pip install playwright
+    .venv-browser/Scripts/python -m playwright install chromium
+    .venv-browser/Scripts/python tools/check_admin_help_browser.py
 """
 
 import os

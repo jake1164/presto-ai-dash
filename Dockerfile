@@ -59,5 +59,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/healthz', timeout=3).read()"]
 
 # The admin page listens on the loopback address unless DASH_ADMIN_HOST says
-# otherwise. See docs/docker.md.
+# otherwise. See
+# https://jake1164.github.io/presto-ai-dash/getting-started/install-with-docker/
+# (source: docs/user/getting-started/install-with-docker.md).
 CMD ["python", "-m", "presto_ai_dash.app", "--admin"]

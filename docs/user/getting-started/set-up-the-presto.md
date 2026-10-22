@@ -34,6 +34,7 @@ or with `mpremote`:
 | `presto/cards.py` | `/ai_dash_files/cards.py` |
 | `presto/gestures.py` | `/ai_dash_files/gestures.py` |
 | `presto/alerts.py` | `/ai_dash_files/alerts.py` |
+| `presto/popup.py` | `/ai_dash_files/popup.py` |
 | `presto/ui.py` | `/ai_dash_files/ui.py` |
 | `examples/sample-status.json` | `/ai_dash_files/sample-status.json` |
 

@@ -24,9 +24,12 @@ Codex owns its OAuth credential cache and keychain, and refreshes them
 itself. The dashboard never reads or copies a credential file into its
 database, and there is no API key to paste into the source settings.
 
-You can also sign in, cancel and sign out from the admin page for a selected
-Codex profile. The daemon starts a bounded app-server process, returns an
-authorization URL or a verification code, and stores no OAuth credential.
+Sign in with Codex's own ChatGPT login flow. The daemon's admin API also has
+routes to start a browser or device-code sign-in, cancel it and sign out for
+a selected Codex profile: the daemon starts a bounded app-server process,
+returns an authorization URL or a verification code, and stores no OAuth
+credential. The admin page has no buttons for these routes yet, so in
+practice you sign in with Codex itself.
 
 An API-key login is refused for this source, because it cannot report
 subscription allowances.
@@ -96,7 +99,7 @@ fabricates a new zero reading.
 | "Codex executable" errors | Set the path to the `codex` binary, or to the VS Code extension binary |
 | The same account twice | Both point at the same profile directory; give one its own |
 | The reading is stale | The probe failed; the card keeps the last known quota and says so |
-| Sign-in fails | Use the dashboard's sign-in, or Codex's own ChatGPT login flow |
+| Sign-in fails | Sign in again with Codex's own ChatGPT login flow |
 
 The **Status** tab names the last problem in plain words, and
 [the troubleshooting pages](../troubleshooting/stale-readings.md) explain the

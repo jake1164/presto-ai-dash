@@ -1,3 +1,13 @@
+> Public, user-facing version: <https://jake1164.github.io/presto-ai-dash/developers/architecture/>. This file is the internal reference and may go into more detail.
+>
+> Corrections (2026-10-21):
+>
+> - There is a write API: `POST /api/v1/ingest` (pushed readings, off by default) and `POST /api/v1/alerts/<id>` (one service's alerts on/off, from the Presto). There are also `GET /api/v1/cards/<id>`, `GET /api/v1/status?cards=lazy` and the unauthenticated `GET /healthz`.
+> - Alert evaluation is built (M12): `alert_policy.py` maps percentages to statuses; the "draft" and "planned beyond M2" notes below are historical.
+> - Seven source types are implemented, including Codex, Claude, OpenCode Go and Ollama Cloud; remote collectors push readings over the ingest route.
+> - The optional Docker image is built; the tray runner and binaries are not.
+> - The admin listener binds to loopback by default and can be bound elsewhere with an allowed-host list. The Presto app also has `popup.py` (pop-to-top rules).
+
 # Architecture
 
 ## Runtime Architecture

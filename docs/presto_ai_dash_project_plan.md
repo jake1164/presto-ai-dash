@@ -1,3 +1,11 @@
+> Historical planning document (written about 2026-10-09 and 2026-10-10, with status lines updated to 2026-10-20); the current state is in [docs/milestones.md](milestones.md) and the [documentation site](https://jake1164.github.io/presto-ai-dash/).
+>
+> Corrections (2026-10-21):
+>
+> - M12 (alert polish) is done; M13 (the demo release) has not started.
+> - The Codex sign-in, cancel and sign-out exist as daemon admin API routes; the admin page has no controls for them.
+> - The optional Docker image ("v0.1" below) is built: `Dockerfile` and `compose.yaml`. The tray runner, binaries and the `presto-ai-dash-daemon` command name are still plans.
+
 # Presto AI Dash - Project Plan
 
 ## 1. Project summary

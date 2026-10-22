@@ -1,3 +1,11 @@
+> Public, user-facing version: <https://jake1164.github.io/presto-ai-dash/getting-started/install-the-daemon/>, <https://jake1164.github.io/presto-ai-dash/getting-started/set-up-the-presto/>, <https://jake1164.github.io/presto-ai-dash/developers/preview-and-device/>. This file is the internal reference and may go into more detail.
+>
+> Corrections (2026-10-21):
+>
+> - The connected runtime is built (no longer "planned"), and so is the optional Docker image: see Install with Docker on the site. Tray runner, installers and the `presto-ai-dash-daemon` name are still not built.
+> - The file table under "First installation" lacks `presto/popup.py` (`/ai_dash_files/popup.py`), which `main.py` imports; the sync tool copies it. The static demo walkthrough there describes the M1 preview.
+> - The admin page binds to loopback by default; `admin.host` / `DASH_ADMIN_HOST` with an allowed-host list can bind it elsewhere (for Docker).
+
 # Setup
 
 ## Requirements

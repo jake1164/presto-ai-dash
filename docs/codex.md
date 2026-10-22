@@ -1,3 +1,9 @@
+> Public, user-facing version: <https://jake1164.github.io/presto-ai-dash/guides/codex/>. This file is the internal reference and may go into more detail.
+>
+> Corrections (2026-10-21):
+>
+> - The browser and device-code sign-in, cancellation and logout exist as daemon admin API routes, but the admin page has no controls for them; sign in with Codex's own login flow.
+
 # Codex subscription source
 
 The first M8 delivery reads live **Codex** allowance windows through the

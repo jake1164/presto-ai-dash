@@ -1,5 +1,40 @@
 # Milestone tracker
 
+## Current status (2026-10-21)
+
+**Built:**
+
+- **M0 to M12**: the repository, the static and connected Presto app, the
+  daemon with SQLite history, the Ollama and LiteLLM sources, local
+  configuration with encrypted keys, the reusable quota model, Codex,
+  Claude, OpenCode Go and Ollama Cloud, the live quota Home, and alert polish
+  (M12 with M12b per-service alerts and a master switch, M12c the bell on
+  each card, and the mute that expires). M6 was a readiness review; M8 has
+  acceptance work left (below).
+- **Phases 1 to 5d, 7 and 9** of the
+  [remote ingest plan](remote-ingest-plan.md): pushed observations and remote
+  tokens, freshness hints, the Claude activity reader, the Claude usage cache
+  reader, the documentation site with in-app help links, and banked reset
+  credits. Also the Home overflow strip, the admin page's three tabs, cards
+  v2 with tiles and lazy card detail, and tapping rows and page dots.
+- **Docker**: `Dockerfile`, `compose.yaml`, the admin bind address and
+  allowed hosts, the health check.
+- **The documentation site**: <https://jake1164.github.io/presto-ai-dash/>,
+  built from `docs/user/`.
+
+**Open:** Phase 5c (push the Claude activity and usage-cache readers, for a
+containerised daemon), Phase 6 (Codex over push), Phase 8 (OpenTelemetry;
+researched, decision gate pending), device diagnostics (`X-Presto-Diag`),
+several Presto devices, M8 acceptance (real expired-login recovery, a second
+account, sign-in controls on the admin page), and M13, the demo release. The
+live list is the backlog in [the remote ingest plan](remote-ingest-plan.md).
+
+The daemon suite has **1409 tests** (3 skipped) as of 2026-10-21. The sections
+below are the historical record; dated corrections mark statements that are
+no longer true.
+
+## Milestones
+
 Status of each milestone in `presto_ai_dash_project_plan.md` §16.
 
 | # | Milestone | Status | Notes |
@@ -22,6 +57,22 @@ Status of each milestone in `presto_ai_dash_project_plan.md` §16.
 | 12 | Alert polish | **done** | Daemon-side percent → status mapping (warning 80%, critical 95%, rate limited 100%) with configurable thresholds, per-service chirps, LED priority, quiet hours judged by the daemon's clock, mute, the alarm pop-to-top with its debounce rules, and the admin Alerts section. The sound is off until it is turned on, and a long-press mute expires (four hours by default) with a chip that says how long is left. |
 | 13 | Demo release | not started | Setup guide, screenshots, sample config, supported subscription paths, limitations, and troubleshooting. |
 
+Corrections (2026-10-21):
+
+- **Local source configuration:** the admin page binds to loopback by
+  default, but since 2026-10-20 it can bind elsewhere (`admin.host`,
+  `DASH_ADMIN_HOST`) with an explicit token and allowed-host list, for Docker.
+- **M8:** the browser and device-code sign-in, cancellation and logout exist
+  as daemon admin API routes, but the admin page has no controls for them;
+  sign in with Codex's own login flow.
+- **M9:** graphical-panel coverage was settled on 2026-10-20: the VS Code
+  panel does not run the status line. Panel users get quota from the usage
+  cache reader (Phase 5d) and activity from the local logs reader (Phase 5).
+- **M13:** the setup guide, troubleshooting, limitations and the supported
+  paths now exist on the documentation site, and the README and the site
+  carry photographs of the real device. The release itself has not started;
+  its checklist is in [the remote ingest plan](remote-ingest-plan.md#m13-demo-release).
+
 The 2026-10-11 planning update prioritizes **subscription allowances** for
 OpenAI/Codex, Claude, and **OpenCode's own Go subscription** before polish and
 release. Former M6/M7 are now M12/M13; completed M0–M5 retain their scope.
@@ -32,6 +83,10 @@ and Claude's graphical-panel coverage remain pending. See
 readiness gaps, and acceptance criteria. API billing and application usage
 monitoring remain separate work. Stop after a requested readiness/review
 deliverable unless implementation is explicitly requested.
+
+Correction (2026-10-21): Claude's graphical-panel question is settled (see
+M9 above), and Codex's login routes exist in the admin API without controls
+on the page; M8's acceptance work is what remains.
 
 ## Milestone 6 readiness result — 2026-10-11
 
@@ -288,6 +343,9 @@ the host suite to 285 passing tests. Three subsequent refresh-recovery tests bri
 the current complete suite to **288 passing tests**. The prior cloud/device suite
 breakdown is below; its original checkpoint count is preserved.
 
+Correction (2026-10-21): these counts are historical. The suite now has
+1409 tests (3 skipped).
+
 | Suite | Tests |
 | --- | --- |
 | `test_cards.py` | 35 |
@@ -377,3 +435,8 @@ pending because no browser surface was connected in the implementation session.
   v0.2 optional separate tray runner; v1 binaries/installers if useful.
   These targets are plans, not delivered features. The planned daemon command
   is `presto-ai-dash-daemon`; today's command is `presto-ai-dash`.
+  Correction (2026-10-21): the optional Docker image is delivered
+  (`Dockerfile`, `compose.yaml`, see
+  [Install with Docker](https://jake1164.github.io/presto-ai-dash/getting-started/install-with-docker/)).
+  The tray runner, binaries and the `presto-ai-dash-daemon` name are still
+  plans.

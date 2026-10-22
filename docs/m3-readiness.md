@@ -1,3 +1,5 @@
+> Historical planning document (written 2026-10-10); the current state is in [docs/milestones.md](milestones.md) and the [documentation site](https://jake1164.github.io/presto-ai-dash/).
+
 # M3 readiness and Luna handoff
 
 Reviewed 2026-10-10 against commit `93f1a46`.

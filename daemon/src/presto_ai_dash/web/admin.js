@@ -41,7 +41,7 @@
     "services": {page: "guides/admin-page.md", anchor: "adding-and-editing-an-account"},
     "add-source": {page: "guides/admin-page.md", anchor: "adding-and-editing-an-account"},
     "account": {page: "guides/admin-page.md", anchor: "the-accounts-own-actions"},
-    "status": {page: "troubleshooting/daemon-offline.md", anchor: "7-the-daemons-own-view"},
+    "status": {page: "guides/admin-page.md", anchor: "status"},
     "settings-panel": {page: "guides/admin-page.md", anchor: "settings"},
     "home-display": {page: "guides/home-display.md", anchor: "the-setting"},
     "remote-reports": {page: "concepts/remote-reports.md", anchor: "turning-it-on"},

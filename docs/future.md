@@ -1,3 +1,12 @@
+> Historical planning document (written about 2026-10-09, with later updates to 2026-10-20); the current state is in [docs/milestones.md](milestones.md) and the [documentation site](https://jake1164.github.io/presto-ai-dash/).
+>
+> Corrections (2026-10-21):
+>
+> - Subscription quota monitoring, described below as "not implemented yet", is built: Codex, Claude, OpenCode Go and Ollama Cloud (M7 to M11).
+> - The optional Docker image ("v0.1" below) is built. The tray runner, binaries and the new command names are still unimplemented.
+> - "Simple web preview" below exists: `tools/presto_preview/live.py` runs the real app against an emulated display in a browser.
+> - "Multiple Presto devices": the daemon already lists every client that polls it on the admin page's Status tab; per-device tokens and settings are still not built.
+
 # Future Features
 
 Deliberately out of scope for v0. Recorded here so the boundary is explicit and

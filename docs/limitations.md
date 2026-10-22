@@ -1,3 +1,9 @@
+> Public, user-facing version: <https://jake1164.github.io/presto-ai-dash/developers/preview-and-device/#what-the-preview-does-not-show>, <https://jake1164.github.io/presto-ai-dash/troubleshooting/daemon-offline/>. This file is the internal reference and may go into more detail.
+>
+> Corrections (2026-10-21):
+>
+> - The LiteLLM source is implemented (M5); "the planned LiteLLM source" below fails soft as described.
+
 # Limitations
 
 The daemon supports fake data, Ollama health, and LiteLLM routed usage. The

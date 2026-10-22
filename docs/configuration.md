@@ -1,3 +1,10 @@
+> Public, user-facing version: <https://jake1164.github.io/presto-ai-dash/guides/admin-page/>, <https://jake1164.github.io/presto-ai-dash/reference/configuration/>, <https://jake1164.github.io/presto-ai-dash/reference/ports-and-endpoints/>. This file is the internal reference and may go into more detail.
+>
+> Corrections (2026-10-21):
+>
+> - "Dashboard-managed Codex sign-in remains pending": the sign-in, cancel and sign-out routes exist in the admin API, but the page has no controls for them.
+> - Claude's real-export verification is done (live readings on 2026-10-11, M9).
+
 # Local configuration and encrypted keys
 
 Start the configuration page with the installed daemon:
@@ -27,7 +34,7 @@ Use the same browser address and port each time: `localhost` and `127.0.0.1`
 have separate cookies. The admin listener binds to loopback by default; for a
 remote headless server, use an SSH port forward to its admin port. A
 container may bind it to another address, but then it needs an explicit
-admin token and the list of names it answers to; see [Docker](docker.md).
+admin token and the list of names it answers to; see [Docker](user/getting-started/install-with-docker.md).
 The status listener remains on `daemon.host`.
 
 ### The admin bind address and the names it answers to

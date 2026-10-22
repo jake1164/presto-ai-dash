@@ -1,3 +1,9 @@
+> Historical planning document (written 2026-10-11); the current state is in [docs/milestones.md](milestones.md) and the [documentation site](https://jake1164.github.io/presto-ai-dash/).
+>
+> Corrections (2026-10-21):
+>
+> - The Claude quota export, "pending" below, was verified with live readings on 2026-10-11 (M9). The VS Code panel question was settled on 2026-10-20: the panel does not run the status line, and the usage cache reader (Phase 5d) gives panel users quota.
+
 # M6 subscription reporting readiness
 
 Reviewed 2026-10-11 against commit `d705691` on Windows.

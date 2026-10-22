@@ -144,7 +144,7 @@ Some actions belong to one account and appear inside its card:
 | --- | --- |
 | Set up / Remove Claude export | Claude |
 | Create, rotate and revoke a remote token | Claude |
-| Codex sign-in, sign-out and cancel | Codex |
+| Codex sign-in, sign-out and cancel | Codex (admin API routes only: the page has no buttons for them yet, so sign in with Codex itself) |
 
 These are the only actions in the whole project that change something on a
 provider account, and they only ever run when **you** press the button. They

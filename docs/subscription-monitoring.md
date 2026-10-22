@@ -1,3 +1,10 @@
+> Historical planning document (written 2026-10-11, with later updates to 2026-10-20); the current state is in [docs/milestones.md](milestones.md) and the [documentation site](https://jake1164.github.io/presto-ai-dash/).
+>
+> Corrections (2026-10-21):
+>
+> - "Dashboard-managed sign-in remains pending" below: the Codex sign-in routes exist in the daemon's admin API, but the admin page has no controls for them; M8 acceptance is still open.
+> - Claude's graphical-panel coverage was settled on 2026-10-20: the panel does not run the status line; the usage cache reader (Phase 5d) gives panel users quota.
+
 # Subscription quota monitoring
 
 Planning update agreed on 2026-10-11. The shared quota model, OpenCode Go adapter,

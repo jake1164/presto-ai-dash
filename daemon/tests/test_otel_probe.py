@@ -210,5 +210,33 @@ class ServerTests(unittest.TestCase):
             self.assertNotIn(secret, repr(self.server.__dict__))
 
 
+class PortFallbackTests(unittest.TestCase):
+    """Windows reserves some ports (Hyper-V, Docker): the probe must not just crash."""
+
+    def test_a_port_that_cannot_be_bound_falls_back_to_one_that_can(self):
+        import socket
+        blocker = socket.socket()
+        blocker.bind(("127.0.0.1", 0))
+        blocker.listen(1)
+        busy = blocker.getsockname()[1]
+        self.addCleanup(blocker.close)
+        server, note = probe.listen(busy, lambda line: None)
+        self.addCleanup(server.server_close)
+        self.assertNotEqual(server.server_address[1], busy)
+        self.assertEqual(server.server_address[0], "127.0.0.1")
+        self.assertIn(str(busy), note)
+        self.assertIn(str(server.server_address[1]), note)
+
+    def test_a_free_port_is_used_as_asked_with_no_note(self):
+        import socket
+        probe_socket = socket.socket()
+        probe_socket.bind(("127.0.0.1", 0))
+        free = probe_socket.getsockname()[1]
+        probe_socket.close()
+        server, note = probe.listen(free, lambda line: None)
+        self.addCleanup(server.server_close)
+        self.assertEqual(server.server_address[1], free)
+        self.assertEqual(note, "")
+
 if __name__ == "__main__":
     unittest.main()

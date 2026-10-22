@@ -294,6 +294,30 @@ def make_server(port, out=print):
     return server
 
 
+def listen(port, out=print):
+    """A server on ``port``, or on another free loopback port when that one cannot be used.
+
+    Windows reserves ranges of ports (Hyper-V and Docker Desktop do), and binding
+    one fails with WinError 10013 even though nothing is listening. Returns the
+    server and a note ("" when the asked-for port was used) saying what happened.
+    """
+    candidates = [port] + [port + 10000] if port + 10000 < 65536 else [port]
+    candidates.append(0)
+    last = None
+    for candidate in candidates:
+        try:
+            server = make_server(candidate, out)
+        except OSError as error:
+            last = error
+            continue
+        actual = server.server_address[1]
+        if actual == port:
+            return server, ""
+        return server, ("port %d could not be used here (%s); listening on %d instead"
+                        % (port, type(last).__name__ if last else "busy", actual))
+    raise last
+
+
 BANNER = """OpenTelemetry probe listening on http://127.0.0.1:{port}  (loopback only)
 
 To test the Claude Code surface you use, give it these environment variables
@@ -319,7 +343,10 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--port", type=int, default=4318)
     args = parser.parse_args(argv)
-    server = make_server(args.port)
+    server, note = listen(args.port)
+    if note:
+        print("NOTE: " + note)
+        print()
     print(BANNER.format(port=server.server_address[1]), flush=True)
     try:
         server.serve_forever()

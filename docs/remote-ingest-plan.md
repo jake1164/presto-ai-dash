@@ -32,7 +32,7 @@ previous one passes its tests.
 | 5d | Claude usage cache reader: quota for VS Code panel users from `~/.claude.json` | Done (2026-10-20) |
 | 6 | Codex over push | Open (optional; needed for Codex with a containerised daemon) |
 | 7 | Documentation site on GitHub Pages (7a site and user docs, 7b developer docs and the source template, 7c in-app help links) | Done (7a and 7b 2026-10-20, 7c 2026-10-21) |
-| 8 | OpenTelemetry activity detail | Researched 2026-10-21; decision gate pending |
+| 8 | OpenTelemetry activity detail | Closed 2026-10-21: the VS Code panel does not emit (probe result in the backlog item) |
 | 9 | Banked reset credits (Codex) | Done (2026-10-20); the envelope part is deferred to Phase 6 |
 
 ## Hard rules
@@ -273,7 +273,7 @@ service.
 
 The research and the gate (2026-10-21; backlog item 4):
 
-4. **Phase 8, OpenTelemetry (researched 2026-10-21; gate pending).** Official and
+4. **Phase 8, OpenTelemetry (CLOSED 2026-10-21: the VS Code panel does not emit).** Official and
    documented (code.claude.com/docs/en/monitoring-usage): `CLAUDE_CODE_ENABLE_TELEMETRY=1`
    plus `OTEL_*` variables; metrics `claude_code.cost.usage` (USD),
    `claude_code.token.usage` (input, output, cacheRead, cacheCreation, by model),
@@ -304,6 +304,23 @@ The research and the gate (2026-10-21; backlog item 4):
      not fixed or disproved, so nobody can say. `tools/otel_probe.py` (a loopback
      listener that prints only names, counts, harmless values and PRESENT markers,
      never the email, ids or prompts; `daemon/tests/test_otel_probe.py`) answers it.
+   - **Result (2026-10-21): negative for the panel.** The probe was listening, the
+     variables were confirmed inside VS Code (`echo` showed the endpoint) and VS Code was
+     restarted with them. A message sent through the Claude panel produced no request and
+     no stray contact. The control, `claude -p` from a terminal with the same variables,
+     produced 3 requests (2 logs, 1 metrics) with `app.entrypoint` = `sdk-cli`, so the
+     probe and the variables work and the panel simply emitted nothing. That matches
+     #35105 and #72261. What the CLI carries, for the record: metrics
+     `claude_code.cost.usage`, `token.usage` (input, output, cacheRead, cacheCreation),
+     `active_time.total`, `session.count`; events `api_request` (cost_usd, tokens with
+     5-minute and 1-hour cache creation, duration_ms, ttft_ms, model, effort, speed),
+     `assistant_response`, `user_prompt`, `mcp_server_connection`, `plugin_loaded`,
+     `managed_settings_resolved`; every record has the email, ids and (redacted) prompt
+     and response attributes present. The control cost about 25,000 tokens (mostly
+     cached context), $0.09 at API rates. Phase 8 is closed: the terminal CLI alone is
+     not worth a receiver for a user who rarely runs it. Revisit only if the probe,
+     re-run after a major extension update (its banner lists the steps), shows
+     `app.entrypoint` = `claude-vscode`.
    - **Decision gate.** If the probe sees `claude_code.*` from the panel with
      `app.entrypoint` = `claude-vscode`: design an HTTP/JSON receiver on an opt-in
      port, allowlist first, summarised by hour and day, shown as labelled

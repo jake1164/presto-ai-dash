@@ -1,7 +1,6 @@
 """Loopback-only admin HTTP surface; the device token cannot edit credentials."""
 
 import hmac
-from http.server import BaseHTTPRequestHandler
 from http.cookies import CookieError, SimpleCookie
 from importlib.resources import files
 import json
@@ -9,7 +8,7 @@ import logging
 import re
 from urllib.parse import urlsplit
 
-from .api import ApiServer
+from .api import ApiServer, BoundedRequestHandler
 from .admin_sessions import AdminSessions, SESSION_SECONDS
 from .storage import ConfigurationConflict
 
@@ -104,11 +103,7 @@ def make_admin_handler(manager, token, allowed_hosts=()):
     sessions = AdminSessions(manager.storage)
     allowed = tuple(allowed_hosts or ())
 
-    class AdminHandler(BaseHTTPRequestHandler):
-        def setup(self):
-            super().setup()
-            self.connection.settimeout(3.0)
-
+    class AdminHandler(BoundedRequestHandler):
         def log_message(self, *_):
             pass
 

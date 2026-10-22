@@ -2,11 +2,13 @@
 
 import hashlib
 import hmac
+import io
 import json
 import logging
 import os
 import re
 import socket
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -96,6 +98,63 @@ class _AlertRateLimiter:
             return True
 
 
+class _DeadlineReader(io.RawIOBase):
+    """Reads a request off a socket, giving up after a total deadline.
+
+    The socket timeout alone only bounds each ``recv``: a client sending one
+    byte every few seconds would keep a handler thread for as long as it
+    liked. Here every read is also checked against a deadline for the whole
+    request.
+    """
+
+    def __init__(self, sock, deadline, io_timeout):
+        super().__init__()
+        self._sock = sock
+        self._deadline = deadline
+        self._io_timeout = io_timeout
+
+    def readable(self):
+        return True
+
+    def readinto(self, buffer):
+        remaining = self._deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("request took too long")
+        self._sock.settimeout(min(self._io_timeout, remaining))
+        return self._sock.recv_into(buffer)
+
+
+class _TimedWriter(io.RawIOBase):
+    """Writes a response with a fresh timeout, whatever the read left behind."""
+
+    def __init__(self, sock, io_timeout):
+        super().__init__()
+        self._sock = sock
+        self._io_timeout = io_timeout
+
+    def writable(self):
+        return True
+
+    def write(self, data):
+        self._sock.settimeout(self._io_timeout)
+        self._sock.sendall(data)
+        return len(data)
+
+
+class BoundedRequestHandler(BaseHTTPRequestHandler):
+    """A handler whose whole request must arrive within ``request_deadline``."""
+
+    request_deadline = 10.0
+    io_timeout = 3.0
+
+    def setup(self):
+        super().setup()
+        self.rfile.close()
+        self.rfile = io.BufferedReader(_DeadlineReader(
+            self.connection, time.monotonic() + self.request_deadline, self.io_timeout))
+        self.wfile = _TimedWriter(self.connection, self.io_timeout)
+
+
 def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                  *, ingest_enabled=None, ingest_rate_limiter=None, client_registry=None,
                  alert_writer=None, alert_rate_limiter=None, card_provider=None):
@@ -105,11 +164,7 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
     alert_limiter = (alert_rate_limiter if alert_rate_limiter is not None
                      else _AlertRateLimiter())
 
-    class StatusHandler(BaseHTTPRequestHandler):
-        def setup(self):
-            super().setup()
-            self.connection.settimeout(3.0)
-
+    class StatusHandler(BoundedRequestHandler):
         def log_message(self, fmt, *args):
             log.debug(fmt, *args)
 
@@ -394,14 +449,93 @@ class _ExclusiveHTTPServer(ThreadingHTTPServer):
     # Keep normal restart behavior elsewhere, without allowing shared listeners.
     allow_reuse_address = os.name != "nt"
     allow_reuse_port = False
+    # The default backlog of 5 refuses real clients during a connection burst.
+    request_queue_size = 128
+    # Requests handled at once. A connection over the limit is answered 503 and
+    # closed, so a flood cannot grow threads and memory without bound.
+    max_handlers = 64
+    # Requests handled at once for one client address, so one machine cannot
+    # take every slot from the others. Behind a proxy or Docker's userland
+    # proxy every client shares one address, and this is then a second total.
+    max_per_address = 16
+
+    def __init__(self, *args, **kwargs):
+        self._slots_lock = threading.Lock()
+        self._slots_used = 0
+        self._open_requests = {}
+        self._address_counts = {}
+        super().__init__(*args, **kwargs)
 
     def server_bind(self):
         if os.name == "nt":
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         super().server_bind()
 
+    def process_request(self, request, client_address):
+        address = client_address[0] if client_address else ""
+        with self._slots_lock:
+            if (self._slots_used >= self.max_handlers or
+                    self._address_counts.get(address, 0) >= self.max_per_address):
+                full = True
+            else:
+                full = False
+                self._slots_used += 1
+                self._address_counts[address] = self._address_counts.get(address, 0) + 1
+                self._open_requests[request] = address
+        if full:
+            try:
+                request.settimeout(0.5)
+                request.sendall(b"HTTP/1.0 503 Service Unavailable\r\n"
+                                b"Connection: close\r\nContent-Length: 0\r\n\r\n")
+            except OSError:
+                pass
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except BaseException:
+            self._release(request)
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._release(request)
+
+    def _release(self, request):
+        with self._slots_lock:
+            self._slots_used -= 1
+            address = self._open_requests.pop(request, None)
+            if address is not None:
+                left = self._address_counts.get(address, 0) - 1
+                if left > 0:
+                    self._address_counts[address] = left
+                else:
+                    self._address_counts.pop(address, None)
+
+    def handle_error(self, request, client_address):
+        # A client that hangs up mid-answer is routine on a LAN, not an error
+        # worth a traceback on stderr.
+        if isinstance(sys.exc_info()[1], (ConnectionError, TimeoutError)):
+            log.debug("client %s dropped the connection", client_address[0])
+            return
+        super().handle_error(request, client_address)
+
+    def abort_open_requests(self):
+        """Cut every connection still being handled, ending its blocked read."""
+        with self._slots_lock:
+            requests = list(self._open_requests)
+        for request in requests:
+            try:
+                request.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
 
 class ApiServer:
+    STOP_GRACE_SECONDS = 2.0
+
     def __init__(self, host, port, storage, shared_token, source_ids=None,
                  status_provider=None, *, ingest_enabled=None, ingest_rate_limiter=None,
                  handler_class=None, client_registry=None, alert_writer=None,
@@ -455,6 +589,16 @@ class ApiServer:
         if self._thread is not None:
             self._server.shutdown()
             self._thread.join()
+        # A client trickling bytes must not hold a shutdown hostage: give
+        # handlers a moment to finish, then cut their connections.
+        deadline = time.monotonic() + self.STOP_GRACE_SECONDS
+        with self._server._active_condition:
+            while self._server._active_handlers:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._server._active_condition.wait(remaining)
+        self._server.abort_open_requests()
         with self._server._active_condition:
             while self._server._active_handlers:
                 self._server._active_condition.wait()

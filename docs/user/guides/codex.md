@@ -94,6 +94,20 @@ A failed probe keeps the last known quota, visibly stale with a fixed
 diagnostic; a later success clears the error. Crossing a reset never
 fabricates a new zero reading.
 
+## When the daemon is somewhere else
+
+The Codex source starts `codex app-server` on the daemon's own computer and
+uses that computer's login. A daemon in a container, or on a server, has
+neither. Run the collector's `watch` mode on the computer where Codex is
+signed in: it makes the same read-only call, and pushes the limits, the reset
+credits and the credit balance to the daemon with a token for this account.
+The daemon uses a pushed reading under five minutes old instead of starting
+Codex, and shows the last one, ageing, if the collector goes quiet and there is
+no Codex to fall back on.
+
+The collector never signs in, signs out or refreshes the login. See
+[Remote collectors](remote-collectors.md).
+
 ## Troubleshooting
 
 | Symptom | What to check |
@@ -110,5 +124,6 @@ freshness rules.
 
 ## See also
 
+- [Remote collectors](remote-collectors.md)
 - [Sources](../concepts/sources.md)
 - [Quotas and where numbers come from](../concepts/quotas-and-provenance.md)

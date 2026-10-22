@@ -15,7 +15,8 @@ from .alert_policy import (apply_threshold, parse_clock, resolve_alert_settings,
                            validate_thresholds)
 from .clients import ClientRegistry
 from .codex_login import CodexLoginManager
-from .collectors import collector_info, presto_collector, served_version, update_state
+from .collectors import (collector_config_text, collector_info, presto_collector,
+                          served_version, update_state)
 from .config import (ALERT_KEYS, alert_base_settings, alert_settings,
                      ingest_enabled, overflow_rows)
 from .credentials import load_cipher
@@ -51,17 +52,24 @@ def _activity_state(activity):
     return "ok" if activity.get("complete", True) else "scanning"
 
 
+def _from_collector(reading):
+    """A note saying a reading was pushed by a collector, and from which computer."""
+    host = reading.get("reported_by")
+    return " (reported by the collector on %s)" % str(host)[:32] if host else ""
+
+
 def _activity_detail(activity):
     """Why the activity reader says what it says, in plain words."""
+    source = _from_collector(activity)
     if not activity.get("available"):
-        return str(activity.get("reason") or activity.get("message") or
-                   "unavailable")[:160]
+        return (str(activity.get("reason") or activity.get("message") or
+                    "unavailable")[:160] + source)
     if not activity.get("complete", True):
-        return "still scanning the session logs"
+        return "still scanning the session logs" + source
     last = activity.get("last_request_at")
     if not last:
-        return "no request recorded yet"
-    return "last request at %s" % str(last)
+        return "no request recorded yet" + source
+    return "last request at %s%s" % (str(last), source)
 
 
 def _cache_state(cache):
@@ -71,13 +79,14 @@ def _cache_state(cache):
 
 def _cache_detail(cache):
     """When the usage cache was read, or why it could not be read."""
+    source = _from_collector(cache)
     if not cache.get("available"):
-        return str(cache.get("message") or cache.get("reason") or
-                   "unavailable")[:160]
+        return (str(cache.get("message") or cache.get("reason") or
+                    "unavailable")[:160] + source)
     fetched = cache.get("fetched_at")
     if not fetched:
-        return "no reading yet"
-    return "fetched at %s" % str(fetched)
+        return "no reading yet" + source
+    return "fetched at %s%s" % (str(fetched), source)
 
 
 def validate_settings(cls, settings):
@@ -440,14 +449,25 @@ class SourceConfiguration:
     def create_ingest_token(self, instance_id):
         """Mint or rotate one write-only push token, shown exactly once."""
         token = self.storage.create_ingest_token(instance_id)
-        token_file = "claude-%s.token" % instance_id
-        return {"token": token,
-                "posix_snippet": presto_collector.posix_snippet(
-                    "/path/to/presto_collector.py", INGEST_URL_PLACEHOLDER,
-                    "~/.config/presto-ai-dash/" + token_file, "laptop"),
-                "powershell_snippet": presto_collector.powershell_snippet(
-                    "C:/path/to/presto_collector.py", INGEST_URL_PLACEHOLDER,
-                    "C:/Users/USERNAME/presto-ai-dash/" + token_file, "laptop")}
+        record = next((row for row in self.storage.source_instances()
+                       if row["id"] == instance_id), None)
+        service = "codex" if record and record["type"] == "codex" else "claude"
+        token_file = "%s-%s.token" % (service, instance_id)
+        result = {"token": token, "service": service, "token_file": token_file,
+                  "collector_folder": "~/.presto-ai-dash",
+                  "collector_config": collector_config_text(
+                      service, (record or {}).get("name") or service, token_file,
+                      INGEST_URL_PLACEHOLDER)}
+        if service == "claude":
+            # The terminal's status line, for Claude Code in a terminal. Codex has
+            # no status line: it is read on a timer by `watch`.
+            result["posix_snippet"] = presto_collector.posix_snippet(
+                "/path/to/presto_collector.py", INGEST_URL_PLACEHOLDER,
+                "~/.config/presto-ai-dash/" + token_file, "laptop")
+            result["powershell_snippet"] = presto_collector.powershell_snippet(
+                "C:/path/to/presto_collector.py", INGEST_URL_PLACEHOLDER,
+                "C:/Users/USERNAME/presto-ai-dash/" + token_file, "laptop")
+        return result
 
     def revoke_ingest_token(self, instance_id):
         self.storage.revoke_ingest_token(instance_id)

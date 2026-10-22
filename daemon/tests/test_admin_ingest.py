@@ -105,7 +105,10 @@ class AdminIngestTests(AdminServerBase):
 
     def test_token_is_returned_once_with_paste_ready_snippets(self):
         data = self.create_token()
-        self.assertEqual(set(data), {"token", "posix_snippet", "powershell_snippet"})
+        self.assertEqual(set(data), {"token", "posix_snippet", "powershell_snippet", "service",
+                                     "token_file", "collector_folder", "collector_config"})
+        self.assertEqual(data["service"], "claude")
+        self.assertNotIn(data["token"], data["collector_config"])
         encoded = data["powershell_snippet"].rsplit(" ", 1)[1]
         decoded = base64.b64decode(encoded).decode("utf-16-le")
         for snippet in (data["posix_snippet"], decoded):

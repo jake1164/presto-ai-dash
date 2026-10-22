@@ -813,6 +813,18 @@ class Storage:
                 self._conn.rollback()
                 raise
 
+    def latest_updated_at(self, source_id):
+        """The ``updated_at`` of a source's latest snapshot, or None when it has none.
+
+        A source whose readings can be older than its own earlier polls (the
+        Claude usage cache) keeps its next snapshot from going backwards with it.
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT updated_at FROM snapshots WHERE source_id = ? "
+                "ORDER BY updated_at DESC, id DESC LIMIT 1", (source_id,)).fetchone()
+        return _read_time(row["updated_at"]) if row else None
+
     def latest_snapshots(self):
         with self._lock:
             rows = self._conn.execute(

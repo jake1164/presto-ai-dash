@@ -158,6 +158,16 @@ reverse proxy or a private network.
 
 ### Phase 5c: push the local readers (needed for Docker and remote daemons)
 
+**Built 2026-10-22.** The collector's `watch` mode reads the activity and the
+usage cache on a timer and pushes them (`activity` and `usage_cache` envelope
+keys, cleaned by `ingest_extras.py`). The usage cache keeps Claude Code's own
+`fetched_at`, capped at the receive time and refused when over seven days old
+or in the future, as designed below. The readers live in the collector as a
+word-for-word embedded copy, refreshed by `tools/build_collector.py`. Still
+open: running it on a second real computer. The "untested on a remote host"
+notice the plan asks for is on the admin page beside the collector settings and
+in the collector guide.
+
 **Phase 5c (amended 2026-10-20; needed for Docker/remote): push the local
 readers.** Status today: the downloadable collector
 (`collectors/claude_statusline.py`) carries ONLY the terminal status-line
@@ -202,6 +212,14 @@ a manual check that it fires in the panel before building. It gives less data
 than Phase 5.
 
 ### Phase 6 (optional): Codex over push
+
+**Built 2026-10-22**, in the collector's `watch` mode rather than a second
+file (the plan's `codex_appserver.py` became a mode of `presto_collector.py`).
+`CodexSource` accepts push: a pushed reading under five minutes old replaces
+the local app-server, and an old one is shown, ageing, when this machine cannot
+read Codex. `reset_credits` and `credits` are allowed envelope keys with the
+same shape and caps as the daemon's own parsing, which now lives in
+`collectors/codex_report.py` and is shared. The original design follows.
 
 Write `collectors/codex_appserver.py` that runs on the developer machine,
 reads Codex windows through the supported app-server call already used by

@@ -118,6 +118,15 @@ quotas to your daemon. The body carries window percentages, reset times,
 evidence hashes and a host label you chose. It carries no credentials, no
 session identities and no prompt text.
 
+The collector's `watch` mode adds what the daemon's own readers would read:
+for Claude, the time of the last request, its model and surface, and request
+and token counts, and the usage cache's quota windows, included credit and
+fetch time; for Codex, the limits, the count and expiry of reset credits and
+the credit balance. It never sends a path, a project name, an account id, an
+e-mail address, an organisation, a prompt or a credential, and the daemon
+refuses a report that carries any field outside that list. The collector only
+reads: it does not sign in, refresh a login or send a prompt.
+
 A remote token is write-only for one account: it cannot read the status
 payload, list your sources or touch another account. Revoke it and that
 computer stops reporting immediately.

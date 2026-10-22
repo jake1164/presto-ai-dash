@@ -20,6 +20,17 @@ def served_version():
     return presto_collector.COLLECTOR_VERSION
 
 
+def collector_config_text(service, name, token_file, url="http://REPLACE-WITH-DASH-ADDRESS:8787/api/v1/ingest"):
+    """The text of a ``collector.json`` for one account, ready to save.
+
+    ``watch`` reads it from ``~/.presto-ai-dash/``. The token file is named
+    relative to that folder, so the file can be copied between computers.
+    """
+    import json
+    account = {"service": service, "name": name, "token_file": token_file}
+    return json.dumps({"url": url, "accounts": [account]}, indent=2) + "\n"
+
+
 def collector_info():
     """What the admin page shows about the collector it serves."""
     raw = collector_bytes()

@@ -1,11 +1,12 @@
 # Remote reports
 
 By default the daemon reads everything itself, from the machine it runs on.
-**Remote reports** let a Claude Code setup on *another* computer report to
-this daemon instead.
+**Remote reports** let a Claude Code or Codex setup on *another* computer
+report to this daemon instead.
 
 This is for the case where the daemon runs somewhere else - a server, a
-container, another room - and the Claude Code you use is on your laptop.
+container, another room - and the Claude Code or Codex you use is on your
+laptop.
 
 ## The rules
 
@@ -16,8 +17,10 @@ container, another room - and the Claude Code you use is on your laptop.
 - The daemon **owns the time**. A pushed reading is stamped with the time the
   daemon received it, so a remote machine with a wrong clock cannot make a
   stale number look fresh.
-- The body carries **no credentials**. Only quota windows, evidence hashes
-  and a short host label.
+- The body carries **no credentials**. Only quota windows, evidence hashes,
+  a short host label and, from `watch`, the same short list of fields the
+  daemon's own readers keep: activity counts, usage-cache numbers and Codex
+  limits.
 
 ## Turning it on
 
@@ -53,16 +56,23 @@ path. The route does not advertise itself.
    remote token** for the account. The token is shown once. Copy it into a file
    on the remote computer, for example `~/.config/presto-ai-dash/claude.token`.
    The daemon stores only its SHA-256 hash.
-4. On the remote computer, set the `statusLine` command in that profile's
-   Claude settings file to the snippet the page gives you, then edit the URL
-   placeholder to the daemon's real address, with the path
-   `/api/v1/ingest`, and check the token file path.
+4. On the remote computer, for Claude Code in a terminal, set the `statusLine`
+   command in that profile's Claude settings file to the snippet the page gives
+   you, then edit the URL placeholder to the daemon's real address, with the
+   path `/api/v1/ingest`, and check the token file path. For the VS Code panel
+   and for Codex, which have no status line, save the token and the
+   `collector.json` the page gives you in `~/.presto-ai-dash/` and run
+   `python3 presto_collector.py watch`.
 
 All of it is on **Settings -> Remote reports**. The account's card on the
 Services tab only says whether remote reports are on, and links there.
 
 Claude Code then runs the collector after normal responses, exactly as it
-runs the local export.
+runs the local export; `watch` reads on a timer.
+
+If you set a collector up while remote reports are still off, nothing is
+stored and nothing breaks. `watch` tells you the daemon answered 404 and what
+to switch on, and starts working at its next retry once you do.
 
 The daemon can also rotate a token and revoke one. A revoked token stops that
 computer's reports immediately.
@@ -90,6 +100,13 @@ computer's reports immediately.
 - `progress` is a hash that changes only when the provider did real work. It
   is the "last reply seen" signal.
 - `client_time` is informational. The daemon's own clock is what counts.
+
+`watch` adds optional keys for what it reads, each checked field by field:
+Claude's `activity` and `usage_cache`, and Codex's `reset_credits` and
+`credits`. A source takes only its own, and anything else in an object is
+refused. A usage-cache reading carries the time Claude Code fetched it, which
+is the one time the daemon accepts from a collector: capped at the receive
+time and refused when over seven days old.
 
 ## Network safety
 

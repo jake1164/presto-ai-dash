@@ -832,13 +832,33 @@
     title.textContent = "Remote token — shown only once, copy it now:";
     box.append(title);
     box.append(copyCell(tokenReveal.token));
-    for (const [name, snippet] of [["POSIX (sh/bash) settings.json status line:",
-                                    tokenReveal.posix_snippet],
-                                   ["Windows PowerShell settings.json status line:",
-                                    tokenReveal.powershell_snippet]]) {
+    if (tokenReveal.posix_snippet) {
+      // Claude Code in a terminal runs the status line after every response.
+      for (const [name, snippet] of [["POSIX (sh/bash) settings.json status line:",
+                                      tokenReveal.posix_snippet],
+                                     ["Windows PowerShell settings.json status line:",
+                                      tokenReveal.powershell_snippet]]) {
+        const label = document.createElement("p"); label.className = "note";
+        label.textContent = name + " edit the URL after pasting:";
+        box.append(label, copyCell(snippet));
+      }
+    }
+    if (tokenReveal.collector_config) {
+      // Everything without a status line is read on a timer by the collector's
+      // watch command, from a folder of its own.
+      const folder = tokenReveal.collector_folder || "~/.presto-ai-dash";
       const label = document.createElement("p"); label.className = "note";
-      label.textContent = name + " edit the URL after pasting:";
-      box.append(label, copyCell(snippet));
+      label.textContent = (tokenReveal.service === "codex"
+        ? "Codex has no status line, so the collector reads it on a timer. "
+        : "The VS Code panel does not run the status line. To report its activity and usage cache, ")
+        + "On the computer where " + (tokenReveal.service === "codex" ? "Codex is signed in" : "Claude Code runs")
+        + ": save the token as " + folder + "/" + tokenReveal.token_file + ", save this as "
+        + folder + "/collector.json (edit the URL), then run: python3 presto_collector.py watch";
+      box.append(label, copyCell(tokenReveal.collector_config));
+      const caution = document.createElement("p"); caution.className = "note";
+      caution.textContent = "This way of reporting has been tested against a throwaway daemon, "
+        + "not yet on a second real computer. Run it once with --once and read what it says.";
+      box.append(caution);
     }
     const dismiss = document.createElement("button"); dismiss.type = "button";
     dismiss.textContent = "Hide";
@@ -963,7 +983,7 @@
     box.replaceChildren();
     const accounts = sources.filter((source) => source.ingest);
     if (!accounts.length) {
-      box.append(el("p", "note", "No account can report remotely yet. Add a Claude account on the Services tab."));
+      box.append(el("p", "note", "No account can report remotely yet. Add a Claude or Codex account on the Services tab."));
       return;
     }
     for (const source of accounts) box.append(buildRemoteAccount(source));

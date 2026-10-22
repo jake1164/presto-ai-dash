@@ -97,10 +97,11 @@ export) run only when you press the button in the admin page. See
 ## Limits
 
 - **Containers:** the Claude activity and usage-cache readers and the Codex
-  source read files and logins on the daemon's own machine, so they do not
-  work inside a container. Claude's status-line quota can still reach a
-  container through the remote collector; Codex needs a daemon on the
-  machine where Codex runs.
+  source read files and logins on the daemon's own machine, so inside a
+  container they get nothing by themselves. A collector on the machine that
+  has them (its `watch` mode, plus the status line for Claude in a terminal)
+  pushes what they would read. It has been tested against a throwaway daemon,
+  not yet on a second real computer.
 - **Claude in the VS Code panel** does not run the status line; panel users
   get quota from the usage cache reader instead, which reads an unofficial
   file. See [The VS Code panel](https://jake1164.github.io/presto-ai-dash/troubleshooting/vs-code-panel/).

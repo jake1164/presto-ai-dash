@@ -25,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from presto_ai_dash.api import ApiServer
 from presto_ai_dash.collectors import presto_collector as collector
 from presto_ai_dash.config import ingest_enabled
+from presto_ai_dash.management import ManagedCollector
 from presto_ai_dash.sources.claude import ClaudeSource
 from presto_ai_dash.sources.codex import CodexSource
 from test_claude_usage_cache import (SENTINEL_EMAIL, SENTINEL_ORG, SENTINEL_PROJECT,
@@ -387,6 +388,23 @@ class EndToEndTests(PushBase):
         for needle in PRIVATE:
             self.assertNotIn(needle, stored)
 
+    def test_a_polling_daemon_shows_the_pushed_readings_even_after_an_earlier_empty_poll(self):
+        # The poll before the push had nothing, and its snapshot carries the poll's own
+        # time; the reading that arrives next is older than that poll. It must win.
+        runtime = ManagedCollector(self.manager, self.config, threading.Event())
+        runtime.collect_once()
+        self.write_session(session_line())
+        self.write_cache()
+        code, output = self.run_watch(self.config_for("claude"))
+        self.assertEqual(code, 0, output)
+        runtime.collect_once()
+        row = next(item for item in self.manager.list_sources()["sources"]
+                   if item["id"] == self.claude["id"])
+        quota = row["quota"]
+        self.assertTrue(quota["local_activity"]["available"])
+        five = next(window for window in quota["windows"] if window["id"] == "five_hour")
+        self.assertEqual(five["used_percent"], 12.0)
+
     def test_codex_reaches_the_daemon_and_is_used_there_without_a_local_codex(self):
         rpc = collector._embedded("codex_rpc")
         with patch.object(rpc, "find_executable", return_value="codex"), \
@@ -551,6 +569,48 @@ class WhenTheDaemonSaysNoTests(PushBase):
         with patch("sys.stderr", io.StringIO()):
             code = collector.main(["watch", "--config", str(self.folder / "absent.json"), "--once"])
         self.assertEqual(code, 2)
+
+
+class DocumentedSetupTests(PushBase):
+    """What the admin page tells a person to save must be what works."""
+
+    def follow_the_page(self, row):
+        from presto_ai_dash.management import INGEST_URL_PLACEHOLDER
+        reveal = self.manager.create_ingest_token(row["id"])
+        (self.folder / reveal["token_file"]).write_text(reveal["token"], encoding="utf-8")
+        text = reveal["collector_config"].replace(INGEST_URL_PLACEHOLDER, self.url)
+        self.config_path.write_text(text, encoding="utf-8")
+        return reveal
+
+    def test_a_claude_account_gets_the_status_line_and_the_watch_setup(self):
+        reveal = self.follow_the_page(self.claude)
+        self.assertEqual(reveal["service"], "claude")
+        self.assertIn("posix_snippet", reveal)
+        self.assertEqual(json.loads(reveal["collector_config"])["accounts"][0]["service"], "claude")
+        self.assertTrue(reveal["token_file"].startswith("claude-"))
+        # The profile in the file is the default one; point it at the test profile.
+        data = json.loads(self.config_path.read_text(encoding="utf-8"))
+        data["accounts"][0]["settings_path"] = str(self.profile / "settings.json")
+        self.config_path.write_text(json.dumps(data), encoding="utf-8")
+        self.write_session(session_line())
+        code, output = self.run_watch(str(self.config_path))
+        self.assertEqual(code, 0, output)
+        self.assertTrue(self.claude_source().collect().metrics["quota"]["local_activity"]["available"])
+
+    def test_a_codex_account_gets_only_the_watch_setup(self):
+        reveal = self.follow_the_page(self.codex)
+        self.assertEqual(reveal["service"], "codex")
+        self.assertNotIn("posix_snippet", reveal)
+        self.assertNotIn("powershell_snippet", reveal)
+        rpc = collector._embedded("codex_rpc")
+        with patch.object(rpc, "find_executable", return_value="codex"), \
+                patch.object(rpc, "read_subscription", return_value=codex_response()):
+            code, output = self.run_watch(str(self.config_path))
+        self.assertEqual(code, 0, output)
+
+    def test_the_token_is_never_inside_the_configuration_text(self):
+        reveal = self.follow_the_page(self.claude)
+        self.assertNotIn(reveal["token"], reveal["collector_config"])
 
 
 class AloneOnAnotherComputerTests(PushBase):

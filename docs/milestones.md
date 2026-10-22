@@ -22,8 +22,13 @@
 - **The documentation site**: <https://jake1164.github.io/presto-ai-dash/>,
   built from `docs/user/`.
 
-**Open:** Phase 5c (push the Claude activity and usage-cache readers, for a
-containerised daemon), Phase 6 (Codex over push), Phase 8 (OpenTelemetry;
+**Built since (2026-10-22):** Phase 5c and Phase 6. The collector has a
+`watch` mode that pushes the Claude activity and usage cache and Codex's
+limits to a daemon on another machine or in a container; the daemon validates
+each new envelope key field by field. Tested against a throwaway daemon, with
+the collector run alone in an empty folder; not yet on a second real computer.
+
+**Open:** Phase 8 (OpenTelemetry;
 researched, decision gate pending), device diagnostics (`X-Presto-Diag`),
 several Presto devices, M8 acceptance (real expired-login recovery, a second
 account, sign-in controls on the admin page), and M13, the demo release. The

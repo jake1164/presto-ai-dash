@@ -257,10 +257,10 @@ full, including publishing the status port on one LAN address only.
 | Ollama Cloud | **Yes** | It is an HTTP API on the internet. |
 | LiteLLM | **Yes** | Point it at the gateway: `http://host.docker.internal:4000` or the gateway's LAN address. |
 | Ollama (a server on your machine) | **Yes** | Same: `http://host.docker.internal:11434` or the LAN address. |
-| Claude Code quota (the terminal export) | **No, not directly** | The export runs on the machine where Claude Code runs and reads files there. Use the remote collector below. |
-| Claude Code activity (the local session logs) | **No** | The reader opens the session files on the daemon's own machine. A container has none. |
-| Claude Code usage cache (`~/.claude.json`) | **No** | Same: the file is on the Claude machine, and it must not be mounted into the container. |
-| Codex | **No** | The source starts a local `codex app-server` and uses the local login. A container has neither. |
+| Claude Code quota (the terminal export) | **Through a collector** | The export runs on the machine where Claude Code runs and reads files there. Use the remote collector below. |
+| Claude Code activity (the local session logs) | **Through a collector** | The reader opens the session files on the machine where Claude Code runs. A container has none; the collector's `watch` mode pushes the summary. |
+| Claude Code usage cache (`~/.claude.json`) | **Through a collector** | Same: the file is on the Claude machine, and it must not be mounted into the container. `watch` pushes the numbers and nothing else from it. |
+| Codex | **Through a collector** | The source needs a local `codex app-server` and the local login, which a container does not have. The collector's `watch` mode reads Codex on the machine where it is signed in and pushes the limits. |
 
 A source whose files are missing does not break anything: it says plainly
 that it is unavailable, and why, in its status. The container does not
@@ -298,6 +298,14 @@ Claude Code then runs the collector after each response, and the reading
 arrives in the container. The body carries quota numbers, hashes and a short
 host label. **No credentials, no prompts, no transcripts.**
 
+That is the terminal's status line. Two things have no status line: the
+**VS Code panel** and **Codex**. For those the collector has a `watch` mode,
+which reads on a timer and pushes with the account's own token, from a folder
+of its own (`~/.presto-ai-dash/collector.json`). The admin page writes that
+file for you when you create the token. Read
+[Remote collectors](../guides/remote-collectors.md) for it, and for what the
+collector says when the container is not accepting reports yet.
+
 Two warnings:
 
 - **The ingest route is plain HTTP.** The token travels in the clear, like
@@ -306,15 +314,16 @@ Two warnings:
 - **A remote token can only write readings for one account.** It cannot
   read the status payload, list your accounts, or touch anything else.
 
-The activity logs and the usage cache are not part of the pushed report
-yet: the collector sends the terminal export only. A container therefore
-shows Claude's quota, but not the VS Code panel's activity. That path is
-not built yet.
+The activity logs and the usage cache are pushed by the collector's `watch`
+mode, not by the status line, and so is **Codex**: the Codex source needs the
+Codex app-server and its login on the machine it runs on, and a container has
+neither. Run `watch` on the machine where Codex is signed in, and the
+container shows what it reads. The collector never puts a login in the
+container: it reads the limits there and sends only the numbers.
 
-**Codex needs a local daemon.** The Codex source runs the Codex app-server
-on the machine it is on and uses that machine's login. A container has
-neither Codex nor a login, so the source says it is unavailable. Run the
-daemon locally for Codex, or wait for the push support that is planned.
+None of this has been run against a real second computer yet; see
+[Remote collectors](../guides/remote-collectors.md#what-reports-remotely-and-what-does-not)
+for exactly what has been tested.
 
 ## The environment variables
 

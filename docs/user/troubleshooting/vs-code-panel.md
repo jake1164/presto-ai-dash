@@ -16,6 +16,11 @@ about a terminal.
 
 ## The fixes
 
+If the daemon runs on another computer or in a container, it cannot read these
+files. Run the collector's `watch` mode on the computer where the panel runs:
+it pushes the usage cache and the activity to the daemon. See
+[Remote collectors](../guides/remote-collectors.md).
+
 ### Use the usage cache
 
 Claude Code caches the numbers behind its own `/usage` dialog on disk. The

@@ -312,6 +312,19 @@ class ClaudePushTests(PushBase):
         self.assertIn("laptop", quota["usage_cache"]["message"])
         self.assertNotIn("/", quota["usage_cache"]["message"])
 
+    def test_the_status_tab_says_a_reading_came_from_a_collector(self):
+        from presto_ai_dash.management import _activity_detail, _cache_detail
+        self.push(self.claude, envelope(activity=activity(), usage_cache=usage_cache()))
+        quota = self.quota(self.claude_source().collect())
+        self.assertIn("reported by the collector on laptop",
+                      _activity_detail(quota["local_activity"]))
+        self.assertIn("reported by the collector on laptop", _cache_detail(quota["usage_cache"]))
+
+    def test_a_local_reading_is_not_labelled_as_pushed(self):
+        from presto_ai_dash.management import _activity_detail
+        self.assertNotIn("collector", _activity_detail(
+            {"available": True, "complete": True, "last_request_at": "2026-10-22T10:00:00+00:00"}))
+
     def test_the_daemons_own_reader_wins_when_it_has_a_reading(self):
         self.push(self.claude, envelope(activity=activity(tokens_5h=1)))
         local = {"available": True, "complete": True, "last_request_at": None,
@@ -405,6 +418,24 @@ class CodexPushTests(PushBase):
             snapshot = source.collect()
         self.assertEqual(snapshot.status, "ok")
         self.assertEqual(self.quota(snapshot)["windows"][0]["used_percent"], 14)
+
+    def test_many_buckets_fit_and_one_more_than_the_limit_does_not(self):
+        from presto_ai_dash.api import INGEST_BODY_LIMIT
+        count = CodexSource.push_max_windows
+
+        def many(total):
+            body = self.reading()
+            body["windows"] = [window("bucket_%02d:primary" % n, "Weekly", 10080, 5.0,
+                                      stamp(datetime.now(timezone.utc) + timedelta(days=3)))
+                               for n in range(total)]
+            body["evidence"] = {item["id"]: "a" * 64 for item in body["windows"]}
+            return body
+
+        full = many(count)
+        self.assertLess(len(json.dumps(full)), INGEST_BODY_LIMIT)
+        self.assertTrue(self.push(self.codex, full))
+        with self.assertRaises(ValueError):
+            self.push(self.codex, many(count + 1))
 
     def test_a_push_stays_inside_what_codex_may_carry(self):
         with self.assertRaises(ValueError):

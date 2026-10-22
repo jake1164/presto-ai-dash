@@ -127,8 +127,9 @@ def validate(envelope, source_class):
             raise ValueError("windows must be a list; omit the key for a heartbeat")
         if not windows:
             raise ValueError("windows must not be empty; omit the key for a heartbeat")
-        if len(windows) > MAX_WINDOWS:
-            raise ValueError("at most %d windows are accepted" % MAX_WINDOWS)
+        limit = getattr(source_class, "push_max_windows", MAX_WINDOWS)
+        if len(windows) > limit:
+            raise ValueError("at most %d windows are accepted" % limit)
         allowed_ids = getattr(source_class, "push_window_ids", None)
         seen_ids = set()
         now = datetime.now(timezone.utc)

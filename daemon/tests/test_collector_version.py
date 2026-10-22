@@ -27,7 +27,7 @@ from presto_ai_dash.collectors import presto_collector as collector
 
 # Version -> SHA-256 of the file with Windows line endings normalised to \n.
 RELEASED = {
-    "1": "0cf9b0ca460eb5a396152c614c53e9285dd2ef15e899cdedb5f4d63b196f9f1d",
+    "1": "5a2a060e10656d43d49cc754a8b6d8f5ea161d49e13333de88b51b8d8d6f02f0",
 }
 
 

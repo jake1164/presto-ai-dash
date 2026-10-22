@@ -54,6 +54,13 @@ class StorageM3Tests(unittest.TestCase):
         self.assertEqual([row.status for row in rows], ["warning"])
         self.assertEqual(self.storage.snapshot_history("missing", datetime(2026, 1, 1, tzinfo=UTC)), [])
 
+    def test_latest_updated_at_is_the_newest_time_a_source_has_saved(self):
+        self.assertIsNone(self.storage.latest_updated_at("fake"))
+        self.storage.save_snapshot(self.snapshot("ok", datetime(2026, 1, 1, 12, tzinfo=UTC)))
+        self.storage.save_snapshot(self.snapshot("ok", datetime(2026, 1, 1, 11, tzinfo=UTC)))
+        self.assertEqual(self.storage.latest_updated_at("fake"), datetime(2026, 1, 1, 12, tzinfo=UTC))
+        self.assertIsNone(self.storage.latest_updated_at("other"))
+
     def test_history_source_isolation_newest_limit_and_ties(self):
         moment = datetime(2026, 1, 1, tzinfo=UTC)
         for status in ("ok", "active", "warning"):

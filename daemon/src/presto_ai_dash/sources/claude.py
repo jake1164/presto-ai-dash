@@ -113,7 +113,7 @@ class ClaudeSource(Source):
         return cache
 
     @staticmethod
-    def _pushed_activity(stored, now):
+    def _pushed_activity(stored, now, host=None):
         """The activity summary a collector pushed, or an unavailable one once it has gone quiet."""
         pushed = stored.get("pushed_activity") if stored else None
         if not isinstance(pushed, dict):
@@ -123,7 +123,9 @@ class ClaudeSource(Source):
             return {"available": False, "reason": "the collector stopped reporting",
                     "complete": False, "last_request_at": None, "last_model": None,
                     "last_entrypoint": "?", "requests_5h": 0, "tokens_5h": 0, "tokens_7d": 0}
-        return {key: value for key, value in pushed.items() if key != "received_at"}
+        reading = {key: value for key, value in pushed.items() if key != "received_at"}
+        reading["reported_by"] = host
+        return reading
 
     def _merge_cache(self, report, cache):
         """The newest reading per window wins; the terminal export wins a tie.
@@ -177,6 +179,21 @@ class ClaudeSource(Source):
             return USAGE_CACHE_STALE_SECONDS
         return value
 
+    def _not_before_earlier(self, observed):
+        """The snapshot's time, never earlier than this source's previous snapshot.
+
+        A reading can be older than the poll that carries it: a usage cache that
+        Claude Code fetched twenty minutes ago, pushed after a poll that had
+        nothing and was stamped with its own time. The latest snapshot is the
+        one with the greatest time, so the older reading would lose to the empty
+        poll for as long as it took the clock to pass it. The window times still
+        say how old the numbers are; this only keeps the snapshot in order.
+        """
+        # A stand-in storage with only observation() has no history to keep order with.
+        lookup = getattr(getattr(self, "storage", None), "latest_updated_at", None)
+        earlier = lookup(self.id) if callable(lookup) else None
+        return observed if earlier is None else max(observed, earlier)
+
     def collect(self):
         now = now_utc()
         observation = self.storage.observation(self.id) if hasattr(self, "storage") else None
@@ -216,7 +233,7 @@ class ClaudeSource(Source):
             report[key] = observation[key] if observation else None
         available = [w for w in report["windows"] if w["state"] == "available"]
         activity = self._activity(now) if self.config.get("activity_logs") else None
-        pushed_activity = self._pushed_activity(stored, now)
+        pushed_activity = self._pushed_activity(stored, now, host)
         if pushed_activity is not None and (activity is None or not activity["available"]):
             activity = pushed_activity
         if activity is not None:
@@ -235,11 +252,12 @@ class ClaudeSource(Source):
                           else "active" if in_use else "ok")
                 observed = max(datetime.fromisoformat(w["observed_at"])
                                for w in report["windows"])
-                return SourceSnapshot(self.id, status, updated_at=observed,
+                return SourceSnapshot(self.id, status, updated_at=self._not_before_earlier(observed),
                                       metrics={"quota": report})
         if stored is None and not available:
             return self.snapshot("warning", metrics={"quota": report})
         status = ("rate_limited" if any(w["used_percent"] >= 100 for w in available)
                   else "ok" if available else "warning")
         observed = max(datetime.fromisoformat(w["observed_at"]) for w in report["windows"])
-        return SourceSnapshot(self.id, status, updated_at=observed, metrics={"quota": report})
+        return SourceSnapshot(self.id, status, updated_at=self._not_before_earlier(observed),
+                              metrics={"quota": report})

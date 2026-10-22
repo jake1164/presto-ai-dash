@@ -36,6 +36,8 @@ class CodexSource(Source):
     # which has neither Codex nor a login.
     accepts_push = True
     push_extras = frozenset(("reset_credits", "credits"))
+    # Two windows for each quota bucket Codex reports; a body must still fit the 16 KiB limit.
+    push_max_windows = 24
     config_fields = (
         {"key": "executable", "label": "Codex executable (blank: automatic discovery)",
          "type": "string", "default": ""},

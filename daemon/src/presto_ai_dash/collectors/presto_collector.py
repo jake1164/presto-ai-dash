@@ -388,6 +388,7 @@ MIN_INTERVAL_SECONDS = 30
 MAX_INTERVAL_SECONDS = 3600
 WATCH_POST_TIMEOUT_SECONDS = 10
 MAX_BACKOFF_SECONDS = 300
+MAX_PUSH_WINDOWS = 24
 MAX_CONFIG_BYTES = 65536
 MAX_ACCOUNTS = 8
 MAX_REASON_CHARS = 120
@@ -643,6 +644,9 @@ class Account(object):
             data = rpc.read_subscription(executable, self.settings["profile_home"],
                                          self.settings["timeout"])
             windows, _, reset_credits, credits = report.rate_limit_windows(data)
+            if len(windows) > MAX_PUSH_WINDOWS:
+                raise Problem("Codex reported more limits than a report can carry (%d)"
+                              % len(windows))
         except rpc.CodexReportingError as error:
             raise Problem("Codex could not be read: %s" % _ascii(error)) from None
         except (ValueError, TypeError, OverflowError, OSError):

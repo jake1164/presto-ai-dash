@@ -177,6 +177,57 @@ class StripRegionTests(unittest.TestCase):
                     self.assertEqual(layout.limit, scroll_limit(layout.total, layout.region))
 
 
+class CutRowTests(unittest.TestCase):
+    """A row cut by the bottom edge is named in the strip, not drawn in halves."""
+
+    def drawn(self, setting, scroll=0):
+        rows = rows_for(AUTHOR_SIX)
+        display = Display()
+        layout = layout_for(rows, setting, display)
+        draw_sources(display, Palette(display), rows, 0, 3, scroll=scroll, layout=layout)
+        return layout, display
+
+    def list_texts(self, layout, display):
+        """The text drawn inside the list area, as (text, y) pairs."""
+        bottom = SOURCE_TOP + layout.region
+        return [(row[0], row[2]) for row in display.rows if row[2] < bottom]
+
+    def test_at_rest_the_ollama_row_is_not_drawn_half_way_above_the_strip(self):
+        layout, display = self.drawn(1)
+        names = [text for text, _ in self.list_texts(layout, display)]
+        # The row is the one the layout says is cut, and the strip is what names it.
+        self.assertEqual([row["name"] for row in layout.hidden(0)], ["Ollama", "LiteLLM"])
+        self.assertNotIn("Ollama", names)
+        self.assertNotIn("7 models", names)
+        band = [row[0] for row in display.rows if row[2] >= SOURCE_TOP + layout.region]
+        self.assertIn("Ollama", band)
+        self.assertIn("LiteLLM", band)
+
+    def test_the_rows_that_fit_are_all_drawn(self):
+        layout, display = self.drawn(1)
+        names = [text for text, _ in self.list_texts(layout, display)]
+        for name in ("OpenCode Go", "Codex", "Claude", "Ollama Cloud"):
+            self.assertIn(name, names)
+
+    def test_with_the_strip_off_a_cut_row_is_still_drawn_because_nothing_else_names_it(self):
+        layout, display = self.drawn(0)
+        names = [text for text, _ in self.list_texts(layout, display)]
+        self.assertEqual(layout.lines, 0)
+        self.assertIn("Ollama", names)
+
+    def test_a_row_leaving_at_the_top_is_still_drawn_as_it_scrolls_out(self):
+        layout, display = self.drawn(1, scroll=10)
+        names = [text for text, _ in self.list_texts(layout, display)]
+        self.assertIn("OpenCode Go", names)
+
+    def test_at_the_end_of_the_scroll_the_local_rows_are_drawn_in_place(self):
+        layout, display = self.drawn(1)
+        _, display = self.drawn(1, scroll=layout.limit)
+        names = [row[0] for row in display.rows if row[2] < SOURCE_TOP + layout.region]
+        self.assertIn("Ollama", names)
+        self.assertIn("LiteLLM", names)
+
+
 class StripLineCountTests(unittest.TestCase):
     """The line count is the layout's, not the scroll position's."""
 

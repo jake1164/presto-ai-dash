@@ -625,10 +625,15 @@ def draw_sources(display, palette, rows, index, total, status="offline",
         display.set_font("bitmap6")
         _text(display, palette, "No sources enabled", 14, SOURCE_TOP, INK_DIM, scale=1)
     y = SOURCE_TOP - scroll
+    list_bottom = SOURCE_TOP + region
     for row, row_height, compact in layout.rows:
         # The list is clipped at its edges, so a partly scrolled row is cut
-        # there and never drawn over the strip or the footer.
-        if y + row_height > SOURCE_TOP and y < SOURCE_TOP + region:
+        # there and never drawn over the strip or the footer. A row cut by the
+        # bottom edge is not drawn at all while the strip is on: the strip names
+        # it, and half a row of text above the strip reads as a mistake. A row
+        # leaving at the top is still drawn, so scrolling stays smooth.
+        cut_below = layout.lines > 0 and y + row_height > list_bottom
+        if y + row_height > SOURCE_TOP and y < list_bottom and not cut_below:
             if compact:
                 _draw_compact_local_row(display, palette, row, y, row_width, stale)
             elif "windows" in row:

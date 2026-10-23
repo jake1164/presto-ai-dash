@@ -343,7 +343,9 @@ class HomeLayout(object):
         """The rows that are not fully visible at this scroll offset.
 
         A row cut by either edge of the region counts as not fully visible,
-        so it is named in the strip as well as drawn.
+        so it is named in the strip. One cut by the bottom edge is not drawn
+        (the strip stands in for it); one leaving at the top is drawn as it
+        scrolls out.
         """
         if region is None:
             region = self.region

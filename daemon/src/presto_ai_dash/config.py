@@ -507,7 +507,9 @@ def resolve_shared_token(config):
     if not token:
         token = secrets.token_urlsafe(24)
         config["daemon"]["shared_token"] = token
-        log.warning("no shared token configured; temporary token: %s", token)
+        # Announced by the daemon once it is ready, as the last lines of the
+        # startup log, so it is not buried under later messages.
+        config["daemon"]["shared_token_generated"] = True
     return token
 
 
@@ -520,8 +522,6 @@ def resolve_admin_token(config, shared_token):
         # temporary without ever showing it. INFO, not WARNING: this is a setup
         # notice that returns at every start, not a fault.
         config["admin"]["token_generated"] = True
-        log.info("temporary admin token (new at every start; set admin.token in "
-                 "dash.toml to keep one): %s", token)
     if token == shared_token:
         raise ValueError("admin token must be different from the device shared token")
     return token

@@ -145,9 +145,11 @@ class AdminTokenRowTests(unittest.TestCase):
                           {"DASH_ADMIN_TOKEN": "x"})["Admin token"]
         self.assertEqual(entry["origin"], ENVIRONMENT)
 
-    def test_the_generated_token_is_logged_at_info_not_warning(self):
-        import logging
+    def test_the_generated_token_is_flagged_not_logged_at_resolve_time(self):
+        # The daemon announces it as the last startup lines instead.
         from presto_ai_dash.config import resolve_admin_token
-        with self.assertLogs("presto_ai_dash.config", level="DEBUG") as captured:
-            resolve_admin_token({"admin": {"token": ""}}, "shared")
-        self.assertEqual([record.levelno for record in captured.records], [logging.INFO])
+        config = {"admin": {"token": ""}}
+        with self.assertNoLogs("presto_ai_dash.config", level="DEBUG"):
+            token = resolve_admin_token(config, "shared")
+        self.assertTrue(config["admin"]["token_generated"])
+        self.assertEqual(config["admin"]["token"], token)

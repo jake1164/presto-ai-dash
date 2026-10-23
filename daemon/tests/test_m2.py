@@ -97,8 +97,8 @@ class ConfigTests(unittest.TestCase):
 
     def test_generated_token_is_reused(self):
         config = load_config()
-        with self.assertLogs("presto_ai_dash.config", level="WARNING"):
-            token = resolve_shared_token(config)
+        token = resolve_shared_token(config)
+        self.assertTrue(config["daemon"]["shared_token_generated"])
         self.assertGreaterEqual(len(token), 24)
         self.assertEqual(resolve_shared_token(config), token)
 

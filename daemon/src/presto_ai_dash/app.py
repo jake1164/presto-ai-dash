@@ -160,8 +160,8 @@ class Daemon:
         while not self.stop_event.wait(interval):
             try:
                 counts = self.storage.prune(now_utc(), retention)
-                log.info("retention cleanup removed %d snapshots and %d alert observations",
-                         counts["snapshots"], counts["alerts"])
+                log.debug("retention cleanup removed %d snapshots and %d alert observations",
+                          counts["snapshots"], counts["alerts"])
             except Exception:
                 log.exception("periodic retention cleanup failed")
 
@@ -181,12 +181,21 @@ class Daemon:
             self.api.start()
             if self.admin is not None:
                 self.admin.start()
-                log.info("configuration page: http://%s:%d", self.admin.host,
-                         self.admin.actual_port)
             return self
         except Exception:
             self.stop()
             raise
+
+    def announce_access(self):
+        """Log the page address and any generated tokens as the last startup lines."""
+        if self.admin is not None:
+            log.info("configuration page: http://%s:%d", self.admin.host,
+                     self.admin.actual_port)
+            if self.config["admin"].get("token_generated"):
+                log.info("temporary admin token (new at every start; set admin.token in "
+                         "dash.toml to keep one): %s", self.config["admin"]["token"])
+        if self.config["daemon"].get("shared_token_generated"):
+            log.warning("no shared token configured; temporary token: %s", self.shared_token)
 
     def stop(self):
         with self._stop_lock:
@@ -256,6 +265,7 @@ def main(argv=None):
             signal.signal(signum, lambda *_: daemon.stop_event.set())
         daemon.start()
         log.info("presto-ai-dash %s ready", __version__)
+        daemon.announce_access()
         daemon.wait()
     except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
         log.error("daemon startup failed: %s", exc)

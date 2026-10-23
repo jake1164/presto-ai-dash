@@ -24,12 +24,10 @@ Presto AI Dash turns a **Pimoroni Presto touchscreen** into a dedicated monitor 
 > **A separate computer or server is required.** This is **not a standalone app that runs entirely on the Presto**. You must run the **Python daemon as a background process or Docker container** on a computer/server on your network. It collects the data and keeps provider credentials; the Presto connects over Wi-Fi to display readings and control its own alerts.
 
 ```mermaid
-flowchart LR
-    S["Cloud and local AI services"] -->|"Readings and reports"| D
-    subgraph H["Computer or server — required"]
-        D["Python daemon or Docker container"]
-    end
-    D -->|"LAN / Wi-Fi"| P["Pimoroni Presto touchscreen"]
+flowchart TB
+    S["Cloud and local AI services"] -->|"Usage and health readings"| D
+    D["Computer or server — REQUIRED<br/>Python daemon or Docker container"]
+    D -->|"Wi-Fi"| P["Pimoroni Presto touchscreen<br/>Display and alerts"]
 ```
 
 ## Supported services
@@ -55,7 +53,7 @@ For configuration, troubleshooting, security, and detailed limitations, see the 
 If Presto AI Dash is useful, a **GitHub star** helps others discover it. Sponsorships and coffee donations help support maintenance, testing, and future integrations. Donations are optional and don't guarantee a particular integration.
 
 <p align="center">
-  <a href="https://github.com/sponsors/jake1164"><img src="https://img.shields.io/badge/GitHub_Sponsors-Support-EA4AAA?logo=githubsponsors&logoColor=white" alt="Support on GitHub Sponsors" height="35"></a>
+  <a href="https://github.com/sponsors/jake1164"><img src="docs/user/images/github-sponsors-button.svg" alt="Support on GitHub Sponsors" height="35"></a>
   <a href="https://buymeacoffee.com/jake1164s"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me a Coffee" height="35"></a>
 </p>
 

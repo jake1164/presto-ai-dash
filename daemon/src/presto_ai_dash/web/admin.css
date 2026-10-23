@@ -84,6 +84,10 @@ main > .panel { min-width: 0; }
 .chip-muted { color: #91a3b9; }
 .card-detail { padding: 4px 0 0 22px; border-left: 2px solid #2a3b53; margin-left: 5px; }
 .card-detail .actions { margin-top: 14px; }
+.card-section { margin-top: 20px; padding-top: 14px; border-top: 1px solid #2a3b53; }
+.card-readings > h4, .card-section > h4 { margin: 14px 0 10px; }
+.card-setup-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+.card-setup-actions:empty { display: none; }
 
 /* The banners that say the master switch is off, and the per-service alert
    group inside an open account card. */
@@ -110,20 +114,31 @@ main > .panel { min-width: 0; }
 .problem { border-left: 2px solid #f87171; padding-left: 12px; }
 .problem strong { color: #ffb8c8; }
 
-/* The help links: a small "?" that opens the documentation site in a new
-   tab. It is a plain anchor, at least 24 pixels tall so it can be tapped at
-   phone width, and it has a visible focus ring. */
-.help-slot { display: inline-flex; align-items: center; }
-.help-link { display: inline-flex; align-items: center; justify-content: center;
-  min-width: 24px; min-height: 24px; margin-left: 6px; padding: 0 4px;
-  border: 1px solid #3c5a78; border-radius: 12px; color: #9cc7f0;
-  text-decoration: none; font-size: .8rem; line-height: 1; }
-.help-link:hover { color: #e3edf8; border-color: #7ce6da; }
+/* Help has one home in the header. Detailed guides appear inside open content. */
+.header-actions { display: flex; align-items: center; gap: 12px; }
+.header-help { position: relative; }
+.header-help > summary { list-style: none; cursor: pointer; color: #c4d6eb;
+  border: 1px solid #3c5a78; border-radius: 7px; padding: 10px 16px; min-height: 44px; }
+.header-help > summary::-webkit-details-marker { display: none; }
+.header-help[open] > summary, .header-help > summary:hover { background: #23344c; }
+.help-menu { position: absolute; right: 0; top: calc(100% + 8px); z-index: 5;
+  width: min(310px, calc(100vw - 36px)); padding: 10px; background: #152034;
+  border: 1px solid #3c5a78; border-radius: 10px; box-shadow: 0 12px 30px #0006; }
+.help-menu > span { display: block; }
+.help-menu .help-link { display: flex; padding: 10px 12px; min-height: 44px;
+  text-decoration: none; border-radius: 5px; }
+.help-menu .help-link:hover { background: #23344c; }
+.help-menu .note { margin: 8px 12px 4px; font-size: .75rem; }
+.guide-slot { display: flex; flex-wrap: wrap; gap: 6px 20px; }
+.card-links { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 20px 0 4px; padding-top: 12px;
+  border-top: 1px solid #2a3b53; }
+.help-link { display: inline-flex; align-items: center;
+  min-height: 24px; color: #9cc7f0; font-size: .85rem;
+  text-underline-offset: 3px; text-align: left; justify-content: flex-start; }
+.help-link:hover { color: #e3edf8; }
 .help-link:focus, .help-link:focus-visible { outline: 2px solid #7ce6da;
   outline-offset: 3px; color: #e3edf8; }
 .title-actions { display: inline-flex; align-items: center; gap: 4px; }
-.field-with-help { display: flex; align-items: center; gap: 4px; }
-.field-with-help > label { flex: 1 1 auto; }
 
 /* Settings: one section open, the rest folded away. */.setting { border: 1px solid #2a3b53; border-radius: 10px; margin-top: 12px; background: #121c2e; }
 .setting > summary { cursor: pointer; padding: 14px 16px; display: flex; align-items: center;
@@ -138,6 +153,9 @@ main > .panel { min-width: 0; }
 
 @media (max-width: 760px) { main { grid-template-columns: 1fr; } body { padding: 18px; } header { align-items: flex-start; } }
 @media (max-width: 600px) {
+  header { flex-wrap: wrap; }
+  .header-actions { margin-left: auto; position: relative; }
+  .header-help { position: static; }
   .source-head { gap: 8px; flex-wrap: wrap; }
   .source-head .card-toggle { flex-basis: 100%; }
   .source-enabled { margin-left: 0; }

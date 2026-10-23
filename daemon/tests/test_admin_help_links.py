@@ -112,6 +112,10 @@ class HelpMapTests(unittest.TestCase):
         for key in list(used):
             if key.startswith("source-"):
                 used.discard(key)
+        # The header guide follows the currently selected tab.
+        if "tab-" in used:
+            used.remove("tab-")
+            used.update("tab-" + tab for tab in ("services", "status", "settings"))
         self.assertTrue(used)
         self.assertEqual(sorted(used - known), [],
                          "the page uses help keys the map does not have")
@@ -137,7 +141,7 @@ class HelpMapTests(unittest.TestCase):
         self.assertIn('link.rel = "noopener noreferrer"', self.js)
         self.assertIn('link.referrerPolicy = "no-referrer"', self.js)
         self.assertIn('link.target = "_blank"', self.js)
-        self.assertIn('link.textContent = "?"', self.js)
+        self.assertIn('link.textContent = label', self.js)
         self.assertIn('link.setAttribute("aria-label", "Help: " + label)', self.js)
         # The URL is built from the base and the map: no query string.
         self.assertNotIn("?", self.js.split("const HELP")[1].split("};")[0])

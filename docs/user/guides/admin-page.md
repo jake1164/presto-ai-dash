@@ -67,6 +67,11 @@ the window meters, the labelled **Quota**, **Activity**, **Usage cache** and
 **Status note** lines, and that account's own actions - the Claude export
 setup, and a line saying whether remote reports are on, with a link to where they are set up.
 
+Every card uses the same layout: **Readings**, **Setup**, **Alerts**, then
+a footer containing its setup guide, account actions guide, and remote-report
+navigation when supported. Provider-specific buttons stay in Setup; links
+stay in the footer.
+
 The order arrows, the **Enabled** checkbox, **Edit** and **Add source** stay
 where they were. Everything on this tab applies to one account at a time.
 
@@ -163,12 +168,16 @@ no fonts, no scripts, no analytics.
 
 ## The help links
 
-A small **?** beside each tab, each section and each notable setting opens
-the documentation site in a new tab, at the page and the heading that
-explain that part of the page.
+The **Help** button in the header opens a small menu with help for the
+current tab, provider setup guides, and troubleshooting missing or stale
+readings. Escape closes the menu and returns focus to Help; clicking
+outside it also closes it.
 
-The links are plain anchors, so they work with the keyboard and without
-JavaScript. They carry nothing identifying: the URL has no query string, no
+Descriptive guide links also appear inside expanded settings, open account
+cards and the source editor. Short explanations stay beside the fields.
+
+The links are plain anchors and work with the keyboard. They carry nothing
+identifying: the URL has no query string, no
 install id, no host, no token and no account, and the page's own address is
 never sent as a Referer. The links point at the public documentation site,
 so nothing about your installation leaves the machine.

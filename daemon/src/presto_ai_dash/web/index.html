@@ -9,7 +9,18 @@
 </head>
 <body>
   <header><div><p class="eyebrow">PRESTO AI DASH</p><h1>Configuration</h1></div>
-    <button id="logout" hidden>Lock configuration</button></header>
+    <div class="header-actions">
+      <details id="header-help" class="header-help">
+        <summary>Help</summary>
+        <nav class="help-menu" aria-label="Help and guides">
+          <span id="current-tab-help"></span>
+          <span data-help="provider-guides" data-help-label="Provider setup guides"></span>
+          <span data-help="troubleshooting" data-help-label="Troubleshoot missing or stale readings"></span>
+          <p class="note">Guides open in a new tab.</p>
+        </nav>
+      </details>
+      <button id="logout" hidden>Lock configuration</button>
+    </div></header>
   <p id="message" role="status" aria-live="polite"></p>
   <section id="login-panel" class="panel">
     <h2>Unlock local configuration</h2>
@@ -26,21 +37,17 @@
     <div id="tablist" class="tablist" role="tablist" aria-label="Sections">
       <button type="button" role="tab" id="tab-services" data-tab="services"
         aria-controls="panel-services" aria-selected="true" tabindex="0">Services</button>
-      <span class="help-slot" data-help="tab-services" data-help-label="Services tab"></span>
       <button type="button" role="tab" id="tab-status" data-tab="status"
         aria-controls="panel-status" aria-selected="false" tabindex="-1">Status</button>
-      <span class="help-slot" data-help="tab-status" data-help-label="Status tab"></span>
       <button type="button" role="tab" id="tab-settings" data-tab="settings"
         aria-controls="panel-settings" aria-selected="false" tabindex="-1">Settings</button>
-      <span class="help-slot" data-help="tab-settings" data-help-label="Settings tab"></span>
     </div>
 
     <section class="panel" role="tabpanel" id="panel-services" aria-labelledby="tab-services" tabindex="0">
       <p id="services-alerts-banner" class="banner" hidden>Alerts are off for all services</p>
       <div class="section-title">
-        <h2>Your services <span class="help-slot" data-help="services" data-help-label="Your services"></span></h2>
-        <span class="title-actions"><button id="add-source">Add source</button>
-          <span class="help-slot" data-help="add-source" data-help-label="Adding a source"></span></span>
+        <h2>Your services</h2>
+        <button id="add-source">Add source</button>
       </div>
       <p>Manage accounts, keys, and refresh settings here. Changes are saved in the database.
         Disable demo data before enabling a live source.</p>
@@ -49,11 +56,12 @@
         Uncheck Enabled to pause a source and hide it on Presto; its settings, key, and position are kept.</p>
       <p class="scope-badge">Every card on this tab applies to one account only. Settings that apply to every service are on the Settings tab.</p>
       <div id="source-list" aria-label="Accounts in display order"></div>
-      <p class="note">Changes apply automatically after any current probe finishes.</p>
+      <p class="note">Saved changes appear on the Presto display on its next successful poll.
+        New readings may take longer if a probe is still running.</p>
     </section>
 
     <section class="panel" role="tabpanel" id="panel-status" aria-labelledby="tab-status" tabindex="0" hidden>
-      <div class="section-title"><h2>Status <span class="help-slot" data-help="status" data-help-label="The Status tab"></span></h2><p class="note" id="status-updated">Not loaded yet</p></div>
+      <div class="section-title"><h2>Status</h2><p class="note" id="status-updated">Not loaded yet</p></div>
       <p class="note">Everything here is read-only. It refreshes every 10 seconds while this tab is open and the browser tab is in the foreground.</p>
       <h3>Daemon</h3>
       <dl id="status-daemon" class="facts"></dl>
@@ -74,14 +82,14 @@
     </section>
 
     <section class="panel" role="tabpanel" id="panel-settings" aria-labelledby="tab-settings" tabindex="0" hidden>
-      <div class="section-title"><h2>Settings <span class="help-slot" data-help="settings-panel" data-help-label="The Settings tab"></span></h2></div>
+      <div class="section-title"><h2>Settings</h2></div>
       <p class="note">These settings apply to every service. Each section is collapsed except the first one.</p>
 
       <details class="setting" open>
         <summary><span class="setting-title">Home display</span>
-          <span class="help-slot" data-help="home-display" data-help-label="Home display"></span>
           <span class="scope-badge">Applies to all services</span></summary>
         <div class="setting-body">
+          <p class="guide-slot" data-help="home-display" data-help-label="Home display guide"></p>
           <label for="overflow-rows">Overflow strip lines</label>
           <select id="overflow-rows">
             <option value="0">0 (off)</option>
@@ -97,9 +105,9 @@
 
       <details class="setting" id="remote-setting">
         <summary><span class="setting-title">Remote reports</span>
-          <span class="help-slot" data-help="remote-reports" data-help-label="Remote reports"></span>
           <span class="scope-badge">Applies to all services</span></summary>
         <div class="setting-body">
+          <p class="guide-slot" data-help="remote-reports" data-help-label="Remote reports guide"></p>
           <label class="check" id="ingest-label"><input id="ingest-enabled" type="checkbox"> Accept remote reports</label>
           <p id="ingest-lock" class="note" hidden>The DASH_INGEST_ENABLED environment variable controls
             remote reports for this daemon; edit the environment instead of this page.</p>
@@ -120,37 +128,28 @@
 
       <details class="setting" id="alerts-setting">
         <summary><span class="setting-title">Alerts</span>
-          <span class="help-slot" data-help="alerts" data-help-label="Alerts"></span>
           <span class="scope-badge">Applies to all services</span>
           <span class="scope-badge" id="alert-master-summary">Alerts on for every service</span></summary>
         <div class="setting-body">
+          <p class="guide-slot" data-help="alerts" data-help-label="How alerts work"></p>
           <p id="alerts-banner" class="banner" hidden>Alerts are off for all services</p>
           <label class="check"><input id="alert-master" type="checkbox"> Alerts on for all services</label>
           <p id="alert-master-reason" class="note" hidden>Alerts are off for all services: no service chirps,
             lights up or scrolls Home to an alarm. Turn the master switch on to use the settings below.</p>
-          <div class="field-with-help">
-            <label for="alert-warning">Warning percent</label>
-            <span class="help-slot" data-help="alert-thresholds" data-help-label="Alert thresholds"></span>
-          </div>
+          <label for="alert-warning">Warning percent</label>
           <input id="alert-warning" type="number" min="1" max="100" step="1" inputmode="numeric">
           <p class="note">A service that has used this much of an allowance turns yellow.</p>
           <label for="alert-critical">Critical percent</label>
           <input id="alert-critical" type="number" min="1" max="100" step="1" inputmode="numeric">
           <p class="note">A service that has used this much turns red. It must be above the warning percent.
             At 100% a service is rate limited, as it always was.</p>
-          <div class="field-with-help">
-            <label class="check"><input id="alert-sound" type="checkbox"> Sound on a new warning</label>
-            <span class="help-slot" data-help="alert-sound" data-help-label="Sound"></span>
-          </div>
+          <label class="check"><input id="alert-sound" type="checkbox"> Sound on a new warning</label>
           <p class="note">Sound is off until you turn it on here: a desk device must not beep
             unannounced. Tick this box to let the Presto chirp. One chirp for a warning, two for a
             critical or rate-limited service. A warning that persists does not chirp again, and a
             recovery is silent. Long-pressing the Presto mutes the sound for a few hours; the
             screen shows how long is left.</p>
-          <div class="field-with-help">
-            <label for="alert-mute-hours">A long-press mute lasts (hours; 0 = until you press again)</label>
-            <span class="help-slot" data-help="alert-mute" data-help-label="The mute length"></span>
-          </div>
+          <label for="alert-mute-hours">A long-press mute lasts (hours; 0 = until you press again)</label>
           <input id="alert-mute-hours" type="number" min="0" max="48" step="1" inputmode="numeric">
           <p class="note">How long the Presto stays muted after a long press, from 0 to 48 hours.
             Zero means it stays muted until you long-press again. The screen shows a MUTED chip
@@ -185,9 +184,9 @@
 
       <details class="setting">
         <summary><span class="setting-title">Effective daemon configuration</span>
-          <span class="help-slot" data-help="effective-config" data-help-label="Effective configuration"></span>
           <span class="scope-badge">Applies to all services</span></summary>
         <div class="setting-body">
+          <p class="guide-slot" data-help="effective-config" data-help-label="Configuration reference"></p>
           <p class="note">Read-only. These values need a daemon restart, so they are edited in dash.toml or in the environment, not on this page.</p>
           <div id="config-table"></div>
         </div>
@@ -195,9 +194,9 @@
 
       <details class="setting">
         <summary><span class="setting-title">About and help</span>
-          <span class="help-slot" data-help="about" data-help-label="About and help"></span>
           <span class="scope-badge">Applies to all services</span></summary>
         <div class="setting-body">
+          <p class="guide-slot" data-help="about" data-help-label="About Presto AI Dash"></p>
           <h4>Cloud and subscription sources</h4>
           <p class="note">Available subscription connectors show current allowance meters in your source list.
             OpenCode Go reports quota percentages. Ollama Cloud reports dated activity;
@@ -221,19 +220,32 @@
       </details>
     </section>
 
+    <template id="service-card-detail-template">
+      <p data-card-summary></p>
+      <section class="card-readings">
+        <h4>Readings</h4>
+        <div data-card-readings></div>
+      </section>
+      <section class="card-section">
+        <h4>Setup</h4>
+        <div class="card-setup-actions" data-card-actions></div>
+        <div data-card-connection></div>
+      </section>
+      <div data-card-alerts></div>
+      <nav class="card-links" data-card-links aria-label="Service guides and setup"></nav>
+    </template>
+
     <div id="editor-modal" class="modal" hidden>
       <div class="modal-card panel">
         <div class="section-title"><h2 id="editor-title">Add source</h2><button id="close-editor" type="button">Close</button></div>
       <form id="source-form">
-        <div class="field-with-help">
-          <label for="source-type">Source type</label>
-          <span class="help-slot" id="source-type-help"></span>
-        </div>
+        <label for="source-type">Source type</label>
         <select id="source-type" required></select>
         <label for="source-name">Display name</label>
         <input id="source-name" maxlength="80" required autocomplete="off">
         <div id="source-fields"></div>
         <p id="source-help" class="note"></p>
+        <p id="source-type-help" class="guide-slot"></p>
         <label class="check"><input id="source-enabled" type="checkbox"> Enable collection</label>
         <div id="key-section" hidden>
           <label for="api-key">API key</label>

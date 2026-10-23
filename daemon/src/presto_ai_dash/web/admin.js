@@ -35,6 +35,8 @@
   // URL anywhere else in the page.
   const DOCS_BASE = "https://jake1164.github.io/presto-ai-dash/";
   const HELP = {
+    "provider-guides": {page: "getting-started/add-the-first-source.md", anchor: "each-source-has-its-own-guide"},
+    "troubleshooting": {page: "troubleshooting/stale-readings.md", anchor: "where-to-look-first"},
     "tab-services": {page: "guides/admin-page.md", anchor: "services"},
     "tab-status": {page: "guides/admin-page.md", anchor: "status"},
     "tab-settings": {page: "guides/admin-page.md", anchor: "settings"},
@@ -51,7 +53,7 @@
     "alert-sound": {page: "concepts/alerts.md", anchor: "the-sound"},
     "alert-mute": {page: "concepts/alerts.md", anchor: "the-mute-that-expires"},
     "effective-config": {page: "reference/configuration.md", anchor: "where-each-value-comes-from"},
-    "about": {page: "getting-started/what-it-does.md", anchor: "what-it-collects"},
+    "about": {page: "getting-started/what-it-does.md", anchor: "what-presto-ai-dash-does"},
     "claude-export": {page: "guides/claude.md", anchor: "the-terminal-status-line"},
     "source-claude": {page: "guides/claude.md", anchor: "the-terminal-status-line"},
     "source-codex": {page: "guides/codex.md", anchor: "set-it-up"},
@@ -76,7 +78,7 @@
     link.target = "_blank";
     link.rel = "noopener noreferrer";
     link.referrerPolicy = "no-referrer";
-    link.textContent = "?";
+    link.textContent = label;
     link.setAttribute("aria-label", "Help: " + label);
     link.title = "Help: " + label;
     return link;
@@ -91,6 +93,30 @@
       if (link) slot.append(link);
     }
   }
+
+  function updateHelp(tab) {
+    const label = tab[0].toUpperCase() + tab.slice(1) + " help";
+    element("current-tab-help").replaceChildren(helpLink("tab-" + tab, label));
+    element("header-help").open = false;
+  }
+
+  // Native disclosure and plain links keep keyboard interaction familiar.
+  document.addEventListener("click", (event) => {
+    const help = element("header-help");
+    if (!help.contains(event.target) || event.target.closest("a")) help.open = false;
+  });
+  document.addEventListener("keydown", (event) => {
+    const help = element("header-help");
+    if (event.key === "Escape" && help.open) {
+      help.open = false;
+      help.querySelector("summary").focus();
+      event.preventDefault();
+    }
+  });
+  document.addEventListener("focusin", (event) => {
+    const help = element("header-help");
+    if (!help.contains(event.target)) help.open = false;
+  });
 
   // -- small helpers --------------------------------------------------------
 
@@ -182,6 +208,7 @@
   function showTab(name, updateHash = true) {
     const tab = TABS.includes(name) ? name : "services";
     activeTab = tab;
+    updateHelp(tab);
     for (const other of TABS) {
       const button = element("tab-" + other);
       const panel = element("panel-" + other);
@@ -566,11 +593,11 @@
       type?.id === "codex" ? "Reads Codex subscription quotas using your ChatGPT login in Codex. Leave both paths blank for automatic discovery and the default profile. Separate accounts need separate Codex profile directories. OAuth stays with Codex; no pay-per-use API key is needed. Browser and device-code sign-in, cancellation, and logout are available through the Codex login controls." :
       type?.id === "claude" ? "Claude Code exports 5h/weekly subscription quotas after normal terminal responses. Save this source, then set up its exporter below. Readings go straight to the database; existing status-line output is preserved. No API key is needed. Idle readings become stale; the VS Code panel does not run the status line, but the optional usage cache reader reads the numbers Claude Code caches on disk for its /usage dialog." :
       type?.id === "fake" ? "Synthetic demo/test data. Disable it before enabling a live source." : "";
-    // The guide for the source type, beside the type chooser.
+    // The setup guide stays inside the editor, below the source description.
     const guide = element("source-type-help");
     guide.replaceChildren();
-    const guideLink = helpLink("source-" + (type?.id || "fake"),
-                               "The guide for " + (type?.name || "this source"));
+    const guideLink = helpLink("source-" + (type?.id || "fake").replace(/_/g, "-"),
+                               (type?.name || "Source") + " setup guide");
     if (guideLink) guide.append(guideLink);
     if (!type) return;
     for (const field of type.fields) {
@@ -899,8 +926,8 @@
     element("ingest-enabled").focus({preventScroll: true});
   }
   function remoteStatus(source) {
-    // Read-only: where this account stands, and the way to the one place that
-    // turns remote reports on and manages the tokens.
+    // Connection information fills the shared Setup section. Navigation belongs
+    // in the card footer, independently of which provider supplied the reading.
     const box = el("div", "remote-status");
     const known = ingestState !== null;
     const on = !!ingestState?.enabled;
@@ -909,11 +936,13 @@
       source.ingest.token_exists ? "token set" : "no token yet",
       lastReportText(source).replace(/^Last report/, "last report").replace(/^No reports yet/, "no reports yet")
     ].concat(source.ingest.collector_update === "available" ? ["collector update available"] : []).join(" · ")));
-    const link = el("a", "remote-link", on ? "Manage remote reports" : "Set up remote reports");
+    return box;
+  }
+  function remoteSettingsLink() {
+    const link = el("a", "help-link", ingestState?.enabled ? "Manage remote reports" : "Set up remote reports");
     link.href = "#settings";
     link.addEventListener("click", (event) => { event.preventDefault(); openRemoteSettings(); });
-    box.append(link);
-    return box;
+    return link;
   }
   function renderCollectorInfo() {
     const box = element("collector-info");
@@ -970,7 +999,7 @@
     }
     row.append(controls);
     // The guide for the remote token, beside the buttons that manage it.
-    const tokenHelp = helpLink("remote-token", "Remote tokens");
+    const tokenHelp = helpLink("remote-token", "About rotating and revoking tokens");
     if (tokenHelp) row.append(tokenHelp);
     const reveal = revealToken(source);
     if (reveal) row.append(reveal);
@@ -1076,9 +1105,6 @@
     const button = document.createElement("button"); button.textContent = "Edit";
     button.dataset.action = "edit";
     button.addEventListener("click", () => { if (!busy) openEditor(source); });
-    // The help for this account's own actions.
-    const cardHelp = helpLink("account", "Account actions");
-    if (cardHelp) head.append(cardHelp);
     head.append(toggle, handle, enabledLabel, ordering, button);
 
     const detail = document.createElement("div");
@@ -1089,17 +1115,23 @@
     return card;
   }
   function renderCardDetail(source, detail) {
-    // Everything the page showed before the cards were collapsed.
+    // Every provider fills the same template slots, in the same order. Provider
+    // branches supply content; they do not decide where sections or links live.
+    detail.append(element("service-card-detail-template").content.cloneNode(true));
+    const readings = detail.querySelector("[data-card-readings]");
+    const setupActions = detail.querySelector("[data-card-actions]");
+    const connection = detail.querySelector("[data-card-connection]");
+    const guides = detail.querySelector("[data-card-links]");
+    guides.setAttribute("aria-label", source.name + " guides and setup");
     const type = catalog.find((item) => item.id === source.type);
     const keyStatus = source.has_key ? "key stored" :
       type && !type.has_secret ? (source.type === "claude" ? "Claude Code quota export" :
         source.type === "codex" ? "Codex-managed subscription login" :
         source.type === "ollama" ? "local API · no key required" :
         "no API key required") : "no stored key";
-    const summary = document.createElement("p");
+    const summary = detail.querySelector("[data-card-summary]");
     summary.textContent = source.type + " · " + (source.enabled ? source.status : "disabled") +
       " · " + keyStatus;
-    detail.append(summary);
     if (source.type === "claude") {
       const setup = document.createElement("button");
       setup.textContent = source.export_installed ? "Remove Claude export setup" : "Set up Claude export";
@@ -1115,14 +1147,14 @@
         } catch (error) { message(error.message, true); }
         finally { busy = false; setup.disabled = false; }
       });
-      detail.append(setup);
-      // The guide for the Claude export, beside the button that sets it up.
-      const exportHelp = helpLink("claude-export", "The Claude export");
-      if (exportHelp) detail.append(exportHelp);
+      setupActions.append(setup);
     }
     // Remote reports are set up in one place, on the Settings tab: the card only
     // says where this account stands and links there.
-    if (source.ingest) detail.append(remoteStatus(source));
+    if (source.ingest) connection.append(remoteStatus(source));
+    if (!setupActions.children.length && !connection.children.length) {
+      connection.append(el("p", "note", "Use Edit to change this service's connection settings."));
+    }
     if (source.quota) {
       for (const quota of source.quota.windows) {
         const meter = document.createElement("div"); meter.className = "quota " + quota.state;
@@ -1153,24 +1185,24 @@
             (passed ? " (passed)" : "");
           meter.append(reset);
         }
-        detail.append(meter);
+        readings.append(meter);
       }
       if (source.quota.error) {
-        const error = document.createElement("p"); error.textContent = source.quota.error; detail.append(error);
+        const error = document.createElement("p"); error.textContent = source.quota.error; readings.append(error);
       }
       if (source.quota.activity) {
         const activity = source.quota.activity;
         const summary = document.createElement("p");
         summary.textContent = (activity.state === "stale" ? "Stale activity: " : "Reported activity: ") + activity.request_count + " requests · $" +
           activity.usage_usd.toFixed(6) + " · " + (activity.input_tokens + activity.output_tokens) + " tokens";
-        detail.append(summary);
+        readings.append(summary);
         const range = document.createElement("p"); range.className = "note";
         range.textContent = "Period: " + new Date(activity.from).toLocaleString() + " – " +
-          new Date(activity.until).toLocaleString(); detail.append(range);
+          new Date(activity.until).toLocaleString(); readings.append(range);
       }
       if (source.quota.note) {
         const note = document.createElement("p"); note.className = "note";
-        note.textContent = source.quota.note; detail.append(note);
+        note.textContent = source.quota.note; readings.append(note);
       }
     }
     if (source.provenance) {
@@ -1180,12 +1212,17 @@
         const line = source.provenance[key];
         if (!line) continue;
         const paragraph = document.createElement("p"); paragraph.className = "note";
-        paragraph.textContent = line; detail.append(paragraph);
+        paragraph.textContent = line; readings.append(paragraph);
       }
     }
-    // This service's own alert settings: its own switch and its own
-    // thresholds, or the global ones when it sets none.
-    renderServiceAlerts(source, detail);
+    if (!readings.children.length) readings.append(el("p", "note", "Status: " + (source.status || "no data")));
+    renderServiceAlerts(source, detail.querySelector("[data-card-alerts]"));
+    const sourceGuide = helpLink("source-" + source.type.replace(/_/g, "-"),
+                               (type?.name || source.type) + " setup guide");
+    if (sourceGuide) guides.append(sourceGuide);
+    const accountGuide = helpLink("account", "Account actions guide");
+    if (accountGuide) guides.append(accountGuide);
+    if (source.ingest) guides.append(remoteSettingsLink());
   }
 
   // -- the status tab -------------------------------------------------------
@@ -1494,4 +1531,5 @@
   }
   restoreLogin();
   mountHelp();
+  updateHelp(activeTab);
 })();

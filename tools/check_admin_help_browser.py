@@ -32,6 +32,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from datetime import datetime, timedelta, timezone
 from urllib.request import urlopen
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -154,9 +155,82 @@ def main():
             page.wait_for_selector("#workspace:not([hidden])", timeout=15000)
             page.wait_for_timeout(500)
 
+            # Every provider uses the same card template. These are disabled
+            # accounts in the throwaway daemon: no provider is contacted.
+            csrf = page.request.get(url + "api/admin/session").json()["csrf_token"]
+            catalog = page.request.get(url + "api/admin/sources").json()
+            existing = {source["type"] for source in catalog["sources"]}
+            for source_type in catalog["types"]:
+                if source_type["id"] in existing:
+                    continue
+                response = page.request.post(url + "api/admin/sources", headers={
+                    "X-CSRF-Token": csrf, "Origin": url.rstrip("/")}, data={
+                    "type": source_type["id"], "name": source_type["name"],
+                    "enabled": False, "config": {}, "revision": 0})
+                if not response.ok:
+                    raise RuntimeError("could not create disabled test source: " + response.text())
+            # Include representative readings as well as empty accounts, so the
+            # template is checked with bars, stale data, activity and notes.
+            fixtures = page.request.get(url + "api/admin/sources").json()
+            now = datetime.now(timezone.utc)
+            for source in fixtures["sources"]:
+                labels = {"claude": ["5h", "Weekly"], "codex": ["Weekly"],
+                          "opencode_go": ["5h", "Weekly", "Monthly"]}.get(source["type"])
+                if labels:
+                    source["quota"] = {"windows": [{
+                        "label": label, "state": "stale" if source["type"] == "codex" else "available",
+                        "used_percent": 14 + index * 11, "observed_at": now.isoformat(),
+                        "resets_at": (now + timedelta(hours=3)).isoformat(), "source": "test reading"
+                    } for index, label in enumerate(labels)], "note": "Sample quota reading."}
+                elif source["type"] == "ollama_cloud":
+                    source["quota"] = {"windows": [{"label": "Monthly credits", "state": "unavailable"}],
+                        "activity": {"state": "available", "request_count": 12, "usage_usd": .12,
+                                     "input_tokens": 4000, "output_tokens": 1000,
+                                     "from": (now - timedelta(days=1)).isoformat(), "until": now.isoformat()},
+                        "note": "Activity is reported; no allowance is available."}
+            page.route("**/api/admin/sources", lambda route: (
+                route.fulfill(json=fixtures) if route.request.method == "GET" else route.continue_()))
+            page.reload()
+            page.wait_for_selector("#workspace:not([hidden])")
+            page.wait_for_function("count => document.querySelectorAll('.source').length === count",
+                                   arg=len(catalog["types"]))
+            for toggle in page.locator(".card-toggle").all():
+                toggle.click()
+            # Alert settings load asynchronously and redraw the account list.
+            page.wait_for_function("() => [...document.querySelectorAll('.card-detail')].every("
+                                   "card => card.querySelector('.service-alerts input'))")
+            layouts = page.locator(".card-detail").evaluate_all("""cards => cards.map(card => ({
+                headings: [...card.querySelectorAll('h4')].map(h => h.textContent),
+                outsideLinks: [...card.querySelectorAll('a')].filter(a => !a.closest('.card-links')).length,
+                guideCount: card.querySelectorAll('.card-links a.help-link').length,
+                footerLast: card.lastElementChild.matches('.card-links')
+            }))""")
+            for layout in layouts:
+                if layout["headings"] != ["Readings", "Setup", "Alerts"]:
+                    failures.append("provider card has inconsistent sections: " + str(layout))
+                if layout["outsideLinks"] or layout["guideCount"] < 2 or not layout["footerLast"]:
+                    failures.append("provider card has links outside its shared footer: " + str(layout))
+            if page.locator(".card-readings progress").count() != 6:
+                failures.append("quota bars were lost when moving readings into the template")
+            print("shared template verified for %d provider cards" % len(layouts))
+            shots = os.path.join(REPO_ROOT, ".preview", "admin-cards")
+            os.makedirs(shots, exist_ok=True)
+            for index, card in enumerate(page.locator(".source").all()):
+                card.screenshot(path=os.path.join(shots, "card-%d.png" % index))
+            page.set_viewport_size({"width": 390, "height": 800})
+            for index, card in enumerate(page.locator(".source").all()):
+                card.screenshot(path=os.path.join(shots, "phone-card-%d.png" % index))
+            if page.evaluate("document.documentElement.scrollWidth > innerWidth"):
+                failures.append("expanded provider cards overflow the phone viewport")
+            page.set_viewport_size({"width": 1280, "height": 900})
+            page.locator(".card-links a[href='#settings']").first.click()
+            if page.locator("#remote-setting").get_attribute("open") is None:
+                failures.append("the footer remote-report link did not open its settings")
+            page.click("#tab-services")
+
             # 1. Every help link points at the right page and anchor.
             links = page.eval_on_selector_all(
-                "a.help-link",
+                "a.help-link[target='_blank']",
                 "els => els.map(e => ({href: e.getAttribute('href'),"
                 " target: e.getAttribute('target'), rel: e.getAttribute('rel'),"
                 " referrer: e.getAttribute('referrerpolicy'),"
@@ -177,13 +251,35 @@ def main():
                     failures.append("a help link sends a referrer: %s" % link["href"])
                 if not (link["label"] or "").startswith("Help: "):
                     failures.append("a help link has no aria-label: %s" % link["href"])
-                if link["text"] != "?":
-                    failures.append("a help link is not a question mark: %s" % link["href"])
+                if not link["text"] or link["text"] == "?":
+                    failures.append("a help link needs descriptive text: %s" % link["href"])
                 if "?" in (link["href"] or "").split("#")[0]:
                     failures.append("a help link has a query string: %s" % link["href"])
 
             # 2. The keyboard reaches a link, and Enter opens it.
-            page.focus("a.help-link")
+            # Help follows the tab; Escape and outside clicks dismiss it.
+            for tab in ("services", "status", "settings"):
+                page.click("#tab-" + tab)
+                page.click("#header-help > summary")
+                current = page.locator("#current-tab-help a")
+                if current.inner_text() != tab.title() + " help":
+                    failures.append("help does not follow the " + tab + " tab")
+                if not current.get_attribute("href").endswith("#" + tab):
+                    failures.append("help points at the wrong tab")
+                page.keyboard.press("Escape")
+                if page.locator("#header-help").get_attribute("open") is not None:
+                    failures.append("Escape did not close Help")
+                if not page.locator("#header-help > summary").evaluate("el => el === document.activeElement"):
+                    failures.append("Escape did not return focus to Help")
+            page.click("#header-help > summary")
+            page.click("h1")
+            if page.locator("#header-help").get_attribute("open") is not None:
+                failures.append("clicking outside did not close Help")
+            page.click("#tab-services")
+            if page.locator("#panel-services .source-head .help-link").count():
+                failures.append("collapsed account rows still have help links")
+            page.click("#header-help > summary")
+            page.focus("#current-tab-help a")
             page.keyboard.press("Tab")
             focused = page.evaluate("document.activeElement.className")
             if "help-link" not in (focused or ""):
@@ -198,6 +294,7 @@ def main():
 
             # 3. Phone width: no horizontal overflow, and the links can be tapped.
             page.set_viewport_size({"width": 390, "height": 800})
+            page.locator("#header-help").evaluate("el => { el.open = true; }")
             page.wait_for_timeout(300)
             overflow = page.evaluate(
                 "() => ({scroll: document.documentElement.scrollWidth,"

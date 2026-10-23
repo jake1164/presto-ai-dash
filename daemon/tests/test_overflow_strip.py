@@ -141,7 +141,7 @@ class StripRegionTests(unittest.TestCase):
         layout = layout_for(rows, 3)
         self.assertEqual(layout.total, quota_height(3) + quota_height(2)
                          + 2 * quota_height(1) + LOCAL_ROW)
-        self.assertEqual(layout.total, 191)
+        self.assertEqual(layout.total, 199)
         self.assertEqual(layout.lines, 0)
         self.assertEqual(layout.region, SOURCE_HEIGHT)
 
@@ -236,7 +236,7 @@ class StripLineCountTests(unittest.TestCase):
         layout = layout_for(rows, 1)
         self.assertEqual(layout.total, quota_height(3) + quota_height(2)
                          + 2 * quota_height(1) + 2 * LOCAL_ROW)
-        self.assertEqual(layout.total, 209)
+        self.assertEqual(layout.total, 217)
         self.assertEqual(layout.lines, 1)
         self.assertEqual(layout.region, 186)
         lines, plus = layout.strip(0)
@@ -247,12 +247,12 @@ class StripLineCountTests(unittest.TestCase):
                          ["Ollama", "LiteLLM"])
 
     def test_one_hidden_name_needs_one_line(self):
-        # Three one-bar rows and two three-bar rows: 38 * 3 + 52 * 2 = 218, so the
+        # Three one-bar rows and two three-bar rows: 40 * 3 + 54 * 2 = 228, so the
         # list scrolls, and with 186 pixels left the fifth row is the only one cut off.
         rows = rows_for([("Codex", "quota"), ("Ollama Cloud", "quota"), ("Account 03", "quota"),
                          ("OpenCode Go", "quota"), ("OpenCode Go B", "quota")])
         layout = layout_for(rows, 1)
-        self.assertEqual(layout.total, 218)
+        self.assertEqual(layout.total, 228)
         self.assertEqual(layout.lines, 1)
         lines, plus = layout.strip(0)
         self.assertIsNone(plus)
@@ -298,7 +298,7 @@ class StripLineCountTests(unittest.TestCase):
                 self.assertEqual(layout.lines, layout.lines)
 
     def test_fifteen_accounts_fit_without_a_count_and_sixteen_need_one(self):
-        # The rows are thirty-eight pixels each, so more of them fit than when every
+        # The rows are forty pixels each, so more of them fit than when every
         # row was forty-six: the strip names what is cut off in three lines up to
         # fifteen accounts, and from sixteen it adds a count.
         for total, counted in ((15, False), (16, True)):

@@ -25,7 +25,7 @@ LOCAL_ROW = 18
 # alike, and the row is as tall as its bars need. With more than four windows
 # the bars thin out, so a service with many buckets cannot fill the list.
 ROW_TOP_H = 30
-ROW_GAP = 2
+ROW_GAP = 4
 BAR_H = 6
 BAR_H_MANY = 3
 BAR_GAP = 1

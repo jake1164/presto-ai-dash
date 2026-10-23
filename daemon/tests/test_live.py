@@ -169,7 +169,7 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
         """Four quota accounts and two local services, in the saved order.
 
         The first has three windows and the second two, like the author's OpenCode Go
-        and Claude; each bar is six pixels, so the rows are 52, 45, 38 and 38 pixels."""
+        and Claude; each bar is six pixels, so the rows are 54, 47, 40 and 40 pixels."""
         payload = embedded_payload()
         payload['card_order'] = 'accounts'
         payload['updated_at'] = '2026-10-20T12:00:00+00:00'
@@ -194,7 +194,7 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_home_scroll_uses_the_total_height_of_mixed_rows(self):
         self.app.client.fetch_async.return_value = self.mixed_payload()
         await self.app.poll_once()
-        total = 52 + 45 + 38 + 38 + 2 * 18
+        total = 54 + 47 + 40 + 40 + 2 * 18
         # The list is taller than the list area, so the overflow strip takes
         # one line of it: 204 - 18 = 186 pixels of list.
         self.assertEqual(self.app.home_layout.lines, 1)

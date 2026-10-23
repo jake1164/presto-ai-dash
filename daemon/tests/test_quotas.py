@@ -261,8 +261,9 @@ class QuotaDeviceTests(unittest.TestCase):
         layout = build_home_layout(Display(), rows, 1)
         scroll.set_height(home_total_height(rows), SOURCE_TOP, SOURCE_HEIGHT,
                           layout.region)
-        # Three windows each: three six-pixel bars and their gaps make a row 52 pixels tall.
-        self.assertEqual(scroll.limit, 8 * 52 - layout.region)
+        # Three windows each: three six-pixel bars, their gaps and the four pixels
+        # below make a row 54 pixels tall.
+        self.assertEqual(scroll.limit, 8 * 54 - layout.region)
         for offset in (0, 25, scroll.limit):
             with self.subTest(offset=offset):
                 display = Display()

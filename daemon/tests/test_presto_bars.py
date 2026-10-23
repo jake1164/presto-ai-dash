@@ -88,7 +88,7 @@ class BarHeightTests(unittest.TestCase):
                 self.assertGreaterEqual(heights[0], 2)
 
     def test_the_row_is_as_tall_as_its_bars(self):
-        for count, expected in ((1, 38), (2, 45), (3, 52)):
+        for count, expected in ((1, 40), (2, 47), (3, 54)):
             with self.subTest(count=count):
                 row = source_rows(payload_for(window_list(count)))[0]
                 self.assertEqual(quota_row_height(row), expected)

@@ -552,7 +552,7 @@ class HomeOrderTests(unittest.TestCase):
         rows, _ = self.drawn(order)
         quota_rows = [row for row in rows if "windows" in row]
         total = sum(quota_row_height(row) for row in quota_rows) + 2 * LOCAL_ROW
-        self.assertEqual(total, 209)  # 38 + 45 + 52 + 38, and two one-line rows
+        self.assertEqual(total, 217)  # 40 + 47 + 54 + 40, and two one-line rows
         self.assertEqual(home_total_height(rows), total)
         # The list is taller than the list area, so the overflow strip takes
         # one line of it and the list scrolls behind the strip.

@@ -548,7 +548,8 @@ def build_instance_payload(snapshots, instances, alerts=None, now=None,
 # builds its own listing. Add a key here when presto/ starts reading it.
 DEVICE_SOURCE_KEYS = ("id", "type", "name", "status", "quota", "metrics", "alerts",
                       "marks")
-DEVICE_QUOTA_KEYS = ("windows", "activity", "hint", "reset_credits")
+DEVICE_QUOTA_KEYS = ("windows", "activity", "hint", "reset_credits", "last_update")
+DEVICE_UPDATE_KEYS = ("age_seconds", "in_use")
 DEVICE_WINDOW_KEYS = ("label", "used_percent", "state", "period_minutes",
                       "resets_at", "observed_at")
 DEVICE_ACTIVITY_KEYS = ("request_count", "usage_usd", "from", "until", "state")
@@ -584,6 +585,8 @@ def _device_quota(quota):
         result["activity"] = _pick(result["activity"], DEVICE_ACTIVITY_KEYS)
     if isinstance(result.get("reset_credits"), dict):
         result["reset_credits"] = _pick(result["reset_credits"], DEVICE_RESET_KEYS)
+    if isinstance(result.get("last_update"), dict):
+        result["last_update"] = _pick(result["last_update"], DEVICE_UPDATE_KEYS)
     return result
 
 

@@ -384,13 +384,16 @@ def _freshness(row, stale):
     from home import reset_label, window_tag
     hint = row.get("hint")
     # A daemon hint takes the note slot; the name makes room for it below.
-    if hint:
+    update = row.get("last_update")
+    if hint and not update:
         return hint, INK_DIM
     binding = row.get("binding")
     if binding is None:
+        if update and any(w.get("expired") for w in row["windows"]):
+            return "awaiting refresh", INK_DIM
         return "", INK_DIM
     window = row["windows"][binding]
-    if stale or window["state"] == "stale":
+    if (stale or window["state"] == "stale") and not update:
         # Never present an old reading, or a passed reset, as current.
         # The daemon's age says nothing about how long the device lost it.
         ago = "" if stale else reset_label(window.get("age"))
@@ -403,17 +406,31 @@ def _freshness(row, stale):
     return "%s resets %s" % (window_tag(window), reset_label(reset_in)), _window_rgb(window, stale)
 
 
+def _update_note(row, stale):
+    """Colour only the reading age; idle or disconnected readings stay grey."""
+    from alerts import rgb_for_accent
+    update = row.get("last_update")
+    if not update:
+        return "", INK_DIM
+    rgb = INK_DIM
+    if not stale and update["in_use"]:
+        rgb = rgb_for_accent("yellow" if update["age_seconds"] > 15 * 60 else "green")
+    return update["text"], rgb
+
+
 def _draw_quota_row(display, palette, row, y, row_width, stale):
     """Name and reset; big labelled percentages; one stacked bar per window."""
     from home import bar_fill, home_windows, quota_label, window_tag
     right = 14 + row_width
     _marker(display, palette, row, 14, y, MARKER, stale)
     note, note_rgb = _freshness(row, stale)
+    update, update_rgb = _update_note(row, stale)
     display.set_font("bitmap8")
     # Firmware wraps at the exact width, so leave slack after the note.
     note_w = display.measure_text(note, 1) + 2 if note else 0
+    update_w = display.measure_text(update, 1) + 8 if update else 0
     name_x = 14 + MARKER + 4
-    space = max(0, row_width - MARKER - 4 - note_w - 8)
+    space = max(0, row_width - MARKER - 4 - note_w - update_w - 8)
     badge = row.get("reset_badge")
     badge_text = badge.get("text") if isinstance(badge, dict) else None
     badge_w = display.measure_text(badge_text, 1) + 4 if badge_text else 0
@@ -443,6 +460,8 @@ def _draw_quota_row(display, palette, row, y, row_width, stale):
               AMBER if badge.get("amber") else INK_DIM, scale=1)
     if note:
         _text(display, palette, note, right - note_w, y, note_rgb, scale=1)
+    if update:
+        _text(display, palette, update, right - note_w - update_w, y, update_rgb, scale=1)
 
     windows = home_windows(row)
     cells = []

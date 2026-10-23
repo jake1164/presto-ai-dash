@@ -97,7 +97,7 @@ reporting is not the same as a provider that cannot be reached.
 
 | Surface | What it shows |
 | --- | --- |
-| Home | The hint in the note slot, in dim ink, in place of the reset note |
+| Home | Claude quota readings show `Updated <age>` before the labelled reset; grey while idle, green in use, yellow in use when over 15 minutes old. Missing readings keep their hint. |
 | Detail card | `Quota age: <age>`, `Last reply: <age> ago` or `Last reply: unavailable`, and `Reports: <host> <age> ago` or `Reports: never` |
 | Admin page | A freshness chip on each account: `fresh 3m`, `stale 2d`, `no data` |
 

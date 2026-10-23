@@ -528,6 +528,14 @@ def present_quota(report, now=None):
     if "collector_seen_at" in result:
         # Built here, not at collect time, so the hint ages between polls.
         result["hint"] = claude_hint(result, now)
+        result.pop("last_update", None)
+        measured = [w for w in result["windows"] if w.get("used_percent") is not None]
+        if measured:
+            observed = max(timestamp(w["observed_at"]) for w in measured)
+            result["last_update"] = {
+                "age_seconds": max(0, int((now - observed).total_seconds())),
+                "in_use": claude_in_use(result, now),
+            }
     return result
 
 

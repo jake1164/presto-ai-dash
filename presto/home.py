@@ -568,6 +568,25 @@ def home_windows(row):
     return shown or windows[:1]
 
 
+def update_note(value):
+    """A bounded quota-reading age, separate from the quota's reset time."""
+    if not isinstance(value, dict):
+        return None
+    age = value.get("age_seconds")
+    if not _number(age) or age < 0 or age > 315360000:
+        return None
+    minutes = int(age) // 60
+    hours, minutes = divmod(minutes, 60)
+    if not hours:
+        label = "%dm" % minutes
+    elif not minutes:
+        label = "%dh" % hours
+    else:
+        label = "%dh:%02dm" % (hours, minutes)
+    return {"text": "Updated " + label, "age_seconds": age,
+            "in_use": value.get("in_use") is True}
+
+
 def source_rows(payload):
     """Reusable per-instance summaries; absent usage is never a zero or quota."""
     from cards import clean_id, normalise_status
@@ -631,6 +650,7 @@ def source_rows(payload):
                              "name": str(source.get("name") or "Cloud account"),
                              "status": normalise_status(source.get("status")), "usage": text,
                              "windows": windows, "activity": text, "hint": hint,
+                             "last_update": update_note(quota.get("last_update")),
                              "reset_badge": reset_badge(quota.get("reset_credits"), now),
                              "binding": binding_window(windows),
                              "marks": marks,

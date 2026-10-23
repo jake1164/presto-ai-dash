@@ -32,10 +32,10 @@ flowchart TB
 
 ## Supported services <img align="right" src="https://img.shields.io/badge/6-integrations-238636" alt="6 integrations">
 
-<table width="100%">
+<table>
   <tr>
-    <td width="50%"><a href="https://jake1164.github.io/presto-ai-dash/guides/claude/"><strong>Claude Code ↗</strong></a><br>Subscription quota &amp; activity</td>
-    <td width="50%"><a href="https://jake1164.github.io/presto-ai-dash/guides/codex/"><strong>OpenAI Codex ↗</strong></a><br>Quotas, resets &amp; banked credits</td>
+    <td width="400"><a href="https://jake1164.github.io/presto-ai-dash/guides/claude/"><strong>Claude Code ↗</strong></a><br>Subscription quota &amp; activity</td>
+    <td width="400"><a href="https://jake1164.github.io/presto-ai-dash/guides/codex/"><strong>OpenAI Codex ↗</strong></a><br>Quotas, resets &amp; banked credits</td>
   </tr>
   <tr>
     <td><a href="https://jake1164.github.io/presto-ai-dash/guides/opencode-go/"><strong>OpenCode Go ↗</strong></a><br>Subscription limits &amp; resets</td>

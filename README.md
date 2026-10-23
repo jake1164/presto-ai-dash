@@ -30,15 +30,30 @@ flowchart TB
     D -->|"Wi-Fi"| P["Presto touchscreen<br/>Display and alerts"]
 ```
 
-## Supported services
+## Supported services <img align="right" src="https://img.shields.io/badge/6-integrations-238636" alt="6 integrations">
 
-- **Subscription quotas and resets:** [Claude Code](https://jake1164.github.io/presto-ai-dash/guides/claude/) · [OpenAI Codex](https://jake1164.github.io/presto-ai-dash/guides/codex/) · [OpenCode Go](https://jake1164.github.io/presto-ai-dash/guides/opencode-go/)
-- **Cloud activity and local service health:** [Ollama Cloud](https://jake1164.github.io/presto-ai-dash/guides/ollama-cloud/) · [Ollama](https://jake1164.github.io/presto-ai-dash/guides/ollama/) · [LiteLLM](https://jake1164.github.io/presto-ai-dash/guides/litellm/)
+<table>
+  <tr>
+    <td width="50%"><a href="https://jake1164.github.io/presto-ai-dash/guides/claude/"><strong>Claude Code ↗</strong></a><br>Subscription quota &amp; activity</td>
+    <td width="50%"><a href="https://jake1164.github.io/presto-ai-dash/guides/codex/"><strong>OpenAI Codex ↗</strong></a><br>Quotas, resets &amp; banked credits</td>
+  </tr>
+  <tr>
+    <td><a href="https://jake1164.github.io/presto-ai-dash/guides/opencode-go/"><strong>OpenCode Go ↗</strong></a><br>Subscription limits &amp; resets</td>
+    <td><a href="https://jake1164.github.io/presto-ai-dash/guides/ollama-cloud/"><strong>Ollama Cloud ↗</strong></a><br>Cloud requests, tokens &amp; spend</td>
+  </tr>
+  <tr>
+    <td><a href="https://jake1164.github.io/presto-ai-dash/guides/ollama/"><strong>Ollama ↗</strong></a><br>Local models &amp; server health</td>
+    <td><a href="https://jake1164.github.io/presto-ai-dash/guides/litellm/"><strong>LiteLLM ↗</strong></a><br>Gateway usage, health &amp; spend</td>
+  </tr>
+</table>
 
-Each link explains the metrics, collection method, setup, and limitations for that service. See also [Sources](https://jake1164.github.io/presto-ai-dash/concepts/sources/) and [where quota numbers come from](https://jake1164.github.io/presto-ai-dash/concepts/quotas-and-provenance/).
+Each service links to its metrics, setup, collection method, and limitations. Also see [Source concepts](https://jake1164.github.io/presto-ai-dash/concepts/sources/) and [where quota numbers come from](https://jake1164.github.io/presto-ai-dash/concepts/quotas-and-provenance/).
 
-> [!TIP]
-> **Missing your favorite AI service?** [Request a new source](https://github.com/jake1164/presto-ai-dash/issues/new/choose) — no coding or API knowledge required, and requests are free. Want to build one? [Contribute an integration](CONTRIBUTING.md) directly through a pull request.
+### 🔌 Missing your favorite AI service?
+
+Presto AI Dash is designed to grow. Request a new provider, subscription, or local service—**no coding or API knowledge required, and requests are free.**
+
+[**💡 Request a Source →**](https://github.com/jake1164/presto-ai-dash/issues/new/choose) &nbsp;&nbsp; [**🔧 Contribute a Source →**](CONTRIBUTING.md)
 
 ## Get started
 

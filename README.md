@@ -53,7 +53,7 @@ For configuration, troubleshooting, security, and detailed limitations, see the 
 If Presto AI Dash is useful, a **GitHub star** helps others discover it. Sponsorships and coffee donations help support maintenance, testing, and future integrations. Donations are optional and don't guarantee a particular integration.
 
 <p align="center">
-  <a href="https://github.com/sponsors/jake1164"><img src="docs/user/images/github-sponsors-button.svg?v=3" alt="Support on GitHub Sponsors" height="35"></a>
+  <a href="https://github.com/sponsors/jake1164"><img src="docs/user/images/sponsor-github.svg" alt="Support on GitHub Sponsors" height="35"></a>
   <a href="https://buymeacoffee.com/jake1164s"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me a Coffee" height="35"></a>
 </p>
 

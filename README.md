@@ -119,7 +119,9 @@ cd daemon
 ```
 
 The suite is pure CPython with localhost HTTP only; the Presto logic is
-tested on the host too. See
+tested on the host too. Tests are grouped into `core`, `admin`, `providers`,
+`ingest`, `device`, `security` and `tooling` folders. VS Code offers **Run test
+group** and **Run all tests** tasks. See
 [Running the tests](https://jake1164.github.io/presto-ai-dash/developers/running-the-tests/)
 and, for the screen preview and the device sync,
 [The preview and the device sync](https://jake1164.github.io/presto-ai-dash/developers/preview-and-device/).

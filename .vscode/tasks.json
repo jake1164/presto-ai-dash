@@ -2,6 +2,26 @@
   "version": "2.0.0",
   "tasks": [
     {
+      "label": "Run all tests",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "windows": { "command": "${workspaceFolder}/.venv/Scripts/python.exe" },
+      "args": ["-m", "unittest", "discover", "-s", "tests", "-q"],
+      "options": { "cwd": "${workspaceFolder}/daemon" },
+      "problemMatcher": [],
+      "group": "test"
+    },
+    {
+      "label": "Run test group",
+      "type": "process",
+      "command": "${workspaceFolder}/.venv/bin/python",
+      "windows": { "command": "${workspaceFolder}/.venv/Scripts/python.exe" },
+      "args": ["-m", "unittest", "discover", "-s", "tests/${input:testGroup}", "-t", "tests", "-q"],
+      "options": { "cwd": "${workspaceFolder}/daemon" },
+      "problemMatcher": [],
+      "group": "test"
+    },
+    {
       "label": "Sync Presto",
       "type": "process",
       "command": "${workspaceFolder}/.venv/bin/python",
@@ -23,6 +43,13 @@
     }
   ],
   "inputs": [
+    {
+      "id": "testGroup",
+      "type": "pickString",
+      "description": "Test group to run",
+      "options": ["core", "admin", "providers", "ingest", "device", "security", "tooling"],
+      "default": "core"
+    },
     {
       "id": "prestoPort",
       "type": "promptString",

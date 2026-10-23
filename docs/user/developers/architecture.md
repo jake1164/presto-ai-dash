@@ -90,7 +90,7 @@ The daemon builds one payload and then makes a **device view** of it:
   quota report once.
 
 The whitelist is the `DEVICE_*_KEYS` constants in `dashboard.py`, and
-`daemon/tests/test_device_payload.py` proves two things: the device draws
+`daemon/tests/device/test_device_payload.py` proves two things: the device draws
 exactly the same screens from the slim payload, and the whitelist still
 covers every key the device code reads.
 

@@ -200,7 +200,7 @@ DEVICE_WINDOW_KEYS = ("label", "used_percent", "state", "period_minutes",
 DEVICE_TOP_KEYS = ("sources", "card_order", "updated_at", "display", "alerts")
 ```
 
-**The guard test** is `daemon/tests/test_device_payload.py`. It parses the
+**The guard test** is `daemon/tests/device/test_device_payload.py`. It parses the
 device's own source with `ast`, finds every key the device reads, and
 requires each one to be on the matching whitelist. If you add a key to the
 device and forget the whitelist, that test fails.

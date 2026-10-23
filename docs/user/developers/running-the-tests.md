@@ -14,32 +14,44 @@ On macOS or Linux use `../.venv/bin/python`.
 Use the repository's `.venv`, not a global Python: it has the project and its
 test dependencies installed.
 
-To run one file, or one test:
+To run one group, one file, or one class (from `daemon/`):
 
 ```bash
-../.venv/Scripts/python -m unittest tests.test_sources -v
-../.venv/Scripts/python -m unittest tests.test_sources.OllamaTests -v
+../.venv/Scripts/python -m unittest discover -s tests/providers -t tests -q
+../.venv/Scripts/python -m unittest discover -s tests/providers -t tests -p test_sources.py -v
+../.venv/Scripts/python -m unittest discover -s tests/providers -t tests -p test_sources.py -k OllamaTests -v
 ```
+
+Keep `-t tests` when selecting a group so shared fixtures and cross-group
+imports resolve the same way as the full suite. Add `-k test_method_name` to
+select a single method instead of a class.
+
+In VS Code, the Testing view groups the files under the folders below. Use
+**Test: Refresh Tests** after pulling the reorganization, then expand or run
+the area you need. **Tasks: Run Task** also offers **Run all tests** and
+**Run test group**, which prompts for a group.
 
 ## What the suite covers
 
 | Area | Where |
 | --- | --- |
-| The status vocabulary, snapshots and cards | `tests/test_m2.py`, `tests/test_cards.py` |
-| Storage and migration | `tests/test_m3.py`, `tests/test_observations.py` |
-| Accounts, settings and the admin API | `tests/test_management.py` |
-| The quota model and the hints | `tests/test_quotas.py`, `tests/test_claude_hint.py` |
-| The alert thresholds and the policy | `tests/test_alert_thresholds.py`, `tests/test_alert_policy.py` |
-| The device payload and its whitelist | `tests/test_device_payload.py` |
-| The device's one write | `tests/test_alert_write_api.py`, `tests/test_device_alerts.py` |
-| The ingest protocol | `tests/test_ingest.py`, `tests/test_ingest_api.py`, `tests/test_ingest_roundtrip.py` |
-| The Claude readers | `tests/test_claude.py`, `tests/test_claude_activity.py`, `tests/test_claude_usage_cache.py` |
-| The Presto app | `tests/test_presto_cards.py`, `tests/test_presto_bars.py`, `tests/test_home.py`, `tests/test_ui.py` |
-| The source template | `tests/test_source_template.py` |
+| Models, storage, quotas, configuration and alert thresholds | `tests/core/` |
+| Accounts, settings, sessions and admin routes | `tests/admin/` |
+| Provider clients, Claude readers, Codex and the source template | `tests/providers/` |
+| Remote ingest, pushed observations and the collector | `tests/ingest/` |
+| Presto UI, gestures, polling, alerts and the device API contract | `tests/device/` |
+| Input hardening, authentication, private files and HTTP boundaries | `tests/security/` |
+| Preview, USB sync, containers, health checks, documentation and licences | `tests/tooling/` |
+
+Put new test files in the relevant group. Each group has an `__init__.py`
+so standard `unittest` discovery visits it. Shared helpers `envutil.py` and
+`presto_path.py`, and shared `fixtures/`, stay at the `tests/` root. Import
+fixtures from other test modules by their group, for example
+`from admin.test_management import ManagementBase`.
 
 ## The device payload guard
 
-`tests/test_device_payload.py` is the test that keeps the device and the
+`tests/device/test_device_payload.py` is the test that keeps the device and the
 daemon honest about the payload. It proves:
 
 - the device draws exactly the same screens from the slim payload as from
@@ -59,7 +71,7 @@ account. It is a hard limit: the test fails the build when it is exceeded.
 ## The Presto tests
 
 The Presto logic runs on the host too. Only `presto/main.py` needs real
-hardware. `tests/test_presto_structure.py` enforces the layering: only
+hardware. `tests/device/test_presto_structure.py` enforces the layering: only
 `main.py` and `ui.py` may import `presto`, `machine`, `picographics` or
 `picovector`.
 

@@ -1,6 +1,6 @@
 """A template for the test that keeps a new source honest.
 
-Copy this file to ``daemon/tests/test_<your_source>.py`` and fill in the
+Copy this file to ``daemon/tests/providers/test_<your_source>.py`` and fill in the
 parts marked TODO. The template source it exercises lives in
 ``daemon/templates/source_template.py``; a real source lives in
 ``daemon/src/presto_ai_dash/sources/`` and is imported by name instead.
@@ -23,7 +23,10 @@ import unittest
 from datetime import datetime, timezone
 from unittest.mock import patch
 
+# Run here in templates/, or after copying into a test group such as providers/.
 HERE = os.path.dirname(os.path.abspath(__file__))
+if os.path.basename(HERE) != "templates":
+    HERE = os.path.dirname(HERE)  # shared tests root
 sys.path.insert(0, os.path.join(HERE, "..", "src"))
 
 from presto_ai_dash.models import SourceSnapshot  # noqa: E402

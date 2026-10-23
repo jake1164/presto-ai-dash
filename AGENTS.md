@@ -122,7 +122,7 @@ ability you have (attach or open the file). Exit code 1 means the app raised;
 the traceback is on stderr. Gestures are the same names as above.
 
 **C. Cannot view images at all.** Say so, make the change, and rely on the tests
-in `daemon/tests/test_ui.py` and `test_cards.py`, which check text fits and does
+in `daemon/tests/device/test_ui.py` and `test_cards.py`, which check text fits and does
 not overlap. Do not claim visual verification.
 
 ### 3. Every card, without a server

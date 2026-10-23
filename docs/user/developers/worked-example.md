@@ -27,7 +27,7 @@ you move the file into `sources/`.
 ## Why the template is not a copy of a real source
 
 A template that nobody runs rots. The one in this repository is executed by
-`daemon/tests/test_source_template.py`, which:
+`daemon/tests/providers/test_source_template.py`, which:
 
 - imports it **by path**, so discovery never sees it,
 - runs its `collect()` against a **fake response**, so no network is
@@ -44,7 +44,7 @@ A template that nobody runs rots. The one in this repository is executed by
 ```bash
 cd daemon
 cp templates/source_template.py src/presto_ai_dash/sources/your_source.py
-cp templates/test_source_template.py tests/test_your_source.py
+cp templates/test_source_template.py tests/providers/test_your_source.py
 ```
 
 ### 2. Change four things
@@ -73,7 +73,7 @@ Here is the template's own test, run in this repository:
 
 ```console
 $ cd daemon
-$ ../.venv/Scripts/python -m unittest tests.test_source_template -v
+$ ../.venv/Scripts/python -m unittest discover -s tests/providers -t tests -p test_source_template.py -v
 test_a_window_the_provider_did_not_report_is_unavailable ... ok
 test_an_unexpected_response_is_offline_rather_than_an_exception ... ok
 test_an_unreachable_service_is_offline ... ok

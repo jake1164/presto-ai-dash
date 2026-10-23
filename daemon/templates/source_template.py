@@ -4,7 +4,7 @@ Copy this file to ``daemon/src/presto_ai_dash/sources/<your_source>.py`` and
 work through it. The template deliberately lives *outside* the importable
 package, in ``daemon/templates/``, so it can never be discovered by the
 daemon and can never appear in the admin page's source catalog. A test
-(``daemon/tests/test_source_template.py``) keeps it working.
+(``daemon/tests/providers/test_source_template.py``) keeps it working.
 
 The four things to change when you copy it:
 

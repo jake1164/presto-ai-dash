@@ -83,7 +83,7 @@ different ones), and its parsing. Do not add a second file.
 ### The version
 
 `COLLECTOR_VERSION` belongs to the file as a whole, and it is a whole number.
-Change the file and raise the number. `tests/test_collector_version.py` records
+Change the file and raise the number. `tests/ingest/test_collector_version.py` records
 each released version with the hash of the file and fails when they disagree,
 so a changed file cannot keep an old version.
 

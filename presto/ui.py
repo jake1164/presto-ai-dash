@@ -57,12 +57,8 @@ TRACK = (56, 60, 72)
 
 # Live Home rows: a name line, then a bars/reset line.
 MARKER = 8
-# The height of the bar area of a row. The row is 46 pixels tall and the
-# numbers above the bars take 30 of them, so 14 leaves exactly the 2 pixels
-# of space between two rows.
-BARS_H = 14
-# The gap between two bars of the same row.
-BAR_GAP = 1
+# The height and gap of a row's bars come from home.py, which also sizes the
+# row to fit them: every bar is the same thickness, whatever the service.
 
 # How far a stale window's colour is faded toward grey. It keeps a tint of its
 # own hue, so three bars can still be told apart, but it stays readable:
@@ -123,27 +119,16 @@ ALERT_MARK_CUT = (
 def bar_layout(count):
     """The bar heights of a row and the gap between them.
 
-    The bars never leave the bar area: with many windows the gap shrinks
-    first, so a row of eight windows still fits.
+    Every bar has the same thickness; the row is made tall enough for them.
     """
+    from home import BAR_GAP, bar_height
     if count <= 0:
         return [], BAR_GAP
-    if count <= 2:
-        return [6] * count, BAR_GAP
-    gap = BAR_GAP
-    height = max(1, (BARS_H - (count - 1) * gap) // count)
-    while gap and height * count + gap * (count - 1) > BARS_H:
-        gap -= 1
-        height = max(1, (BARS_H - (count - 1) * gap) // count)
-    return [height] * count, gap
+    return [bar_height(count)] * count, BAR_GAP
 
 
 def bar_heights(count):
-    """The height of each bar of a row, so the bars fill the bar area.
-
-    Three windows get four-pixel bars with one-pixel gaps; one or two
-    windows get a taller bar each. Never more than ``BARS_H`` in total.
-    """
+    """The height of each bar of a row."""
     return bar_layout(count)[0]
 
 

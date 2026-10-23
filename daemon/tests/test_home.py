@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 import presto_path
 from datetime import datetime, timedelta, timezone
-from home import (DEMO_QUOTAS, HomeScroll, LOCAL_ROW, ROW_HEIGHT, SOURCE_HEIGHT, SOURCE_ROW,
+from home import (quota_row_height, DEMO_QUOTAS, HomeScroll, LOCAL_ROW, ROW_HEIGHT, SOURCE_HEIGHT, SOURCE_ROW,
                   SOURCE_TOP, STRIP_LINE_HEIGHT, alert_settings, binding_window,
                   home_total_height, quota_label, quota_width, scroll_limit, source_rows)
 from net import embedded_payload
@@ -466,8 +466,11 @@ class HomeOrderTests(unittest.TestCase):
         sources = []
         for name, kind in order:
             if kind == "quota":
+                # The author's own services: Go reports three windows, Claude two.
+                count = {"Go": 3, "Claude": 2}.get(name, 1)
                 sources.append({"id": name.lower(), "type": "claude", "name": name,
-                                "status": "ok", "quota": {"windows": [self.window()]}})
+                                "status": "ok",
+                                "quota": {"windows": [self.window() for _ in range(count)]}})
             else:
                 sources.append({"id": name.lower(), "type": "litellm", "name": name,
                                 "status": "ok",
@@ -547,7 +550,9 @@ class HomeOrderTests(unittest.TestCase):
     def test_the_scroll_bound_uses_the_total_height_of_the_rows(self):
         order = self.mixed_order()
         rows, _ = self.drawn(order)
-        total = 4 * SOURCE_ROW + 2 * LOCAL_ROW
+        quota_rows = [row for row in rows if "windows" in row]
+        total = sum(quota_row_height(row) for row in quota_rows) + 2 * LOCAL_ROW
+        self.assertEqual(total, 209)  # 38 + 45 + 52 + 38, and two one-line rows
         self.assertEqual(home_total_height(rows), total)
         # The list is taller than the list area, so the overflow strip takes
         # one line of it and the list scrolls behind the strip.
@@ -735,10 +740,11 @@ class RowAtTests(unittest.TestCase):
     def test_the_row_under_a_touch_follows_heights_and_scroll(self):
         from home import row_at
         layout = self.layout()
+        height = layout.rows[0][1]
         self.assertEqual(row_at(layout, 0, 10)["id"], "q0")
-        self.assertEqual(row_at(layout, 0, 4 + 46)["id"], "q1")        # first pixel of row 1
-        self.assertEqual(row_at(layout, 0, 4 + 46 - 1)["id"], "q0")    # last pixel of row 0
-        self.assertEqual(row_at(layout, 46, 10)["id"], "q1")           # scrolled one row
+        self.assertEqual(row_at(layout, 0, 4 + height)["id"], "q1")        # first pixel of row 1
+        self.assertEqual(row_at(layout, 0, 4 + height - 1)["id"], "q0")    # last pixel of row 0
+        self.assertEqual(row_at(layout, height, 10)["id"], "q1")           # scrolled one row
         self.assertEqual(row_at(layout, layout.limit, 4 + layout.region - 5)["id"], "l")
 
     def test_outside_the_list_region_is_not_a_row(self):

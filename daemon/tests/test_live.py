@@ -166,19 +166,25 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
         return payload
 
     def mixed_payload(self):
-        """Four quota accounts and two local services, in the saved order."""
+        """Four quota accounts and two local services, in the saved order.
+
+        The first has three windows and the second two, like the author's OpenCode Go
+        and Claude; each bar is six pixels, so the rows are 52, 45, 38 and 38 pixels."""
         payload = embedded_payload()
         payload['card_order'] = 'accounts'
         payload['updated_at'] = '2026-10-20T12:00:00+00:00'
         payload['sources'] = []
         for index in range(4):
+            windows = [{'label': label, 'period_minutes': minutes,
+                        'used_percent': 14, 'state': 'available',
+                        'resets_at': '2026-10-25T12:00:00+00:00',
+                        'observed_at': '2026-10-20T11:55:00+00:00'}
+                       for label, minutes in (('5h', 300), ('Weekly', 10080), ('Monthly', 43200))]
             payload['sources'].append({
                 'id': 'cloud-%d' % index, 'type': 'claude', 'name': 'Cloud %d' % index,
                 'status': 'ok',
-                'quota': {'windows': [{'label': 'Weekly', 'period_minutes': 10080,
-                                       'used_percent': 14, 'state': 'available',
-                                       'resets_at': '2026-10-25T12:00:00+00:00',
-                                       'observed_at': '2026-10-20T11:55:00+00:00'}]}})
+                'quota': {'windows': windows[:{0: 3, 1: 2}.get(index, 1)] if index < 2
+                          else windows[1:2]}})
         for index in range(2):
             payload['sources'].append({
                 'id': 'local-%d' % index, 'type': 'litellm', 'name': 'Gateway %d' % index,
@@ -188,7 +194,7 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_home_scroll_uses_the_total_height_of_mixed_rows(self):
         self.app.client.fetch_async.return_value = self.mixed_payload()
         await self.app.poll_once()
-        total = 4 * 46 + 2 * 18
+        total = 52 + 45 + 38 + 38 + 2 * 18
         # The list is taller than the list area, so the overflow strip takes
         # one line of it: 204 - 18 = 186 pixels of list.
         self.assertEqual(self.app.home_layout.lines, 1)

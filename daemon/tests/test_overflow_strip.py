@@ -13,8 +13,8 @@ import unittest
 import presto_path
 from cards import accent_for, severity
 from alerts import rgb_for_accent
-from home import (DEFAULT_OVERFLOW_ROWS, LIST_X, LOCAL_ROW, SOURCE_HEIGHT, SOURCE_ROW,
-                  SOURCE_TOP, STRIP_LINE_HEIGHT, STRIP_MAX_LINES, overflow_rows,
+from home import (BAR_GAP, BAR_H, DEFAULT_OVERFLOW_ROWS, LIST_X, LOCAL_ROW, ROW_GAP,
+                  ROW_TOP_H, SOURCE_HEIGHT, SOURCE_TOP, STRIP_LINE_HEIGHT, STRIP_MAX_LINES, overflow_rows,
                   scroll_limit, source_rows, strip_needed)
 from ui import INK, INK_DIM, Palette, build_home_layout, draw_sources
 from test_ui import Display
@@ -33,13 +33,29 @@ AUTHOR_SIX = [("OpenCode Go", "quota"), ("Codex", "quota"), ("Claude", "quota"),
               ("Ollama Cloud", "quota"), ("Ollama", "local"), ("LiteLLM", "local")]
 
 
+# How many windows each of the author's services reports, and so how many bars
+# its row has. Every other name has one.
+def window_count(name):
+    return 3 if name.startswith("OpenCode Go") else 2 if name == "Claude" else 1
+
+
+WINDOW_KINDS = (("5h", 300), ("Weekly", 10080), ("Monthly", 43200))
+
+
+def quota_height(count):
+    """The height of a quota row with this many bars, worked out from the parts."""
+    return ROW_TOP_H + count * BAR_H + (count - 1) * BAR_GAP + ROW_GAP
+
+
 def quota_source(name, status="ok"):
+    kinds = WINDOW_KINDS[:window_count(name)] if window_count(name) > 1 else WINDOW_KINDS[1:2]
     return {"id": name.lower().replace(" ", "-"), "type": "claude", "name": name,
             "status": status,
-            "quota": {"windows": [{"label": "Weekly", "period_minutes": 10080,
+            "quota": {"windows": [{"label": label, "period_minutes": minutes,
                                    "used_percent": 14, "state": "available",
                                    "resets_at": "2026-10-25T12:00:00+00:00",
-                                   "observed_at": "2026-10-20T11:55:00+00:00"}]}}
+                                   "observed_at": "2026-10-20T11:55:00+00:00"}
+                                  for label, minutes in kinds]}}
 
 
 def local_source(name, status="ok"):
@@ -114,15 +130,18 @@ class StripRegionTests(unittest.TestCase):
     def test_a_list_that_fits_has_no_strip(self):
         rows = rows_for([("Codex", "quota")])
         layout = layout_for(rows, 3)
-        self.assertEqual(layout.total, SOURCE_ROW)
+        self.assertEqual(layout.total, quota_height(1))
         self.assertEqual(layout.lines, 0)
         self.assertEqual(layout.region, SOURCE_HEIGHT)
         self.assertEqual(layout.limit, 0)
 
     def test_a_list_just_under_the_area_has_no_strip(self):
-        rows = rows_for([("Codex", "quota")] * 4 + [("Ollama", "local")])
+        rows = rows_for([("OpenCode Go", "quota"), ("Claude", "quota"), ("Codex", "quota"),
+                         ("Ollama Cloud", "quota"), ("Ollama", "local")])
         layout = layout_for(rows, 3)
-        self.assertEqual(layout.total, 4 * SOURCE_ROW + LOCAL_ROW)
+        self.assertEqual(layout.total, quota_height(3) + quota_height(2)
+                         + 2 * quota_height(1) + LOCAL_ROW)
+        self.assertEqual(layout.total, 191)
         self.assertEqual(layout.lines, 0)
         self.assertEqual(layout.region, SOURCE_HEIGHT)
 
@@ -164,7 +183,9 @@ class StripLineCountTests(unittest.TestCase):
     def test_the_authors_six_accounts_need_one_line(self):
         rows = rows_for(AUTHOR_SIX)
         layout = layout_for(rows, 1)
-        self.assertEqual(layout.total, 4 * SOURCE_ROW + 2 * LOCAL_ROW)
+        self.assertEqual(layout.total, quota_height(3) + quota_height(2)
+                         + 2 * quota_height(1) + 2 * LOCAL_ROW)
+        self.assertEqual(layout.total, 209)
         self.assertEqual(layout.lines, 1)
         self.assertEqual(layout.region, 186)
         lines, plus = layout.strip(0)
@@ -175,8 +196,12 @@ class StripLineCountTests(unittest.TestCase):
                          ["Ollama", "LiteLLM"])
 
     def test_one_hidden_name_needs_one_line(self):
-        rows = rows_for([("Account %02d" % index, "quota") for index in range(5)])
+        # Three one-bar rows and two three-bar rows: 38 * 3 + 52 * 2 = 218, so the
+        # list scrolls, and with 186 pixels left the fifth row is the only one cut off.
+        rows = rows_for([("Codex", "quota"), ("Ollama Cloud", "quota"), ("Account 03", "quota"),
+                         ("OpenCode Go", "quota"), ("OpenCode Go B", "quota")])
         layout = layout_for(rows, 1)
+        self.assertEqual(layout.total, 218)
         self.assertEqual(layout.lines, 1)
         lines, plus = layout.strip(0)
         self.assertIsNone(plus)
@@ -221,14 +246,18 @@ class StripLineCountTests(unittest.TestCase):
                 self.assertEqual(layout.region, region)
                 self.assertEqual(layout.lines, layout.lines)
 
-    def test_twelve_accounts_fit_without_a_count(self):
-        items = [("Acc%02d" % index, "quota") for index in range(12)]
-        rows = rows_for(items)
-        layout = layout_for(rows, 3)
-        self.assertEqual(layout.lines, 3)
-        for offset in (0, layout.limit // 2, layout.limit):
-            lines, plus = layout.strip(offset)
-            self.assertIsNone(plus, offset)
+    def test_fifteen_accounts_fit_without_a_count_and_sixteen_need_one(self):
+        # The rows are thirty-eight pixels each, so more of them fit than when every
+        # row was forty-six: the strip names what is cut off in three lines up to
+        # fifteen accounts, and from sixteen it adds a count.
+        for total, counted in ((15, False), (16, True)):
+            with self.subTest(accounts=total):
+                items = [("Acc%02d" % index, "quota") for index in range(total)]
+                layout = layout_for(rows_for(items), 3)
+                self.assertEqual(layout.lines, 3)
+                for offset in (0, layout.limit // 2, layout.limit):
+                    lines, plus = layout.strip(offset)
+                    self.assertEqual(plus is not None, counted, offset)
 
     def test_thirty_accounts_need_the_count_and_the_worst_colour(self):
         sources = [quota_source("Acc%02d" % index) for index in range(30)]

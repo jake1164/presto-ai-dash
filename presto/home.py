@@ -20,6 +20,39 @@ SOURCE_HEIGHT = 204
 SOURCE_ROW = 46
 LOCAL_ROW = 18
 
+# A quota row is its name and numbers, then one bar for each window. Every bar
+# is the same thickness whatever the service, so one, two or three windows read
+# alike, and the row is as tall as its bars need. With more than four windows
+# the bars thin out, so a service with many buckets cannot fill the list.
+ROW_TOP_H = 30
+ROW_GAP = 2
+BAR_H = 6
+BAR_H_MANY = 3
+BAR_GAP = 1
+MANY_BARS = 4
+# A row with nothing measured says so in one line of text where its bars would be.
+MIN_BARS_AREA = 10
+
+
+def bar_height(count):
+    """The thickness of every bar of a row with this many windows."""
+    return BAR_H if count <= MANY_BARS else BAR_H_MANY
+
+
+def bars_area(count):
+    """The height of the bars of a row, with the gaps between them."""
+    if count <= 0:
+        return 0
+    return count * bar_height(count) + (count - 1) * BAR_GAP
+
+
+def quota_row_height(row):
+    """The height of one quota row on Home: its numbers, its bars, and the gap below."""
+    windows = home_windows(row)
+    measured = [w for w in windows if w["percent"] is not None]
+    area = bars_area(len(windows)) if measured else MIN_BARS_AREA
+    return ROW_TOP_H + area + ROW_GAP
+
 # The overflow strip: the names of the rows that do not fit in the list.
 LIST_X = 14
 STRIP_LINE_HEIGHT = 18
@@ -59,7 +92,7 @@ def home_layout(rows):
     layout = []
     for row in rows:
         if "windows" in row:
-            layout.append((row, SOURCE_ROW, False))
+            layout.append((row, quota_row_height(row), False))
         elif compact:
             layout.append((row, LOCAL_ROW, True))
         else:

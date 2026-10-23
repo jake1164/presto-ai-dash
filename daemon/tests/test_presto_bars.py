@@ -1,11 +1,12 @@
 """Home bars, the card bell and the alerts-off mark: geometry and colour.
 
-The bars of a Home row used to be eleven pixels split over the windows, so
-a three-window service got three-pixel bars on a track that was almost the
-same colour as the background. These tests pin the fixed numbers down: the
-bar height per window count, the contrast of the track, the colour of a
-stale window, the smallest fill of a measured value, the space between two
-rows, and the size of the bell and of the alerts-off mark.
+The bars of a Home row used to share a fixed area, so a three-window service
+got thinner bars than a one-window one, on a track that was almost the same
+colour as the background. These tests pin the numbers down: every bar is the
+same thickness and the row is as tall as its bars need, the contrast of the
+track, the colour of a stale window, the smallest fill of a measured value,
+the space between two rows, and the size of the bell and of the alerts-off
+mark.
 """
 
 import os
@@ -14,10 +15,11 @@ import unittest
 from datetime import datetime, timedelta, timezone
 
 import presto_path  # noqa: F401
-from home import SOURCE_ROW, SOURCE_TOP, bar_fill, source_rows
+from home import (BAR_GAP, BAR_H, ROW_GAP, ROW_TOP_H, SOURCE_TOP, bar_fill,
+                  quota_row_height, source_rows)
 from test_ui import Display
 import ui
-from ui import (ALERT_MARK, BACKGROUND, BARS_H, BELL_HIT, BELL_ICON, DAILY,
+from ui import (ALERT_MARK, BACKGROUND, BELL_HIT, BELL_ICON, DAILY,
                 INK, INK_DIM, LIMIT, MONTHLY, Palette, TRACK, WEEKLY,
                 bell_hit, bar_heights, dim_rgb, draw_sources)
 
@@ -62,26 +64,53 @@ def drawn_rows(windows, stale=False):
     return display
 
 
+def window_list(count):
+    labels = (("5h", 300, 12), ("Weekly", 10080, 34), ("Monthly", 43200, 5),
+              ("Daily", 1440, 20), ("Extra", 600, 8), ("More", 700, 9))
+    return [window(label, period, percent) for label, period, percent in labels[:count]]
+
+
 class BarHeightTests(unittest.TestCase):
-    """The bar area is fourteen pixels; the bars share it."""
+    """Every bar is the same thickness, whatever the service; the row grows to fit."""
 
-    def test_three_windows_get_four_pixel_bars_with_one_pixel_gaps(self):
-        self.assertEqual(bar_heights(3), [4, 4, 4])
-        self.assertEqual(sum(bar_heights(3)) + 2 * ui.BAR_GAP, BARS_H)
+    def test_one_two_three_and_four_windows_get_the_same_six_pixel_bar(self):
+        self.assertEqual(BAR_H, 6)
+        for count in (1, 2, 3, 4):
+            with self.subTest(count=count):
+                self.assertEqual(bar_heights(count), [BAR_H] * count)
 
-    def test_one_or_two_windows_get_a_taller_bar(self):
-        self.assertEqual(bar_heights(1), [6])
-        self.assertEqual(bar_heights(2), [6, 6])
-        for count in (1, 2):
-            for height in bar_heights(count):
-                self.assertGreaterEqual(height, 5)
+    def test_many_windows_thin_out_together_and_stay_equal(self):
+        for count in (5, 6, 8):
+            with self.subTest(count=count):
+                heights = bar_heights(count)
+                self.assertEqual(len(set(heights)), 1)
+                self.assertLess(heights[0], BAR_H)
+                self.assertGreaterEqual(heights[0], 2)
 
-    def test_the_bars_never_leave_the_bar_area(self):
-        for count in range(1, 9):
-            heights, gap = ui.bar_layout(count)
-            self.assertEqual(len(heights), count)
-            total = sum(heights) + gap * (count - 1)
-            self.assertLessEqual(total, BARS_H, count)
+    def test_the_row_is_as_tall_as_its_bars(self):
+        for count, expected in ((1, 38), (2, 45), (3, 52)):
+            with self.subTest(count=count):
+                row = source_rows(payload_for(window_list(count)))[0]
+                self.assertEqual(quota_row_height(row), expected)
+                self.assertEqual(expected, ROW_TOP_H + count * BAR_H + (count - 1) * BAR_GAP
+                                 + ROW_GAP)
+
+    def test_a_row_with_nothing_measured_keeps_room_for_its_line_of_text(self):
+        row = source_rows(payload_for([window("Weekly", 10080, None, "unavailable")]))[0]
+        self.assertEqual(quota_row_height(row), ROW_TOP_H + 10 + ROW_GAP)
+
+    def test_every_bar_on_the_screen_is_the_same_height(self):
+        display = Display()
+        sources = []
+        for index, count in enumerate((1, 2, 3)):
+            sources.append({"id": "s%d" % index, "type": "claude", "name": "Svc%d" % count,
+                            "status": "ok", "quota": {"windows": window_list(count)}})
+        rows = source_rows({"updated_at": NOW.isoformat(), "card_order": "accounts",
+                            "sources": sources})
+        draw_sources(display, Palette(display), rows, 0, 3, status="ok")
+        tracks = [rect for pen, rect in display.rectangles if pen == TRACK and rect[2] > 20]
+        self.assertEqual(len(tracks), 1 + 2 + 3)
+        self.assertEqual({rect[3] for rect in tracks}, {BAR_H})
 
 
 class TrackContrastTests(unittest.TestCase):
@@ -179,12 +208,13 @@ class RowSpacingTests(unittest.TestCase):
         grouped = self.groups(display)
         self.assertEqual(len(grouped), 2, grouped)
         first, second = grouped
-        # The bars of a row stay inside its own 46 pixels, with the two
-        # pixels of space to the next row.
+        # The bars of a row stay inside its own height, with the two pixels
+        # of space to the next row; each row is as tall as its own bars need.
+        first_h, second_h = quota_row_height(rows[0]), quota_row_height(rows[1])
         self.assertLessEqual(max(rect[1] + rect[3] for rect in first),
-                             SOURCE_TOP + SOURCE_ROW - 2)
+                             SOURCE_TOP + first_h - 2)
         self.assertLessEqual(max(rect[1] + rect[3] for rect in second),
-                             SOURCE_TOP + 2 * SOURCE_ROW - 2)
+                             SOURCE_TOP + first_h + second_h - 2)
         self.assertGreaterEqual(min(rect[1] for rect in second) -
                                 max(rect[1] + rect[3] for rect in first), 2)
 

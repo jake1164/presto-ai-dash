@@ -25,9 +25,9 @@ Presto AI Dash turns a **Pimoroni Presto touchscreen** into a dedicated monitor 
 
 ```mermaid
 flowchart TB
-    S["Cloud and local AI services"] -->|"Usage and health readings"| D
-    D["Computer or server — REQUIRED<br/>Python daemon or Docker container"]
-    D -->|"Wi-Fi"| P["Pimoroni Presto touchscreen<br/>Display and alerts"]
+    S["Cloud + local AI services"] --> D
+    D["Computer / server REQUIRED<br/>Python daemon or Docker"]
+    D -->|"Wi-Fi"| P["Presto touchscreen<br/>Display and alerts"]
 ```
 
 ## Supported services

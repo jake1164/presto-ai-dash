@@ -32,7 +32,7 @@ flowchart TB
 
 ## Supported services <img align="right" src="https://img.shields.io/badge/6-integrations-238636" alt="6 integrations">
 
-<table>
+<table width="100%">
   <tr>
     <td width="50%"><a href="https://jake1164.github.io/presto-ai-dash/guides/claude/"><strong>Claude Code ↗</strong></a><br>Subscription quota &amp; activity</td>
     <td width="50%"><a href="https://jake1164.github.io/presto-ai-dash/guides/codex/"><strong>OpenAI Codex ↗</strong></a><br>Quotas, resets &amp; banked credits</td>

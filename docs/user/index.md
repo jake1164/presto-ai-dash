@@ -72,6 +72,14 @@ If something is already installed and broken, go straight to
 Every one of these is optional. Start with the Fake source and the hardware,
 then add the accounts you care about.
 
+## Want another source?
+
+[Request a source on GitHub](https://github.com/jake1164/presto-ai-dash/issues/new/choose)
+if you'd like support for another provider, subscription or local service.
+No programming or API knowledge is required. Developers can
+[contribute a source](developers/contributing-sources.md) directly through a
+pull request using the existing source and test templates.
+
 ## What it will never do
 
 - It will not spend, redeem, reset or change anything on a provider account.

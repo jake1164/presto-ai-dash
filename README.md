@@ -56,6 +56,18 @@ API keys are stored encrypted in the daemon's SQLite database; the Presto
 never holds a provider key. Details per source:
 [Guides](https://jake1164.github.io/presto-ai-dash/guides/claude/).
 
+## Request or contribute a source
+
+Missing an AI service? [Request a source](https://github.com/jake1164/presto-ai-dash/issues/new/choose)
+with its name, official link, and the measurements you'd like to see. You
+don't need to know its API or write code.
+
+Want to build an integration?
+[Contribute a source](CONTRIBUTING.md) using the existing
+[source template](daemon/templates/source_template.py) and
+[developer guide](https://jake1164.github.io/presto-ai-dash/developers/contributing-sources/).
+You can submit a pull request directly; an issue is optional.
+
 ## How it fits together
 
 ```text

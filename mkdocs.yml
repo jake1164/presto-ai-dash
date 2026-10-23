@@ -116,6 +116,7 @@ nav:
       - The Status Payload and Its Size Budget: reference/status-payload.md
   - Privacy: privacy/index.md
   - Developers:
+      - Request or Contribute a Source: developers/contributing-sources.md
       - Architecture Overview: developers/architecture.md
       - Running the Tests: developers/running-the-tests.md
       - The Preview and the Device Sync: developers/preview-and-device.md

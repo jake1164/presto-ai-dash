@@ -71,7 +71,13 @@ serves them while the switch is on. The scenario loops through every status in
 the vocabulary above, in small steps, and never contacts a provider.
 
 Because it is a mode, it needs no account row, cannot be confused with an
-account, and can never write a provider-side setting. See
+account, and can never write a provider-side setting.
+
+**Adding a source means adding its demo data.** Every registered source type
+needs a demo account in `demo.py`, and `daemon/tests/core/test_demo.py` fails
+until it has one. The demo is how users see a source before they own an
+account, and it keeps the preview, the daemon's demo mode and the documentation
+site's demo in step. See `docs/user/developers/how-a-source-works.md`. See
 [the admin page](user/guides/admin-page.md) and the demo page on the site.
 
 ## ollama

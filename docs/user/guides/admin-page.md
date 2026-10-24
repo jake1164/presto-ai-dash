@@ -140,6 +140,13 @@ The switch is on the Settings tab. It is off by default. When the
 demonstration is over, switch it off and the Presto goes back to the real
 readings on its next poll, with no restart.
 
+Two shortcuts save a new reader from hunting for it. While no account exists,
+the **Services** tab offers **Want to see how it works first? Show sample
+data.**, and the button turns demo mode on. While demo mode is on, the banner
+at the top of every tab carries **Turn demo off**; when you do have real
+accounts, the same banner says they are hidden while demo is on, because the
+numbers on the Presto are not theirs.
+
 - **It overrides, it does not replace.** The real sources are not disabled
   or edited while demo mode is on, and the readings that were collected are
   kept.

@@ -23,10 +23,28 @@ if DAEMON_SRC not in sys.path:
 
 from presto_ai_dash import demo  # noqa: E402
 
+# The scenes the preview can jump to, in loop order.
+SCENES = tuple(name for name, _start in demo.SCENES)
+DEFAULT_SCENE = SCENES[0]
+
+
+def scene_offset(name):
+    """The loop second a scene starts at: the offset that jumps to it.
+
+    Raises KeyError for a name the demo does not have, so a caller can refuse
+    it rather than start somewhere arbitrary.
+    """
+    return demo.scene_second(name)
+
 
 def payload_at(t):
     """The demo payload at loop second ``t``: what render.py draws."""
     return demo.demo_payload(t)
+
+
+def card_detail_at(card_id, t):
+    """One card's tiles and lines at loop second ``t``, or None."""
+    return demo.demo_card_detail(card_id, t)
 
 
 class DemoClient(object):
@@ -51,7 +69,10 @@ class DemoClient(object):
             # The same exception a failed fetch raises, so the app runs its
             # real stale (10 s) and offline (30 s) timers.
             import net
-            raise net.NetworkUnavailable("simulated by preview")
+            error = net.NetworkUnavailable("simulated by preview")
+            # The offline screen shows the reason a real client would give.
+            error.reason = "simulated loss"
+            raise error
 
     async def fetch_async(self):
         """The status payload for this moment, with the bells as tapped."""

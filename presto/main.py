@@ -844,27 +844,36 @@ class App(object):
         self._poll_failed("Connecting...", "Joining Wi-Fi")
         asyncio.run(self._run_live())
 
+    def _tick(self):
+        """One pass of the main loop: touch, timers, and a redraw if needed.
+
+        The device calls it every 20 ms from _run_live. The documentation
+        site's demo calls it from a browser timer, so the page runs this same
+        pass instead of a copy of it.
+        """
+        try:
+            self._handle_gestures(self._poll_touch())
+            self._poll_popup()
+            if self._expire_alerts():
+                self._needs_redraw = True
+            if self._last_screen != self._connection_screen():
+                self._needs_redraw = True
+            if self.detail_open and _ticks_diff(_now_ms(), self.detail_opened_at) > DETAIL_TIMEOUT_MS:
+                self._close_detail()
+            if self._needs_redraw:
+                self._update_leds()
+                self._render()
+                # Only a draw that worked clears the error, not a pass
+                # with nothing to draw.
+                self._loop_error = None
+        except Exception as exc:
+            self._loop_failed(exc)
+
     async def _run_live(self):
         poller = asyncio.create_task(self._network_loop())
         try:
             while True:
-                try:
-                    self._handle_gestures(self._poll_touch())
-                    self._poll_popup()
-                    if self._expire_alerts():
-                        self._needs_redraw = True
-                    if self._last_screen != self._connection_screen():
-                        self._needs_redraw = True
-                    if self.detail_open and _ticks_diff(_now_ms(), self.detail_opened_at) > DETAIL_TIMEOUT_MS:
-                        self._close_detail()
-                    if self._needs_redraw:
-                        self._update_leds()
-                        self._render()
-                        # Only a draw that worked clears the error, not a pass
-                        # with nothing to draw.
-                        self._loop_error = None
-                except Exception as exc:
-                    self._loop_failed(exc)
+                self._tick()
                 await asyncio.sleep(0.02)
         finally:
             poller.cancel()

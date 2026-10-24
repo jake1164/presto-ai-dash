@@ -4,10 +4,11 @@ It rasterises into an RGB565-quantised framebuffer using the device's own
 bitmap font data, so text fitting and truncation match the Presto. Only the
 calls the app uses are implemented: anything new fails loudly with an
 AttributeError instead of being silently drawn wrong.
-"""
 
-import struct
-import zlib
+It imports nothing but ``fonts``, so the same code runs under the browser's
+MicroPython WebAssembly build (no ``struct`` or ``zlib`` there). PNG encoding
+lives in ``png.py``, which only the CPython tools import.
+"""
 
 from fonts import FONTS
 
@@ -144,27 +145,3 @@ class Framebuffer(object):
                     self._character(char, x + char_offset, y + line_offset, scale)
                     char_offset += self._char_width(char, scale) + spacing * scale
             i = end + 1
-
-    # -- output --------------------------------------------------------------
-
-    def png(self, scale=2):
-        """Encode the framebuffer, pixel-doubled like the 480x480 panel."""
-        return encode_png(self.pixels, self.width, self.height, scale)
-
-
-def encode_png(pixels, width, height, scale=1):
-    rows = []
-    stride = width * 3
-    for row in range(height):
-        line = bytes(pixels[row * stride:(row + 1) * stride])
-        if scale > 1:
-            line = b"".join(line[px:px + 3] * scale for px in range(0, stride, 3))
-        rows.extend([b"\x00" + line] * scale)
-
-    def chunk(kind, data):
-        body = kind + data
-        return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
-
-    header = struct.pack(">IIBBBBB", width * scale, height * scale, 8, 2, 0, 0, 0)
-    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", header) +
-            chunk(b"IDAT", zlib.compress(b"".join(rows), 6)) + chunk(b"IEND", b""))

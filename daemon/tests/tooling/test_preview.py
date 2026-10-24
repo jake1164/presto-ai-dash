@@ -1,5 +1,6 @@
 """The Presto layout preview must keep rendering the real device screens."""
 
+import json
 import os
 import struct
 import sys
@@ -74,6 +75,66 @@ class PreviewTests(unittest.TestCase):
     def test_offline_renders_one_connection_screen(self):
         with tempfile.TemporaryDirectory() as out:
             self.assertEqual(len(render.render("demo", out, offline=True)), 1)
+
+    def test_a_scene_can_be_chosen_and_is_recorded(self):
+        import hashlib
+        from demo_client import DEFAULT_SCENE, SCENES
+
+        self.assertIn("rate_limited", SCENES)
+        with tempfile.TemporaryDirectory() as calm_out:
+            calm = render.render("demo", calm_out)
+            with open(os.path.join(calm_out, "manifest.json")) as handle:
+                self.assertEqual(json.load(handle)["state"]["scene"], DEFAULT_SCENE)
+            with open(os.path.join(calm_out, calm[0]["file"]), "rb") as handle:
+                calm_home = hashlib.sha256(handle.read()).hexdigest()
+        with tempfile.TemporaryDirectory() as busy_out:
+            busy = render.render("demo", busy_out, scene="rate_limited")
+            with open(os.path.join(busy_out, "manifest.json")) as handle:
+                self.assertEqual(json.load(handle)["state"]["scene"], "rate_limited")
+            with open(os.path.join(busy_out, busy[0]["file"]), "rb") as handle:
+                busy_home = hashlib.sha256(handle.read()).hexdigest()
+        self.assertNotEqual(calm_home, busy_home, "two scenes rendered the same Home")
+
+    def test_an_unknown_scene_is_refused(self):
+        with tempfile.TemporaryDirectory() as out:
+            with self.assertRaises(SystemExit):
+                render.render("demo", out, scene="no-such-scene")
+
+    def test_the_demo_cards_carry_their_tiles_and_lines(self):
+        """The harness fills the lazy detail, so a card shows its tiles."""
+        from cards import Card
+        from demo_client import scene_offset
+
+        class FakeApp:
+            def __init__(self):
+                self.cards = [Card("dash", "AI Dash", "ok"),
+                              Card("demo-claude", "Claude", "ok")]
+                self.card_details = {}
+
+        app = FakeApp()
+        render._fill_card_details(app, scene_offset("calm"))
+        # Home's card gets lines too; only the account cards draw tiles.
+        self.assertTrue(set(app.card_details) <= {"dash", "demo-claude"})
+        self.assertTrue(app.card_details["demo-claude"]["tiles"])
+        self.assertTrue(app.card_details["demo-claude"]["lines"])
+
+
+class FramebufferImportTests(unittest.TestCase):
+    """The browser demo imports framebuffer.py under MicroPython WebAssembly."""
+
+    def test_it_needs_no_stdlib_modules_the_wasm_build_lacks(self):
+        with open(os.path.join(PREVIEW_DIR, "framebuffer.py"), encoding="utf-8") as handle:
+            source = handle.read()
+        self.assertNotIn("import struct", source)
+        self.assertNotIn("import zlib", source)
+        self.assertFalse(hasattr(Framebuffer, "png"))
+
+    def test_png_encoding_lives_in_the_cpython_only_module(self):
+        import png as png_module
+
+        data = png_module.png(Framebuffer())
+        self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertEqual(struct.unpack(">II", data[16:24]), (480, 480))
 
 
 class DemoClientTests(unittest.TestCase):
@@ -157,6 +218,32 @@ class LivePreviewTests(unittest.TestCase):
             self.assertIsNone(state["error"])
         self.assertNotEqual(runner.pixels, home, "a swipe never changed the screen")
 
+    def test_a_scene_jump_restarts_the_demo_at_that_scene(self):
+        from demo_client import SCENES
+
+        runner = live.Runner(demo=True)
+        self.addCleanup(runner.stop)
+        runner.restart()
+        state = runner.snapshot(-1, timeout=5)
+        self.assertEqual(state["scene"], SCENES[0])
+        self.assertEqual(state["scenes"], list(SCENES))
+        before = runner.pixels
+        runner.set_scene("offline")
+        state = runner.snapshot(state["frame"], timeout=10)
+        while state["frame"] < 2 and state["error"] is None:
+            state = runner.snapshot(state["frame"], timeout=5)
+        self.assertEqual(state["scene"], "offline")
+        self.assertIsNone(state["error"])
+        self.assertNotEqual(runner.pixels, before, "the scene did not change the screen")
+
+    def test_a_scene_name_the_demo_does_not_have_is_refused(self):
+        from demo_client import scene_offset
+        import demo_client
+
+        with self.assertRaises(KeyError):
+            scene_offset("no-such-scene")
+        self.assertNotIn("no-such-scene", demo_client.SCENES)
+
 
 class FakeRunner:
     """Enough of the live runner for the handler: it records what it is told."""
@@ -220,9 +307,12 @@ class PageTemplateTests(unittest.TestCase):
         for tag in ("html", "head", "body", "style", "script"):
             self.assertEqual(page.tags.count(tag), 1, "<%s> count" % tag)
             self.assertEqual(page.closed.count(tag), 1, "</%s> count" % tag)
-        for control in ("demo", "netfail", "restart"):
+        for control in ("demo", "scene", "netfail", "restart"):
             self.assertEqual(page.ids.count(control), 1, 'id="%s" count' % control)
         self.assertNotIn("STATIC_DEMO", live.PAGE)
+        # The checkbox says Demo, and the scene menu is a real control.
+        self.assertIn("> Demo</label>", live.PAGE)
+        self.assertIn('id="scene-label"', live.PAGE)
 
 
 class LiveServerGuardTests(unittest.TestCase):

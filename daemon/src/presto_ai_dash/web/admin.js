@@ -269,11 +269,37 @@
   }
   function renderDemo() {
     const on = !!demoState?.enabled;
+    const locked = !!demoState?.locked_by_environment;
     element("demo-enabled").checked = on;
-    element("demo-enabled").disabled = !!demoState?.locked_by_environment;
-    element("demo-lock").hidden = !demoState?.locked_by_environment;
+    element("demo-enabled").disabled = locked;
+    element("demo-lock").hidden = !locked;
     // The banner is a child of the workspace, so it heads every tab.
     element("demo-banner").hidden = !on;
+    // It says the real accounts are still there but not on screen, which is
+    // the question a reader with services asks when the numbers look odd.
+    element("demo-banner-hidden").hidden = !(on && sources.length > 0);
+    element("demo-banner-off").disabled = locked;
+    element("demo-banner-lock").hidden = !(on && locked);
+    // The first-run offer: while no account is switched on. A fresh install
+    // always carries a disabled placeholder for the sources dash.toml can
+    // configure, so "no rows" would never be true for a new reader.
+    const enabled = sources.filter((source) => source.enabled).length;
+    element("demo-callout").hidden = !(demoState && !on && enabled === 0);
+    element("demo-callout-button").disabled = locked;
+    element("demo-callout-lock").hidden = !locked;
+  }
+  async function setDemoEnabled(enabled) {
+    // One writer for the three controls: the Settings switch, the empty-list
+    // callout and the banner's Turn demo off button.
+    if (busy) { renderDemo(); return; }
+    busy = true;
+    try {
+      demoState = await request("/api/admin/demo", "PUT", {enabled: enabled});
+      message(enabled ?
+        "Demo mode on. The Presto shows sample data until you turn it off." :
+        "Demo mode off. The Presto shows the real accounts on its next poll.");
+    } catch (error) { message(error.message, true); }
+    finally { busy = false; renderDemo(); }
   }
   function renderDisplay() {
     const value = displayState?.overflow_rows;
@@ -1047,6 +1073,8 @@
     if (focusedId && focusedAction) focusAccount(focusedId, focusedAction);
     else if (focusedField) document.getElementById(focusedField)?.focus({preventScroll: true});
     renderRemoteAccounts();
+    // The first-run callout appears and goes with the list's length.
+    renderDemo();
   }
   function buildCard(source, index) {
     const card = document.createElement("article");
@@ -1462,18 +1490,9 @@
     // The account cards say whether remote reports are on, so they follow the switch.
     finally { busy = false; renderIngest(); renderList(); }
   });
-  element("demo-enabled").addEventListener("change", async () => {
-    if (busy) { renderDemo(); return; }
-    busy = true;
-    try {
-      demoState = await request("/api/admin/demo", "PUT",
-        {enabled: element("demo-enabled").checked});
-      message(element("demo-enabled").checked ?
-        "Demo mode on. The Presto shows sample data until you turn it off." :
-        "Demo mode off. The Presto shows the real accounts on its next poll.");
-    } catch (error) { message(error.message, true); }
-    finally { busy = false; renderDemo(); }
-  });
+  element("demo-enabled").addEventListener("change", () => setDemoEnabled(element("demo-enabled").checked));
+  element("demo-callout-button").addEventListener("click", () => setDemoEnabled(true));
+  element("demo-banner-off").addEventListener("click", () => setDemoEnabled(false));
   element("overflow-rows").addEventListener("change", async () => {
     if (busy) { renderDisplay(); return; }
     busy = true;

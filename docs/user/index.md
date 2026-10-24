@@ -8,6 +8,9 @@ it resets, whether your local Ollama is up, and whether anything is broken.
 
 ![The Presto Home screen with quota bars for several accounts](images/home.png)
 
+Want to try it first? [See it running](demo/index.md) in your browser: the real
+app, on sample data.
+
 Everything runs on your own machines. There is no account to create, nothing
 is sent to a server we do not control, and the dashboard never spends, resets
 or changes anything on a provider account. See [Privacy](privacy/index.md).

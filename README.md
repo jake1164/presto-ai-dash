@@ -14,6 +14,9 @@ A tiny AI usage dashboard for Pimoroni Presto with support for local and cloud A
 
 Documentation: <https://jake1164.github.io/presto-ai-dash/>
 
+Try it in your browser, no Presto needed:
+[see it running](https://jake1164.github.io/presto-ai-dash/demo/).
+
 Presto AI Dash puts your AI subscription quotas and the health of your local
 AI services on a 240x240 touchscreen on your desk. A small Python daemon on
 your LAN reads the numbers, read-only, and the Presto polls it and draws them.

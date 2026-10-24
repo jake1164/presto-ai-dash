@@ -21,6 +21,13 @@ from envutil import clean_env  # noqa: E402
 
 from admin.test_management import AdminServerBase, ManagementBase  # noqa: E402
 
+WEB_DIR = Path(__file__).resolve().parents[3] / "daemon" / "src" / "presto_ai_dash" / "web"
+
+
+def read_web(name):
+    with open(WEB_DIR / name, encoding="utf-8") as handle:
+        return handle.read()
+
 from presto_ai_dash import demo  # noqa: E402
 from presto_ai_dash.api import ApiServer  # noqa: E402
 from presto_ai_dash.config import (ConfigError, demo_enabled, load_config)  # noqa: E402
@@ -317,3 +324,42 @@ class DemoAdminRouteTests(AdminServerBase):
                        b'data-help="demo-mode"'):
             self.assertIn(marker, html)
         self.assertIn(b"Demo mode is ON", html)
+
+    def test_the_empty_list_offers_sample_data(self):
+        """A new reader finds demo mode without opening Settings."""
+        _, _, html = self.request("/")
+        for marker in (b'id="demo-callout"', b'id="demo-callout-button"',
+                       b"Want to see how it works first?", b"Show sample data",
+                       b'id="demo-callout-lock"'):
+            self.assertIn(marker, html)
+        js = read_web("admin.js")
+        # The callout only exists while no account is switched on, and its
+        # button is the same writer as the Settings switch.
+        self.assertIn("sources.filter((source) => source.enabled).length", js)
+        self.assertIn("enabled === 0)", js)
+        self.assertIn(
+            'element("demo-callout-button").addEventListener("click", '
+            '() => setDemoEnabled(true))', js)
+        self.assertIn('demo-callout-button").disabled = locked', js)
+
+    def test_the_banner_says_services_are_hidden_and_can_turn_demo_off(self):
+        _, _, html = self.request("/")
+        for marker in (b'id="demo-banner-off"', b'id="demo-banner-hidden"',
+                       b"Your services are hidden while demo is on.",
+                       b'id="demo-banner-lock"'):
+            self.assertIn(marker, html)
+        js = read_web("admin.js")
+        self.assertIn('demo-banner-hidden").hidden = !(on && sources.length > 0)', js)
+        self.assertIn(
+            'element("demo-banner-off").addEventListener("click", '
+            '() => setDemoEnabled(false))', js)
+
+    def test_adding_a_source_never_turns_demo_off(self):
+        """One writer only: nothing in the save path touches demo mode."""
+        js = read_web("admin.js")
+        occurrences = js.count("setDemoEnabled(")
+        # The definition plus one call for each of the three controls.
+        self.assertEqual(occurrences, 4, "demo mode must be changed by its controls only")
+        for call in ('setDemoEnabled(true))', 'setDemoEnabled(false))',
+                     '() => setDemoEnabled(element("demo-enabled").checked))'):
+            self.assertEqual(js.count(call), 1, call)

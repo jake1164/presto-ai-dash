@@ -65,8 +65,10 @@ The whitelist scan parses the device's own source with `ast` and looks for
 the keys it reads. If you add a key to the device, add it to the
 `DEVICE_*_KEYS` constants in `dashboard.py`, or this test fails.
 
-The size budget is 5000 bytes for the whole payload and 1000 bytes per
-account. It is a hard limit: the test fails the build when it is exceeded.
+The size budget is 5000 bytes for one poll response and 1000 bytes per
+account within it (card detail has its own 8 KiB limit per request). It is a
+hard limit: the test fails the build when it is exceeded, and
+`tests/core/test_demo.py` holds every message the demo sends to the same limits.
 
 ## The Presto tests
 
@@ -108,6 +110,27 @@ the admin page points at an anchor that exists in the built site:
 ```bash
 .venv/Scripts/python tools/check_doc_anchors.py
 ```
+
+## The demo checks
+
+The documentation site's demo has two generated parts, and neither is
+committed: build them first.
+
+```bash
+.venv/Scripts/python tools/build_demo_site.py
+node tools/check_demo_wasm.mjs
+```
+
+The first writes `docs/user/demo/app/`. The second loads the vendored
+MicroPython WebAssembly runtime in Node, checks that every app module imports,
+that Home and every card at every scene draw exactly the pixels CPython drew,
+and that a swipe and the **Stale** switch work. It fails, and does not skip, if
+the runtime cannot load. `tests/tooling/test_demo_page.py` runs it against a
+good build and against deliberately broken ones when Node is installed, and
+`tests/core/test_demo.py` fails when a registered source type has no demo
+account (see [Demo data](how-a-source-works.md#demo-data)). In CI the Ubuntu
+Python 3.13 job builds and checks the demo, and the docs workflow builds it
+before `mkdocs build --strict`.
 
 ## The browser checks
 

@@ -100,5 +100,22 @@ class FontNoticeTests(unittest.TestCase):
         self.assertIn("mpremote", self.NOTICES)
 
 
+class WasmNoticeTests(unittest.TestCase):
+    NOTICES = read("THIRD_PARTY_NOTICES.md")
+
+    def test_the_notice_names_the_vendored_runtime_and_its_package(self):
+        self.assertIn("docs/user/demo/vendor/micropython.js", self.NOTICES)
+        self.assertIn("docs/user/demo/vendor/micropython.wasm", self.NOTICES)
+        self.assertIn("@micropython/micropython-webassembly-pyscript", self.NOTICES)
+        self.assertIn("1.29.0-6", self.NOTICES)
+
+    def test_the_notice_carries_the_upstream_copyright_and_permission_text(self):
+        for required in ("Copyright (c) 2013-2026 Damien P. George",
+                         "Permission is hereby granted, free of charge, to any person obtaining a copy",
+                         "The above copyright notice and this permission notice shall be included in",
+                         'THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND'):
+            self.assertIn(required, self.NOTICES)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -497,12 +497,13 @@ do not delete the database or its provider keys.
 In managed live mode, the device endpoint returns Home plus one swipe card per
 enabled source instance and a `sources` array of independent measurements.
 Multiple accounts of one type have separate cards and usage. With
-`STATIC_DEMO = False`, the Presto polls the endpoint and groups each quota
+the Presto polls the endpoint and groups each quota
 account's actual windows into stacked, labelled bars on Home. All accounts
 follow the saved admin order. Additional accounts/windows scroll; swipe
 cards show details and UTC resets. Names, enable/disable changes, and accounts
 appear on the next successful poll. Refreshes preserve the selected card by
-instance ID; removing it returns to Home. Static samples remain DEMO.
+instance ID; removing it returns to Home. Sample data comes only from the daemon's demo mode, and the Presto marks it
+with a DEMO chip.
 
 ## The small summary and the lazy card detail
 

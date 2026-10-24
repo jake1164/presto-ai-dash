@@ -143,26 +143,52 @@ def _mute_left_ms(text):
     return int(text) * 60 * 60 * 1000
 
 
+def _fill_card_details(app, t):
+    """Give the app every card's demo detail, as a poll would have fetched it.
+
+    The render harness has no event loop, so it cannot let the app fetch a
+    detail lazily. Filling the map here is what makes a rendered card show its
+    tiles and its full set of lines, exactly as a card opened in PSL does.
+    """
+    for card in app.cards:
+        detail = demo_client.card_detail_at(card.id, t)
+        if detail is None:
+            continue
+        app.card_details[card.id] = {"tiles": list(detail.get("tiles") or ()),
+                                     "lines": list(detail.get("lines") or ()),
+                                     "at": 0}
+
+
 def render(payload="demo", out=DEFAULT_OUT, stale=False, offline=False, muted=False,
-           mute_left=None):
+           mute_left=None, scene=None):
     main, net = _load_app_modules()
     if HERE not in sys.path:
         sys.path.insert(0, HERE)
     from framebuffer import Framebuffer
+    from png import png
+    scene = scene or demo_client.DEFAULT_SCENE
+    if scene not in demo_client.SCENES:
+        raise SystemExit("--scene must be one of: %s" % ", ".join(demo_client.SCENES))
+    second = demo_client.scene_offset(scene)
 
     display = Framebuffer()
     presto = FakePresto(display)
     app = main.App(presto)
+    # No event loop here: the lazy detail would have to be a task. Every
+    # screen is rendered with whatever the payload and the demo carry.
+    app._maybe_load_detail = lambda: None
     if payload == "demo":
-        # The first second of the loop: the calm scene. The payload carries
-        # the demo flag, so the app draws the chip.
-        data = demo_client.payload_at(0)
+        # The chosen scene's payload. It carries the demo flag, so the app
+        # draws the chip, and its card details are filled below.
+        data = demo_client.payload_at(second)
     elif payload == "live":
         data = _fetch_live(net, main.config)
     else:
         with open(payload) as handle:
             data = json.load(handle)
     app._set_payload(data)
+    if payload == "demo":
+        _fill_card_details(app, second)
     if app.error:
         print("payload rejected by the app: %s" % app.error, file=sys.stderr)
     app.alerts.muted = muted
@@ -189,7 +215,7 @@ def render(payload="demo", out=DEFAULT_OUT, stale=False, offline=False, muted=Fa
         app._render()
         filename = "%02d-%s.png" % (len(screens), re.sub(r"[^\w-]+", "-", name).strip("-") or "card")
         with open(os.path.join(out, filename), "wb") as handle:
-            handle.write(display.png())
+            handle.write(png(display))
         screens.append({"file": filename, "label": label, "led": list(presto.leds[0])})
 
     for index, card in enumerate(app.cards):
@@ -204,6 +230,7 @@ def render(payload="demo", out=DEFAULT_OUT, stale=False, offline=False, muted=Fa
             break  # Every card shows the same connection screen.
 
     state = {"payload": payload if payload in PAYLOADS else os.path.basename(payload),
+             "scene": scene if payload == "demo" else None,
              "stale": stale, "offline": offline, "muted": muted,
              "code_revision": main.__presto_revision__}
     with open(os.path.join(out, "manifest.json"), "w") as handle:
@@ -253,9 +280,13 @@ def main_cli(argv=None):
     parser.add_argument("--mute-left", default=None,
                         help="how long the mute chip has left: 3h, 45m, or 0 "
                              "for a mute that lasts until pressed again")
+    parser.add_argument("--scene", default=None,
+                        help="with --payload demo, the scene to render: %s "
+                             "(default %s)" % (", ".join(demo_client.SCENES),
+                                                demo_client.DEFAULT_SCENE))
     args = parser.parse_args(argv)
     screens = render(args.payload, args.out, args.stale, args.offline, args.muted,
-                      args.mute_left)
+                      args.mute_left, args.scene)
     for screen in screens:
         print(os.path.join(args.out, screen["file"]))
 

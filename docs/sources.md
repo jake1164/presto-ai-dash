@@ -185,10 +185,12 @@ reset times from `GET https://opencode.ai/zen/go/v1/usage`. Each account has its
 own encrypted key and configurable refresh interval in the database.
 
 Ollama Cloud is separate from the keyless local Ollama connector. Its authorized
-`GET https://ollama.com/api/usage` returns dated activity totals. Monthly credit
-allowance, remaining balance, and reset are absent from the verified response;
-those stay unavailable instead of being inferred from the plan price. Requests,
-tokens, and reported USD activity are shown separately.
+`GET https://ollama.com/api/balance` returns monthly included credit allowance,
+remaining balance and reset dates, or legacy session/weekly percentages remaining.
+Purchased credits are kept separate. `GET https://ollama.com/api/usage?range=7d`
+returns rolling requests, tokens and reported USD activity; this is a different
+period from the credit billing cycle. No allowance is inferred from plan prices
+or activity spend.
 
 Both connectors use fixed HTTPS reporting routes with redirects disabled and
 make no inference requests. See [quota contract, freshness, and verified coverage](quotas.md).

@@ -47,7 +47,7 @@ your LAN reads the numbers, read-only, and the Presto polls it and draws them.
 | Claude | The Claude Code **status-line export** (5-hour and weekly quota, after a terminal response); optionally the **local activity logs** (timestamps, model and token counts only) and the **usage cache** Claude Code keeps for its `/usage` dialog | On the machine where Claude Code runs; the status-line export can also be pushed from another computer |
 | Codex | Quota buckets, resets and banked reset credits through the local **Codex app-server**, using your existing Codex login | On the machine with Codex and its login |
 | OpenCode Go | 5-hour, weekly and monthly quota and resets from its usage API, with your API key | Anywhere with internet access |
-| Ollama Cloud | Dated request, token and spend activity from its usage API (no allowance is reported) | Anywhere with internet access |
+| Ollama Cloud | Monthly included credits, purchased balance and resets (or legacy session/weekly limits), plus separate rolling request, token and spend activity | Anywhere with internet access |
 | Ollama | Server health, version, installed and loaded models | Anywhere that can reach the Ollama server |
 | LiteLLM | Health, readiness, and today's requests, tokens, spend and errors | Anywhere that can reach the gateway |
 
@@ -105,9 +105,9 @@ export) run only when you press the button in the admin page. See
 - **Claude in the VS Code panel** does not run the status line; panel users
   get quota from the usage cache reader instead, which reads an unofficial
   file. See [The VS Code panel](https://jake1164.github.io/presto-ai-dash/troubleshooting/vs-code-panel/).
-- **Ollama Cloud** reports activity only, no allowance or balance, so it has
-  no quota bar. **Ollama** has no request history, so direct use cannot be
-  counted.
+- **Ollama Cloud** activity covers a rolling seven-day range, separate from
+  its monthly credit balance. **Ollama** has no request history, so direct
+  use cannot be counted.
 - **The host preview** runs the real app against an emulated display, but it
   cannot show sound, real LED hardware, memory or CPU limits, or Wi-Fi.
 

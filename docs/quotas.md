@@ -44,6 +44,13 @@ credit period. The adapter stores selected numeric totals and date bounds;
 it does not store account identity, model names, request records, or raw bodies.
 The screenshot's rounded spend and API activity value need not match exactly.
 
+Update (2026-10-24): the adapter now also reads the documented
+[`/api/balance`](https://docs.ollama.com/api/balance) endpoint. Its monthly
+included allowance and remaining balance supply the percent consumed and the
+billing-period reset. Purchased credits remain separate. Legacy session and
+weekly remaining percentages become percentages consumed. The selected
+`/api/usage?range=7d` activity range remains separate from billing-cycle usage.
+
 ## Status contract
 
 In managed live mode, `/api/v1/status` returns Home followed by one swipe card

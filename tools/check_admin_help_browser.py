@@ -183,11 +183,14 @@ def main():
                         "resets_at": (now + timedelta(hours=3)).isoformat(), "source": "test reading"
                     } for index, label in enumerate(labels)], "note": "Sample quota reading."}
                 elif source["type"] == "ollama_cloud":
-                    source["quota"] = {"windows": [{"label": "Monthly credits", "state": "unavailable"}],
-                        "activity": {"state": "available", "request_count": 12, "usage_usd": .12,
-                                     "input_tokens": 4000, "output_tokens": 1000,
-                                     "from": (now - timedelta(days=1)).isoformat(), "until": now.isoformat()},
-                        "note": "Activity is reported; no allowance is available."}
+                    source["quota"] = {"windows": [{"label": "Monthly credits", "state": "available",
+                        "used_percent": 100 * 8.48 / 60, "used_amount": 8.48, "limit_amount": 60,
+                        "currency": "USD", "resets_at": (now + timedelta(days=14)).isoformat()}],
+                        "cloud_balance": {"included_remaining_usd": 51.52,
+                                          "purchased_remaining_usd": 0, "state": "available"},
+                        "activity": {"state": "available", "range": "7d", "request_count": 297,
+                                     "usage_usd": 8.480570, "input_tokens": 22000000, "output_tokens": 231608,
+                                     "from": (now - timedelta(days=7)).isoformat(), "until": now.isoformat()}}
             page.route("**/api/admin/sources", lambda route: (
                 route.fulfill(json=fixtures) if route.request.method == "GET" else route.continue_()))
             page.reload()
@@ -210,8 +213,12 @@ def main():
                     failures.append("provider card has inconsistent sections: " + str(layout))
                 if layout["outsideLinks"] or layout["guideCount"] < 2 or not layout["footerLast"]:
                     failures.append("provider card has links outside its shared footer: " + str(layout))
-            if page.locator(".card-readings progress").count() != 6:
+            if page.locator(".card-readings progress").count() != 7:
                 failures.append("quota bars were lost when moving readings into the template")
+            cloud = page.locator(".source").filter(has=page.get_by_role("button", name="Show the details of Ollama Cloud", exact=True))
+            cloud_text = cloud.inner_text()
+            if not all(value in cloud_text for value in ("14.1%", "$51.52", "$8.48", "rolling 7d", "22.23M")):
+                failures.append("cloud balance or readable rolling activity was lost: " + cloud_text)
             print("shared template verified for %d provider cards" % len(layouts))
             shots = os.path.join(REPO_ROOT, ".preview", "admin-cards")
             os.makedirs(shots, exist_ok=True)

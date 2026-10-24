@@ -14,9 +14,10 @@ from urllib.parse import urlsplit
 class HttpError(Exception):
     """The server answered with a non-2xx status."""
 
-    def __init__(self, status, body=""):
+    def __init__(self, status, body="", retry_after=None):
         self.status = status
         self.body = body
+        self.retry_after = retry_after
         super().__init__("HTTP %s: %s" % (status, body[:200]))
 
 
@@ -121,7 +122,7 @@ def get_json(url, timeout=5, headers=None, transport=None, allow_redirects=True)
             body = exc.read(MAX_ERROR_BODY_BYTES).decode("utf-8", "replace")
         except Exception:  # pragma: no cover - defensive
             body = ""
-        raise HttpError(exc.code, body)
+        raise HttpError(exc.code, body, exc.headers.get("Retry-After") if exc.headers else None)
     except urllib.error.URLError as exc:
         raise HttpUnreachable(str(exc.reason))
     except OSError as exc:

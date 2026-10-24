@@ -1,6 +1,6 @@
 """Render every Presto screen to PNG with the device's own drawing code.
 
-    python tools/presto_preview/render.py                    # sample payload
+    python tools/presto_preview/render.py                    # demo payload
     python tools/presto_preview/render.py --payload live     # daemon in presto/config.py
     python tools/presto_preview/render.py --payload fixture.json --stale
 
@@ -28,9 +28,13 @@ if os.path.dirname(HERE) not in sys.path:
     sys.path.append(os.path.dirname(HERE))
 from presto_bundle import app_files, snapshot  # noqa: E402
 
+if HERE not in sys.path:
+    sys.path.insert(0, HERE)
+import demo_client  # noqa: E402
+
 PRESTO_DIR = os.path.join(REPO_ROOT, "presto")
 DEFAULT_OUT = os.path.join(REPO_ROOT, ".preview")
-PAYLOADS = ("sample", "live", "demo")
+PAYLOADS = ("demo", "live")
 
 
 class _AppSourceLoader(importlib.machinery.SourceFileLoader):
@@ -114,7 +118,7 @@ class FakePresto(object):
 def _fetch_live(net, config):
     host = getattr(config, "DAEMON_HOST", None)
     if not host:
-        raise SystemExit("presto/config.py has no DAEMON_HOST; use --payload sample or a file")
+        raise SystemExit("presto/config.py has no DAEMON_HOST; use --payload demo or a file")
     url = net.build_url(host, int(getattr(config, "DAEMON_PORT", 8787)))
     request = Request(url, headers=net.build_headers(getattr(config, "SHARED_TOKEN", "")))
     try:
@@ -139,7 +143,7 @@ def _mute_left_ms(text):
     return int(text) * 60 * 60 * 1000
 
 
-def render(payload="sample", out=DEFAULT_OUT, stale=False, offline=False, muted=False,
+def render(payload="demo", out=DEFAULT_OUT, stale=False, offline=False, muted=False,
            mute_left=None):
     main, net = _load_app_modules()
     if HERE not in sys.path:
@@ -149,9 +153,10 @@ def render(payload="sample", out=DEFAULT_OUT, stale=False, offline=False, muted=
     display = Framebuffer()
     presto = FakePresto(display)
     app = main.App(presto)
-    app.static_demo = payload == "demo"
-    if payload in ("sample", "demo"):
-        data = net.embedded_payload()
+    if payload == "demo":
+        # The first second of the loop: the calm scene. The payload carries
+        # the demo flag, so the app draws the chip.
+        data = demo_client.payload_at(0)
     elif payload == "live":
         data = _fetch_live(net, main.config)
     else:
@@ -238,9 +243,9 @@ figcaption { margin-top: 8px; color: #8b949e; }
 
 def main_cli(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--payload", default="sample",
-                        help="sample (built-in), live (daemon in presto/config.py), "
-                             "demo (static Home), or a JSON file path")
+    parser.add_argument("--payload", default="demo",
+                        help="demo (the scripted sample data), live (daemon in "
+                             "presto/config.py), or a JSON file path")
     parser.add_argument("--out", default=DEFAULT_OUT)
     parser.add_argument("--stale", action="store_true", help="a failed refresh after good data")
     parser.add_argument("--offline", action="store_true", help="the full-screen connection error")

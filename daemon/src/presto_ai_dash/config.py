@@ -26,6 +26,9 @@ DEFAULTS = {
     "admin": {"enabled": False, "port": 8788, "token": "", "key_file": "",
               "host": "127.0.0.1", "allowed_hosts": [], "secure_cookie": False},
     "display": {"overflow_rows": 1},
+    # Demo mode: sample data served by the daemon itself, replacing the real
+    # readings while it is on. Off until the user asks for it.
+    "demo": {"enabled": False},
     # The sound is off until the user turns it on: a desk device must never
     # beep unannounced. A value the user already stored (in the database or
     # in dash.toml) is respected; only the unset default is off.
@@ -35,7 +38,6 @@ DEFAULTS = {
                "quiet_start": "22:00", "quiet_end": "07:00",
                "pop_to_top": True, "mute_hours": DEFAULT_MUTE_HOURS},
     "sources": {
-        "fake": {"enabled": True, "scenario_interval": 20},
         "ollama": {"enabled": False, "base_url": "http://localhost:11434",
                    "timeout": 5, "samples_file": ""},
         "litellm": {"enabled": False, "base_url": "http://localhost:4000",
@@ -70,6 +72,8 @@ class ConfigError(ValueError):
 
 
 INGEST_ENV = "DASH_INGEST_ENABLED"
+# Demo mode: the device shows sample data instead of the real accounts.
+DEMO_ENV = "DASH_DEMO"
 # Mark the admin session cookie Secure: set it when the page is served over HTTPS.
 ADMIN_SECURE_COOKIE_ENV = "DASH_ADMIN_SECURE_COOKIE"
 TRUTHY_FLAGS = frozenset(("1", "true", "yes", "on"))
@@ -256,6 +260,30 @@ def ingest_enabled(config, stored=None, environ=None):
     return config["daemon"].get("ingest_enabled", False)
 
 
+def demo_enabled(config, stored=None, environ=None):
+    """The effective demo switch, resolved afresh on every request.
+
+    The environment beats the admin's stored setting, which beats TOML; off by
+    default. Reading the environment here - not once at startup - is what lets
+    an admin toggle apply without a daemon restart. A garbled variable fails
+    closed, so a broken value can never put sample data in front of a reader
+    who did not ask for it.
+    """
+    names = os.environ if environ is None else environ
+    if DEMO_ENV in names:
+        try:
+            return parse_flag(names[DEMO_ENV], DEMO_ENV)
+        except ConfigError:
+            log.error("%s is set to a non-boolean value; demo mode stays off", DEMO_ENV)
+            return False
+    if stored is not None:
+        return stored
+    section = config.get("demo") if isinstance(config, dict) else None
+    if isinstance(section, dict):
+        return section.get("enabled", False) is True
+    return False
+
+
 # The alert settings the admin page can change, and the file can set.
 ALERT_KEYS = ("enabled", "warning_percent", "critical_percent", "sound",
               "quiet_hours", "quiet_start", "quiet_end", "pop_to_top",
@@ -361,6 +389,8 @@ def load_config(path=None):
             config[section][key] = value
     if INGEST_ENV in os.environ:
         config["daemon"]["ingest_enabled"] = parse_flag(os.environ[INGEST_ENV], INGEST_ENV)
+    if DEMO_ENV in os.environ:
+        config["demo"]["enabled"] = parse_flag(os.environ[DEMO_ENV], DEMO_ENV)
     if ADMIN_SECURE_COOKIE_ENV in os.environ:
         config["admin"]["secure_cookie"] = parse_flag(os.environ[ADMIN_SECURE_COOKIE_ENV],
                                                       ADMIN_SECURE_COOKIE_ENV)
@@ -381,7 +411,6 @@ def load_config(path=None):
         (config["daemon"], "poll_interval", 1, None),
         (config["daemon"], "retention_hours", 1, None),
         (config["daemon"], "cleanup_interval", 1, None),
-        (config["sources"]["fake"], "scenario_interval", 1, None),
         (config["admin"], "port", 1, 65535),
     ):
         value = section[key]
@@ -394,6 +423,8 @@ def load_config(path=None):
             raise ConfigError("daemon.%s must be a valid string" % key)
     if type(config["daemon"]["ingest_enabled"]) is not bool:
         raise ConfigError("daemon.ingest_enabled must be a boolean")
+    if type(config["demo"].get("enabled", False)) is not bool:
+        raise ConfigError("demo.enabled must be a boolean")
     overflow = config["display"].get("overflow_rows")
     if type(overflow) is not int or overflow < OVERFLOW_MIN or overflow > OVERFLOW_MAX:
         raise ConfigError("display.overflow_rows must be an integer in range %d..%d" %
@@ -440,8 +471,12 @@ def load_config(path=None):
     check_token_strength("admin.token", admin_token)
     if token and admin_token == token:
         raise ConfigError("admin token must be different from the device shared token")
-    if type(config["sources"]["fake"]["enabled"]) is not bool:
-        raise ConfigError("sources.fake.enabled must be a boolean")
+    # The demo source is gone. An install that still carries its section in
+    # dash.toml keeps working: the section is dropped, with one warning.
+    if "fake" in config["sources"]:
+        del config["sources"]["fake"]
+        log.warning("[sources.fake] is no longer used; demo mode replaces it "
+                    "(DASH_DEMO or the admin page). The section was ignored.")
     from .sources import available_sources, source_type
     supported_sources = available_sources()
     for name, section in config["sources"].items():
@@ -455,8 +490,6 @@ def load_config(path=None):
             continue
         if type(section.get("enabled", False)) is not bool:
             raise ConfigError("sources.%s.enabled must be a boolean" % name)
-        if name == "fake":
-            continue
         if name not in ("ollama", "litellm"):
             from .management import validate_settings
             cls = source_type(name)
@@ -489,10 +522,6 @@ def load_config(path=None):
     child_env.hide(key_env)
     if key_env and os.environ.get(key_env):
         config["sources"]["litellm"]["api_key"] = os.environ[key_env]
-    if config["sources"]["fake"].get("enabled") and any(
-        section.get("enabled") for name, section in config["sources"].items() if name != "fake"
-    ):
-        raise ConfigError("disable sources.fake when enabling a live source")
     level = config["logging"]["level"]
     if not isinstance(level, str) or level.upper() not in (
         "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"

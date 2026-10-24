@@ -210,7 +210,7 @@ class BellAppTests(unittest.IsolatedAsyncioTestCase):
             "bell_app_for_test",
             os.path.join(presto_path.PRESTO_DIR, "main.py"))
         self.module = importlib.util.module_from_spec(spec)
-        with patch.dict(sys.modules, {"config": SimpleNamespace(STATIC_DEMO=False)}):
+        with patch.dict(sys.modules, {"config": SimpleNamespace()}):
             spec.loader.exec_module(self.module)
         self.device = SimpleNamespace(
             display=Display(), update=lambda: None, NUM_LEDS=7,
@@ -409,7 +409,7 @@ class DeviceAlertLogicTests(unittest.IsolatedAsyncioTestCase):
             "bell_logic_app_for_test",
             os.path.join(presto_path.PRESTO_DIR, "main.py"))
         self.module = importlib.util.module_from_spec(spec)
-        with patch.dict(sys.modules, {"config": SimpleNamespace(STATIC_DEMO=False)}):
+        with patch.dict(sys.modules, {"config": SimpleNamespace()}):
             spec.loader.exec_module(self.module)
         self.device = SimpleNamespace(
             display=Display(), update=lambda: None, NUM_LEDS=7,

@@ -203,7 +203,6 @@ class CodexProtocolTests(unittest.TestCase):
 
 class CodexManagedTests(ManagementBase):
     def test_ui_catalog_database_restart_and_independent_account_cards(self):
-        self.disable_fake()
         description = next(t for t in source_catalog() if t["id"] == "codex")
         self.assertFalse(description["has_secret"])
         rows = [self.manager.save({"type": "codex", "name": "Codex " + profile,

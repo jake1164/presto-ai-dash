@@ -14,7 +14,8 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-from .dashboard import build_status_payload
+from . import demo
+from .dashboard import build_status_payload, lazy_cards
 from .ingest import ingest as store_observation
 
 log = logging.getLogger(__name__)
@@ -285,12 +286,17 @@ class BoundedRequestHandler(BaseHTTPRequestHandler):
 
 def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                  *, ingest_enabled=None, ingest_rate_limiter=None, client_registry=None,
-                 alert_writer=None, alert_rate_limiter=None, card_provider=None):
+                 alert_writer=None, alert_rate_limiter=None, card_provider=None,
+                 demo_enabled=None, demo_second=None):
     if not shared_token:
         raise ValueError("API requires a nonempty shared token")
     limiter = ingest_rate_limiter if ingest_rate_limiter is not None else _IngestRateLimiter()
     alert_limiter = (alert_rate_limiter if alert_rate_limiter is not None
                      else _AlertRateLimiter())
+    # The bells switched in demo mode. Demo mode is sample data with no stored
+    # settings, so a tap is remembered here and nowhere else - and it lives in
+    # this one server, so it is gone when the daemon restarts.
+    demo_alerts = {}
 
     class StatusHandler(BoundedRequestHandler):
         def log_message(self, fmt, *args):
@@ -326,6 +332,36 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
             from .clients import sanitize_header
             return sanitize_header(self.headers.get("X-Presto-Client"))
 
+        def _demo_on(self):
+            """Whether demo mode is on right now, re-read on every request.
+
+            Demo mode is a setting of this daemon, so it can be turned on and
+            off without a restart. A broken check must never serve sample data
+            to a reader who did not ask for it, so it fails closed.
+            """
+            if demo_enabled is None:
+                return False
+            try:
+                return bool(demo_enabled())
+            except Exception:
+                log.exception("demo mode check failed")
+                return False
+
+        def _demo_payload(self, query):
+            """The demo's own payload, with the bells this server was told.
+
+            It is built by the daemon's builders in demo.py, so it has the
+            same shape and size as a real payload. The in-memory bell taps
+            are applied on top: nothing here reads the database.
+            """
+            payload = demo.demo_payload(demo_second() if demo_second else 0)
+            for source in payload.get("sources", ()):
+                if isinstance(source, dict) and source.get("id") in demo_alerts:
+                    source["alerts"] = demo_alerts[source["id"]]
+            if LAZY_QUERY in (query or ""):
+                lazy_cards(payload)
+            return payload
+
         def do_GET(self):
             parsed = urlparse(self.path)
             path = parsed.path
@@ -350,7 +386,11 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                 self._send_json(401, {"error": "unauthorised"})
                 return
             try:
-                if status_provider is not None:
+                if self._demo_on():
+                    # Demo mode overrides the real sources on both daemon
+                    # paths, and asks no collector for anything.
+                    payload = self._demo_payload(parsed.query)
+                elif status_provider is not None:
                     payload = self._status_payload(parsed.query)
                 else:
                     snapshots = storage.latest_snapshots()
@@ -392,6 +432,20 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
             """One card's tiles and lines. Read-only, with the shared token."""
             if not self._authorized():
                 self._send_json(401, {"error": "unauthorised"})
+                return
+            if self._demo_on():
+                # The demo's cards are its own, on either daemon path.
+                try:
+                    detail = demo.demo_card_detail(card_id,
+                                                   demo_second() if demo_second else 0)
+                except Exception:
+                    log.exception("could not build the demo card detail")
+                    self._send_json(500, {"error": "internal_error"})
+                    return
+                if not isinstance(detail, dict):
+                    self._send_json(404, {"error": "not_found"})
+                    return
+                self._send_json(200, detail)
                 return
             if card_provider is None:
                 self._send_json(404, {"error": "not_found"})
@@ -490,7 +544,8 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
             if not self._authorized():
                 self._send_json(401, {"error": "unauthorised"})
                 return
-            if alert_writer is None:
+            demo_tap = self._demo_on() and demo.is_demo_id(instance_id)
+            if alert_writer is None and not demo_tap:
                 # No managed sources: there is nothing to switch.
                 self._send_json(404, {"error": "not_found"})
                 return
@@ -531,6 +586,19 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                 self._send_json(400, {"error": "invalid_body"})
                 return
             enabled = payload["enabled"]
+            if demo_tap:
+                # Sample data has no stored settings: the tap is remembered in
+                # memory for this server and written nowhere.
+                demo_alerts[instance_id] = enabled
+                log.info("demo alerts for %s turned %s by %s", instance_id,
+                         "on" if enabled else "off", self._client_name())
+                self._send_json(200, {"ok": True, "alerts": enabled, "master": True})
+                return
+            if self._demo_on():
+                # Demo mode knows only its own accounts. A real account's
+                # setting is never written while it is on, even by mistake.
+                self._send_json(404, {"error": "not_found"})
+                return
             try:
                 state = alert_writer(instance_id, enabled)
             except KeyError:
@@ -677,7 +745,8 @@ class ApiServer:
     def __init__(self, host, port, storage, shared_token, source_ids=None,
                  status_provider=None, *, ingest_enabled=None, ingest_rate_limiter=None,
                  handler_class=None, client_registry=None, alert_writer=None,
-                 alert_rate_limiter=None, card_provider=None):
+                 alert_rate_limiter=None, card_provider=None, demo_enabled=None,
+                 demo_second=None):
         self.host = host
         self._server = _ExclusiveHTTPServer(
             (host, port), handler_class or make_handler(
@@ -687,7 +756,9 @@ class ApiServer:
                 client_registry=client_registry,
                 alert_writer=alert_writer,
                 alert_rate_limiter=alert_rate_limiter,
-                card_provider=card_provider))
+                card_provider=card_provider,
+                demo_enabled=demo_enabled,
+                demo_second=demo_second))
         self._server.daemon_threads = False
         self._server.block_on_close = True
         self._server._active_condition = threading.Condition()

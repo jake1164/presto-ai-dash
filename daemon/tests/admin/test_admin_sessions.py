@@ -181,7 +181,8 @@ class MigrationTests(unittest.TestCase):
         self.addCleanup(storage.close)
         columns = {row["name"] for row in storage._conn.execute("PRAGMA table_info(admin_sessions)")}
         self.assertIn("binding", columns)
-        self.assertEqual(storage._conn.execute("PRAGMA user_version").fetchone()[0], 8)
+        self.assertEqual(storage._conn.execute("PRAGMA user_version").fetchone()[0],
+                         Storage.SCHEMA_VERSION)
         # The old row has no binding, so no current token accepts it.
         self.assertIsNone(storage.admin_session("h", time.time(), token_binding(TOKEN, False)))
         self.assertIsNone(storage.admin_session("h", time.time(), token_binding(TOKEN, True)))

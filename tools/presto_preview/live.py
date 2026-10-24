@@ -1,7 +1,7 @@
 """Run the Presto app live in a browser window.
 
     python tools/presto_preview/live.py            # polls the daemon in presto/config.py
-    python tools/presto_preview/live.py --demo     # STATIC_DEMO Home, no network
+    python tools/presto_preview/live.py --demo     # the scripted demo, no daemon
     python tools/presto_preview/live.py --open     # also open the default browser
     open http://127.0.0.1:8790/
 
@@ -153,7 +153,11 @@ class Runner(object):
             draw_boot(display, Palette(display), "Starting...")
             presto.update()
             app = main.App(presto)
-            app.static_demo = self.demo
+            if self.demo:
+                # The demo never contacts the daemon: its client answers from
+                # the daemon's own demo module, in this process.
+                from demo_client import DemoClient
+                app.client = DemoClient()
             fetch = app.client.fetch_async
 
             async def fetch_async():
@@ -334,8 +338,8 @@ button { font: inherit; background: #21262d; color: #c9d1d9; border: 1px solid #
 </style></head><body>
 <div id="bezel"><img id="screen" alt="Presto screen" draggable="false" src="/frame.png"><pre id="error"></pre></div>
 <div class="controls">
-  <label id="demo-label" title="Runs the app the way the device does when STATIC_DEMO is on: it never contacts the daemon. Home shows built-in sample quotas (OpenAI, Claude, Ollama Cloud, OpenCode.ai) marked DEMO, and the cards come from the built-in sample data. Use it to work on the layout without real accounts or a running daemon. Untick to go back to live data."><input type="checkbox" id="demo"> Static demo</label>
-  <label id="netfail-label" title="Makes every daemon request fail, as if the daemon were off or unreachable. The app keeps its last good data marked 'STALE - retrying', then after 30 seconds switches to the red 'Daemon offline' screen, exactly as the device does. Untick to watch it recover. Your real daemon is not affected. Not available in static demo, which makes no requests."><input type="checkbox" id="netfail"> Simulate network failure</label>
+  <label id="demo-label" title="Runs the app on the scripted demo instead of the daemon: it never contacts anything. The same sample accounts the daemon's demo mode and the published demo page show, with the device's own screens. Untick to go back to live data."><input type="checkbox" id="demo"> Static demo</label>
+  <label id="netfail-label" title="Makes every fetch fail, as if the daemon were off or unreachable. The app keeps its last good data marked 'STALE - retrying', then after 30 seconds switches to the red 'Daemon offline' screen, exactly as the device does. Untick to watch it recover. Your real daemon is not affected."><input type="checkbox" id="netfail"> Simulate network failure</label>
   <button id="restart" type="button" title="Restarts the app from boot, back on Home, with the current presto/*.py code. Saving a presto file already does this automatically, so use it to reset the app's state, such as scroll position, mute, or a stuck screen.">Restart app</button>
 </div>
 <div class="hint">Drag to swipe or scroll &middot; click to tap &middot; hold 0.7s to mute.
@@ -421,7 +425,6 @@ button { font: inherit; background: #21262d; color: #c9d1d9; border: 1px solid #
         errorBox.textContent = state.error || "";
         if (!offlineUrl) cacheOffline();
         document.getElementById("demo").checked = state.demo;
-        document.getElementById("netfail").disabled = state.demo;
         document.getElementById("netfail").checked = state.network_fail;
         status.textContent = (state.demo ? "static demo" : "live daemon") + " · frame " + frame +
           (state.network_fail ? " · network failing" : "");
@@ -483,7 +486,8 @@ def open_tabs(first, preview_url, wait=30):
 
 def main_cli(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--demo", action="store_true", help="STATIC_DEMO Home; no network")
+    parser.add_argument("--demo", action="store_true",
+                        help="start with the demo on: sample data, no daemon")
     parser.add_argument("--port", type=int, default=8790)
     parser.add_argument("--open", action="store_true", help="open the page in the default browser")
     parser.add_argument("--open-first", action="append", default=[], metavar="URL",

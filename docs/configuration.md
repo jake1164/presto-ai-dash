@@ -124,10 +124,11 @@ only refreshed when `/usage` is opened. The terminal export keeps its own
 **Mark idle readings stale after (seconds)** threshold, and each window of a
 merged report is judged by the source it came from.
 
-Disable the fake source before enabling a live source. Only one demo instance
-can be enabled, and it cannot run with live sources. Fake remains an available
-**demo/test** connector for hardware and connection checks. Delete its saved
-instance if you no longer want it listed; it will not be recreated on restart.
+Sample data is not a connector. **Demo mode** (the Settings tab, or
+`DASH_DEMO=1`) replaces the readings the device and the status API see with a
+scripted set of sample accounts. It overrides the real sources without
+disabling or editing them, contacts no provider, and writes no reading.
+Turning it off brings the real readings back on the next poll.
 
 The Ollama connector monitors **local server health and loaded models**. Local
 Ollama requires no API key, so its source row says **local API · no key required**.
@@ -144,14 +145,14 @@ Changes trigger collection without restarting the daemon. An in-flight probe
 may finish first; its result is discarded if its configuration changed or the
 instance was disabled/deleted.
 
-Available connectors are fake, local Ollama, LiteLLM, **Codex**, **Claude**, **OpenCode Go**, and
+Available connectors are local Ollama, LiteLLM, **Codex**, **Claude**, **OpenCode Go**, and
 **Ollama Cloud**. Manage provider account settings, keys, and refresh intervals in this
 page; the database is the source of truth. No separate provider configuration
 file is required. OpenCode Go shows 5h/Weekly/Monthly quota meters. Ollama Cloud
 shows dated activity; its current reporting response does not expose monthly
 allowance or remaining credits. See [cloud readings](quotas.md).
 
-The menu labels Fake as demo/test data. Codex uses an existing subscription
+The menu lists only real connectors. Codex uses an existing subscription
 login; its source settings live in SQLite, while OAuth stays with Codex's own
 credential cache/keychain. Dashboard-managed Codex sign-in remains pending.
 See [Codex setup](codex.md). Claude has a [terminal quota exporter](claude.md),
@@ -443,7 +444,7 @@ decided it. These values need a daemon restart, so they are edited in
 `dash.toml` or in the environment rather than on the page.
 
 **About and help** holds the explanatory text: the cloud and subscription
-sources, the Fake demo source, the order note, and where the logs and the
+sources, the order note, and where the logs and the
 diagnostics commands are.
 
 ## Management API

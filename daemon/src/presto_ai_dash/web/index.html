@@ -34,6 +34,8 @@
     </form>
   </section>
   <main id="workspace" hidden>
+    <p id="demo-banner" class="banner" hidden>Demo mode is ON. The Presto is showing sample data.
+      Real readings below are unchanged.</p>
     <div id="tablist" class="tablist" role="tablist" aria-label="Sections">
       <button type="button" role="tab" id="tab-services" data-tab="services"
         aria-controls="panel-services" aria-selected="true" tabindex="0">Services</button>
@@ -49,8 +51,7 @@
         <h2>Your services</h2>
         <button id="add-source">Add source</button>
       </div>
-      <p>Manage accounts, keys, and refresh settings here. Changes are saved in the database.
-        Disable demo data before enabling a live source.</p>
+      <p>Manage accounts, keys, and refresh settings here. Changes are saved in the database.</p>
       <p class="note">Drag an account by its grip to change the order, or use the arrow buttons.
         Order saves automatically and appears on Presto Home and swipe cards on the next poll.
         Uncheck Enabled to pause a source and hide it on Presto; its settings, key, and position are kept.</p>
@@ -123,6 +124,22 @@
           <p id="remote-off-note" class="note" hidden>Remote reports are off, so the daemon refuses every
             remote collector, with or without a token. Turn them on above first.</p>
           <div id="remote-accounts"></div>
+        </div>
+      </details>
+
+      <details class="setting" id="demo-setting">
+        <summary><span class="setting-title">Demo mode</span>
+          <span class="scope-badge">Applies to all services</span></summary>
+        <div class="setting-body">
+          <p class="guide-slot" data-help="demo-mode" data-help-label="Demo mode guide"></p>
+          <label class="check" id="demo-label"><input id="demo-enabled" type="checkbox"> Show sample data</label>
+          <p id="demo-lock" class="note" hidden>The DASH_DEMO environment variable controls
+            demo mode for this daemon; edit the environment instead of this page.</p>
+          <p class="note">While demo mode is on, the Presto and the status API show a scripted set of
+            sample accounts instead of the real ones, with their own demo chip. The real accounts are
+            untouched: no provider is contacted, no reading is stored, and a bell tap on a sample
+            account is remembered in memory only. Turning it off brings the real readings back on the
+            next poll, with no restart.</p>
         </div>
       </details>
 
@@ -202,9 +219,6 @@
             OpenCode Go reports quota percentages. Ollama Cloud reports dated activity;
             its monthly credit balance is not available from the current reporting API.
             Codex uses your existing ChatGPT login in the local Codex app. Claude uses a Claude Code terminal quota export. Subscription allowances are separate from API billing.</p>
-          <h4>The Fake demo source</h4>
-          <p class="note">Fake remains available for demos and connection testing. You can delete
-            its saved instance; it will not return on restart.</p>
           <h4>Order</h4>
           <p class="note">The order of the accounts on the Services tab is the order of the Presto Home
             list and of the swipe cards. It saves automatically and applies on the next poll.</p>

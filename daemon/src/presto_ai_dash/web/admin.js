@@ -8,7 +8,7 @@
   let csrfToken = "", unlocked = false, catalog = [], sources = [], editing = null;
   let busy = false;
   let dragging = null;
-  let ingestState = null, tokenReveal = null, displayState = null;
+  let ingestState = null, tokenReveal = null, displayState = null, demoState = null;
   let alertsState = null;
   // The master switch: alerts on or off for every service. It is kept apart
   // from the form, so a background refresh never rewrites what the reader
@@ -47,6 +47,7 @@
     "settings-panel": {page: "guides/admin-page.md", anchor: "settings"},
     "home-display": {page: "guides/home-display.md", anchor: "the-setting"},
     "remote-reports": {page: "concepts/remote-reports.md", anchor: "turning-it-on"},
+    "demo-mode": {page: "guides/admin-page.md", anchor: "demo-mode"},
     "remote-token": {page: "guides/remote-collectors.md", anchor: "rotating-and-revoking"},
     "alerts": {page: "guides/alerts-and-the-bell.md", anchor: "the-settings-behind-it"},
     "alert-thresholds": {page: "concepts/alerts.md", anchor: "what-raises-an-alert"},
@@ -61,8 +62,6 @@
     "source-ollama-cloud": {page: "guides/ollama-cloud.md", anchor: "set-it-up"},
     "source-ollama": {page: "guides/ollama.md", anchor: "set-it-up"},
     "source-litellm": {page: "guides/litellm.md", anchor: "set-it-up"},
-    "source-fake": {page: "getting-started/add-the-first-source.md",
-                     anchor: "the-first-source-pick-something-local"},
   };
 
   function helpLink(key, label) {
@@ -260,6 +259,21 @@
       displayState = await request("/api/admin/display");
       renderDisplay();
     } catch (_) { /* keep the last known setting */ }
+  }
+  async function loadDemo() {
+    // Demo mode is read on its own too, so the banner follows the switch.
+    try {
+      demoState = await request("/api/admin/demo");
+      renderDemo();
+    } catch (_) { /* keep the last known state */ }
+  }
+  function renderDemo() {
+    const on = !!demoState?.enabled;
+    element("demo-enabled").checked = on;
+    element("demo-enabled").disabled = !!demoState?.locked_by_environment;
+    element("demo-lock").hidden = !demoState?.locked_by_environment;
+    // The banner is a child of the workspace, so it heads every tab.
+    element("demo-banner").hidden = !on;
   }
   function renderDisplay() {
     const value = displayState?.overflow_rows;
@@ -591,13 +605,12 @@
       type?.id === "opencode_go" ? "Read-only subscription meters for your OpenCode Go account. This does not make model requests or sum tokens into quotas." :
       type?.id === "ollama_cloud" ? "Reads dated cloud activity. Monthly allowance and remaining credits are not returned by the current API; local Ollama is a separate source." :
       type?.id === "codex" ? "Reads Codex subscription quotas using your ChatGPT login in Codex. Leave both paths blank for automatic discovery and the default profile. Separate accounts need separate Codex profile directories. OAuth stays with Codex; no pay-per-use API key is needed. Browser and device-code sign-in, cancellation, and logout are available through the Codex login controls." :
-      type?.id === "claude" ? "Claude Code exports 5h/weekly subscription quotas after normal terminal responses. Save this source, then set up its exporter below. Readings go straight to the database; existing status-line output is preserved. No API key is needed. Idle readings become stale; the VS Code panel does not run the status line, but the optional usage cache reader reads the numbers Claude Code caches on disk for its /usage dialog." :
-      type?.id === "fake" ? "Synthetic demo/test data. Disable it before enabling a live source." : "";
+      type?.id === "claude" ? "Claude Code exports 5h/weekly subscription quotas after normal terminal responses. Save this source, then set up its exporter below. Readings go straight to the database; existing status-line output is preserved. No API key is needed. Idle readings become stale; the VS Code panel does not run the status line, but the optional usage cache reader reads the numbers Claude Code caches on disk for its /usage dialog." : "";
     // The setup guide stays inside the editor, below the source description.
     const guide = element("source-type-help");
     guide.replaceChildren();
-    const guideLink = helpLink("source-" + (type?.id || "fake").replace(/_/g, "-"),
-                               (type?.name || "Source") + " setup guide");
+    const guideLink = type ? helpLink("source-" + type.id.replace(/_/g, "-"),
+                                      type.name + " setup guide") : null;
     if (guideLink) guide.append(guideLink);
     if (!type) return;
     for (const field of type.fields) {
@@ -662,8 +675,7 @@
       option.value = source.type; option.textContent = source.type + " (unavailable)";
       element("source-type").append(option);
     }
-    element("source-type").value = source?.type ??
-      catalog.find((type) => type.id !== "fake")?.id ?? catalog[0]?.id ?? "";
+    element("source-type").value = source?.type ?? catalog[0]?.id ?? "";
     element("source-name").value = source?.name ?? selectedType()?.name ?? "";
     element("source-enabled").checked = source?.enabled ?? false;
     element("api-key").value = "";
@@ -1338,6 +1350,7 @@
   function lock() {
     csrfToken = ""; unlocked = false; sources = []; catalog = []; editing = null;
     ingestState = null; tokenReveal = null; displayState = null;
+    demoState = null;
     alertsState = null; masterOn = true; lastMasterOn = null;
     serviceAlertStates.clear(); serviceAlertDrafts.clear(); serviceAlertLoading.clear();
     statusState = null; configState = null; expanded.clear();
@@ -1351,11 +1364,12 @@
   async function unlock() {
     await reload();
     await loadIngest();
+    await loadDemo();
     await loadDisplay();
     await loadAlerts();
     element("source-type").replaceChildren(...catalog.map((type) => {
         const option = document.createElement("option"); option.value = type.id;
-        option.textContent = type.id === "fake" ? "Fake (demo/test data)" : type.name; return option;
+        option.textContent = type.name; return option;
       }));
     const planned = document.createElement("optgroup"); planned.label = "Planned — not implemented";
     for (const [id, name] of [["codex", "OpenAI / Codex subscription"], ["claude", "Claude subscription"],
@@ -1447,6 +1461,18 @@
     } catch (error) { message(error.message, true); }
     // The account cards say whether remote reports are on, so they follow the switch.
     finally { busy = false; renderIngest(); renderList(); }
+  });
+  element("demo-enabled").addEventListener("change", async () => {
+    if (busy) { renderDemo(); return; }
+    busy = true;
+    try {
+      demoState = await request("/api/admin/demo", "PUT",
+        {enabled: element("demo-enabled").checked});
+      message(element("demo-enabled").checked ?
+        "Demo mode on. The Presto shows sample data until you turn it off." :
+        "Demo mode off. The Presto shows the real accounts on its next poll.");
+    } catch (error) { message(error.message, true); }
+    finally { busy = false; renderDemo(); }
   });
   element("overflow-rows").addEventListener("change", async () => {
     if (busy) { renderDisplay(); return; }

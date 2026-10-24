@@ -67,10 +67,11 @@ If something is already installed and broken, go straight to
 | [Ollama Cloud](guides/ollama-cloud.md) | Dated activity totals: requests, tokens and spend |
 | [Ollama](guides/ollama.md) | Local server health, loaded model, measured speed |
 | [LiteLLM](guides/litellm.md) | Routed requests, tokens, spend, errors and top model |
-| Fake | Synthetic data, for demos and for checking the hardware |
 
-Every one of these is optional. Start with the Fake source and the hardware,
-then add the accounts you care about.
+Every one of these is optional. To see the display work before you connect an
+account, turn on **Demo mode** on the admin page's Settings tab: six sample
+accounts are shown, clearly labelled, and the real readings come back when you
+turn it off.
 
 ## What it will never do
 

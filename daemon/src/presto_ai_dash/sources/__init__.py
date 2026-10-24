@@ -155,14 +155,13 @@ def build_sources(config):
 
 # Importing the modules registers their classes. Keep this at the bottom to
 # avoid a circular import.
-from . import fake  # noqa: E402,F401
 from . import ollama  # noqa: E402,F401
 from . import litellm  # noqa: E402,F401
 
 # Developer-installed source modules are trusted code. Discovery happens at
 # startup, never from an upload or a web request.
 for _module in sorted(pkgutil.iter_modules(__path__), key=lambda item: item.name):
-    if not _module.name.startswith("_") and _module.name not in ("fake", "ollama", "litellm"):
+    if not _module.name.startswith("_") and _module.name not in ("ollama", "litellm"):
         try:
             importlib.import_module("." + _module.name, __name__)
         except Exception:

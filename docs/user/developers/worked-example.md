@@ -30,7 +30,7 @@ A template that nobody runs rots. The one in this repository is executed by
 `daemon/tests/providers/test_source_template.py`, which:
 
 - imports it **by path**, so discovery never sees it,
-- runs its `collect()` against a **fake response**, so no network is
+- runs its `collect()` against a **canned response**, so no network is
   involved,
 - asserts that its ID is **not** in `source_catalog()`,
 - checks that a missing window is *unavailable* and not zero,

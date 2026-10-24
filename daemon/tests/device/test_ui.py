@@ -5,10 +5,13 @@ import sys
 import unittest
 
 import presto_path  # noqa: F401
+from alerts import rgb_for_accent
 from cards import Card, parse_cards
 from home import source_rows
-from net import embedded_payload
-from ui import Palette, _text, draw_card, draw_sources, INK
+from payloads import sample_payload
+from ui import (DEMO_CHIP_BG, DEMO_CHIP_TEXT, EMPTY_HINT, EMPTY_HINT_MORE,
+                EMPTY_TITLE, Palette, _text, demo_chip_rect, draw_card,
+                draw_sources, INK)
 
 PREVIEW_DIR = os.path.join(presto_path.REPO_ROOT, "tools", "presto_preview")
 if PREVIEW_DIR not in sys.path:
@@ -70,17 +73,28 @@ class Display:
 
 class TextLayoutTests(unittest.TestCase):
     def assert_rows_fit(self, display):
-        previous_bottom = -1
+        """Every row fits its width, and no two rows of text overlap.
+
+        Rows may share a band when they are side by side (the STALE chip and
+        the status chip do), so overlap is checked on both axes, using the
+        text's measured width rather than the space it was offered.
+        """
+        boxes = []
         for text, x, y, wrap, scale, font in display.rows:
             display.set_font(font)
-            self.assertLessEqual(display.measure_text(text, scale), wrap, text)
+            width = display.measure_text(text, scale)
+            height = (8 if font == "bitmap8" else 6) * scale
+            self.assertLessEqual(width, wrap, text)
             self.assertLessEqual(x + wrap, display.width - 8)
             self.assertNotIn("\n", text)
-            self.assertGreaterEqual(y, previous_bottom, text)
-            previous_bottom = y + (8 if font == "bitmap8" else 6) * scale
+            for previous, px, py, pw, ph in boxes:
+                intersects = (x < px + pw and px < x + width and
+                              y < py + ph and py < y + height)
+                self.assertFalse(intersects, (text, previous))
+            boxes.append((text, x, y, width, height))
 
     def test_sample_cards_do_not_wrap_or_overlap(self):
-        cards, error = parse_cards(embedded_payload())
+        cards, error = parse_cards(sample_payload())
         self.assertIsNone(error)
         for index, card in enumerate(cards):
             with self.subTest(card=card.id):
@@ -229,3 +243,77 @@ class DotHitTests(unittest.TestCase):
     def test_a_single_card_has_no_dots(self):
         from ui import dot_hit
         self.assertIsNone(dot_hit(120, 232, 0, 1))
+
+
+class EmptyHomeTests(unittest.TestCase):
+    """No service set up is amber with an instruction, never a green "ok"."""
+
+    def test_the_empty_screen_says_what_to_do(self):
+        display = Display()
+        draw_sources(display, Palette(display), [], 0, 1, status="ok")
+        texts = [text for text, *_ in display.rows]
+        self.assertIn(EMPTY_TITLE, texts)
+        self.assertIn(EMPTY_HINT, texts)
+        self.assertIn(EMPTY_HINT_MORE, texts)
+        self.assertTrue(all(ord(char) < 128 for text in texts for char in text), texts)
+
+    def test_the_empty_screen_is_amber_whatever_the_status_says(self):
+        display = Display()
+        draw_sources(display, Palette(display), [], 0, 1, status="ok")
+        self.assertEqual(display.rectangles[0],
+                         (rgb_for_accent("yellow"), (0, 0, 5, 240)))
+
+    def test_a_configured_list_keeps_its_status_colour(self):
+        rows = source_rows(sample_payload())
+        display = Display()
+        draw_sources(display, Palette(display), rows, 0, 3, status="ok")
+        self.assertEqual(display.rectangles[0],
+                         (rgb_for_accent("green"), (0, 0, 5, 240)))
+
+
+class DemoChipTests(unittest.TestCase):
+    """Sample data is called out in one clear chip, and only when it is."""
+
+    def card(self):
+        return Card("claude", "Claude", "warning", "5h: 12%", "Weekly 66%")
+
+    def test_the_chip_is_drawn_on_a_card_only_with_the_flag(self):
+        for demo, expected in ((True, True), (False, False)):
+            with self.subTest(demo=demo):
+                display = Display()
+                draw_card(display, Palette(display), self.card(), 3, 7, demo=demo)
+                texts = [text for text, *_ in display.rows]
+                self.assertEqual(DEMO_CHIP_TEXT in texts, expected)
+
+    def test_the_chip_is_drawn_on_home_only_with_the_flag(self):
+        rows = source_rows(sample_payload())
+        for demo, expected in ((True, True), (False, False)):
+            with self.subTest(demo=demo):
+                display = Display()
+                draw_sources(display, Palette(display), rows, 0, 7, demo=demo)
+                texts = [text for text, *_ in display.rows]
+                self.assertEqual(DEMO_CHIP_TEXT in texts, expected)
+
+    def test_the_chip_is_a_filled_box_not_a_dim_note(self):
+        display = Display()
+        draw_sources(display, Palette(display), [], 0, 1, demo=True)
+        x, y, width, height = demo_chip_rect(display)
+        self.assertIn((DEMO_CHIP_BG, (x, y, width, height)), display.rectangles)
+        self.assertGreaterEqual(width, display.measure_text(DEMO_CHIP_TEXT, 1))
+
+    def test_the_chip_keeps_clear_of_the_stale_text_its_status_and_the_dots(self):
+        display = Display()
+        draw_card(display, Palette(display), self.card(), 3, 7, stale=True, demo=True)
+        x, y, width, height = demo_chip_rect(display)
+        for text in ("STALE - retrying", "WARNING"):
+            found = [row for row in display.rows if row[0] == text]
+            self.assertTrue(found, text)
+            _text_drawn, tx, ty, _wrap, scale, font = found[0]
+            display.set_font(font)
+            text_width = display.measure_text(text, scale)
+            overlaps = (x < tx + text_width and tx < x + width and
+                        y < ty + (8 if font == "bitmap8" else 6) * scale and
+                        ty < y + height)
+            self.assertFalse(overlaps, text)
+        # The page dots are centred at height - 12 with a 3 pixel radius.
+        self.assertLessEqual(y + height, 240 - 15)

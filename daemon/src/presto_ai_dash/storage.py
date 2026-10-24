@@ -91,7 +91,7 @@ def _token_digest(token):
 
 
 class Storage:
-    SCHEMA_VERSION = 8
+    SCHEMA_VERSION = 9
     # Live browser sessions the admin page keeps; the oldest go first.
     ADMIN_SESSION_LIMIT = 25
     MAX_HISTORY_LIMIT = 1000
@@ -209,6 +209,13 @@ class Storage:
                 self._conn.execute(
                     "ALTER TABLE admin_sessions ADD COLUMN binding TEXT NOT NULL DEFAULT ''")
             self._conn.execute("PRAGMA user_version = 8")
+            # v9: the demo source is gone. An upgrade drops its saved instance
+            # and its readings (the alerts cascade with the snapshots), so no
+            # row remains that the daemon can no longer serve. Demo mode is a
+            # switch now, not a source.
+            self._conn.execute("DELETE FROM source_instances WHERE type = 'fake'")
+            self._conn.execute("DELETE FROM snapshots WHERE source_id = 'fake'")
+            self._conn.execute("PRAGMA user_version = 9")
             self._conn.commit()
         except Exception:
             self._conn.rollback()
@@ -442,6 +449,22 @@ class Storage:
         with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO configuration_meta (name, value) VALUES ('ingest_enabled', ?)"
+                " ON CONFLICT(name) DO UPDATE SET value=excluded.value",
+                (b"1" if enabled else b"0",))
+
+    def demo_enabled_setting(self):
+        """The persisted demo switch, or None while it has never been set."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT value FROM configuration_meta WHERE name = 'demo_enabled'").fetchone()
+        return None if row is None else bytes(row["value"]) == b"1"
+
+    def save_demo_enabled(self, enabled):
+        if type(enabled) is not bool:
+            raise ValueError("demo_enabled must be a boolean")
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO configuration_meta (name, value) VALUES ('demo_enabled', ?)"
                 " ON CONFLICT(name) DO UPDATE SET value=excluded.value",
                 (b"1" if enabled else b"0",))
 
@@ -735,12 +758,6 @@ class Storage:
                     raise ConfigurationConflict("source changed; reload before saving")
                 if current and current["type"] != record["type"]:
                     raise ValueError("source type cannot change; create a new source")
-                if record["enabled"]:
-                    others = self._conn.execute(
-                        "SELECT type FROM source_instances WHERE enabled = 1 AND id != ?",
-                        (record["id"],)).fetchall()
-                    if any(record["type"] == "fake" or row["type"] == "fake" for row in others):
-                        raise ValueError("disable demo sources before enabling live sources")
                 self._conn.execute(
                     "INSERT INTO source_instances (id, type, name, enabled, config, credential, revision, position) "
                     "VALUES (?, ?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(position), -1) + 1 FROM source_instances)) "

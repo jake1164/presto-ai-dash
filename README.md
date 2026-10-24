@@ -51,7 +51,8 @@ your LAN reads the numbers, read-only, and the Presto polls it and draws them.
 | Ollama | Server health, version, installed and loaded models | Anywhere that can reach the Ollama server |
 | LiteLLM | Health, readiness, and today's requests, tokens, spend and errors | Anywhere that can reach the gateway |
 
-A `fake` source cycles through every status for demos and hardware checks.
+**Demo mode** replaces the readings with a scripted set of sample accounts, for
+demos and hardware checks, and writes nothing.
 API keys are stored encrypted in the daemon's SQLite database; the Presto
 never holds a provider key. Details per source:
 [Guides](https://jake1164.github.io/presto-ai-dash/guides/claude/).

@@ -6,15 +6,12 @@ import presto_path  # noqa: F401
 
 import net
 from net import (
-    EMBEDDED_SAMPLE,
     NetworkUnavailable,
     StatusClient,
     StatusError,
     Unauthorised,
     build_headers,
     build_url,
-    embedded_payload,
-    load_static_payload,
     parse_payload,
 )
 
@@ -117,29 +114,6 @@ class TestParsePayload(unittest.TestCase):
             parse_payload('"hello"')
 
 
-class TestEmbeddedSample(unittest.TestCase):
-
-    def test_parses(self):
-        payload = embedded_payload()
-        self.assertEqual(payload["app"], "presto-ai-dash")
-
-    def test_has_three_cards_in_plan_order(self):
-        payload = embedded_payload()
-        self.assertEqual(
-            [c["id"] for c in payload["cards"]],
-            ["dash", "ollama", "litellm"])
-
-    def test_matches_the_committed_sample_file(self):
-        import json
-        import os
-        path = os.path.join(
-            os.path.dirname(presto_path.__file__), "..", "..",
-            "examples", "sample-status.json")
-        with open(os.path.abspath(path)) as handle:
-            on_disk = json.load(handle)
-        self.assertEqual(embedded_payload(), on_disk)
-
-
 class TestStatusClient(unittest.TestCase):
 
     def _client(self, response=None, exc=None):
@@ -209,25 +183,6 @@ class TestStatusClient(unittest.TestCase):
         with self.assertRaises(StatusError):
             client.fetch()
         self.assertTrue(response.closed)
-
-
-class TestLoadStaticPayload(unittest.TestCase):
-
-    def test_missing_file(self):
-        with self.assertRaises(StatusError):
-            load_static_payload("/definitely/not/here.json")
-
-    def test_reads_a_real_file(self):
-        import json
-        import os
-        import tempfile
-        path = os.path.join(tempfile.gettempdir(), "pulse-static-test.json")
-        with open(path, "w") as handle:
-            json.dump({"cards": []}, handle)
-        try:
-            self.assertEqual(load_static_payload(path), {"cards": []})
-        finally:
-            os.remove(path)
 
 
 if __name__ == "__main__":

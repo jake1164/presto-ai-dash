@@ -49,7 +49,6 @@ class AdminProvenanceBase(AdminServerBase):
 
     def setUp(self):
         super().setUp()
-        self.disable_fake()
         self.row = self.manager.save({"type": "claude", "name": "Claude personal",
                                       "enabled": True,
                                       "config": {"settings_path": str(Path(self.temp.name) / "settings.json"),
@@ -349,7 +348,6 @@ class AdminPagePresetTests(AdminServerBase):
         self.assertTrue(sentences)
 
     def test_a_form_with_both_readers_is_saved_and_read_back_as_booleans(self):
-        self.disable_fake()
         payload = {"type": "claude", "name": "Claude personal", "enabled": True,
                    "config": {"settings_path": str(Path(self.temp.name) / "settings.json"),
                               "activity_logs": True, "usage_cache": True}}
@@ -364,7 +362,6 @@ class AdminPagePresetTests(AdminServerBase):
         self.assertIs(row["config"]["usage_cache"], True)
 
     def test_the_saved_readers_can_be_turned_off_again(self):
-        self.disable_fake()
         payload = {"type": "claude", "name": "Claude personal", "enabled": True,
                    "config": {"settings_path": str(Path(self.temp.name) / "settings.json"),
                               "activity_logs": True, "usage_cache": True}}

@@ -75,7 +75,7 @@ hardware. `tests/device/test_presto_structure.py` enforces the layering: only
 `main.py` and `ui.py` may import `presto`, `machine`, `picographics` or
 `picovector`.
 
-The drawing tests use a fake display and check that text fits and does not
+The drawing tests use a stand-in display and check that text fits and does not
 overlap, in the firmware's own bitmap fonts.
 
 ## The documentation site

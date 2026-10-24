@@ -13,7 +13,8 @@ from envutil import clean_env
 import presto_path
 from cards import parse_cards
 from home import source_rows
-from net import NetworkUnavailable, StatusClient, StatusError, Unauthorised, embedded_payload
+from net import NetworkUnavailable, StatusClient, StatusError, Unauthorised
+from payloads import sample_payload
 from ui import Palette, draw_sources
 from device.test_ui import Display
 
@@ -56,12 +57,12 @@ class AsyncHttpTests(unittest.IsolatedAsyncioTestCase):
         return StatusClient('127.0.0.1', server.sockets[0].getsockname()[1], 'test-device-token', timeout=1)
 
     async def test_fragmented_payload_auth_and_input_can_run_during_wait(self):
-        client = await self.server(response(json.dumps(embedded_payload()).encode()), delay=.08)
+        client = await self.server(response(json.dumps(sample_payload()).encode()), delay=.08)
         task = asyncio.create_task(client.fetch_async())
         await asyncio.sleep(.02)
         self.assertFalse(task.done(), 'Network wait must yield to the UI loop')
         payload = await task
-        self.assertEqual(len(parse_cards(payload)[0]), 3)
+        self.assertEqual(len(parse_cards(payload)[0]), 7)
         self.assertIn(b'Authorization: Bearer test-device-token\r\n', self.requests[0])
         await asyncio.wait_for(self.closed.wait(), 1)
 
@@ -102,7 +103,7 @@ class AsyncHttpTests(unittest.IsolatedAsyncioTestCase):
     async def test_incomplete_transfer_is_connection_failure_and_retry_recovers(self):
         replies = iter((b'HTTP/1.1 200 OK\r\nContent-Len',
                         b'HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n{}',
-                        response(json.dumps(embedded_payload()).encode())))
+                        response(json.dumps(sample_payload()).encode())))
 
         async def handle(reader, writer):
             await reader.readuntil(b'\r\n\r\n')
@@ -118,9 +119,9 @@ class AsyncHttpTests(unittest.IsolatedAsyncioTestCase):
         for _ in range(2):
             with self.assertRaises(NetworkUnavailable):
                 await client.fetch_async()
-        self.assertEqual(await client.fetch_async(), embedded_payload())
+        self.assertEqual(await client.fetch_async(), sample_payload())
 
-    async def test_real_managed_fake_daemon_contract(self):
+    async def test_real_managed_daemon_contract(self):
         from presto_ai_dash.app import Daemon
         from presto_ai_dash.config import load_config
         with clean_env():
@@ -131,8 +132,11 @@ class AsyncHttpTests(unittest.IsolatedAsyncioTestCase):
         try:
             client = StatusClient('127.0.0.1', daemon.api.actual_port, 'device-token')
             payload = await client.fetch_async()
-            self.assertEqual([card.id for card in parse_cards(payload)[0]], ['dash', 'ollama', 'litellm'])
-            self.assertEqual(source_rows(payload)[0]['type'], 'fake')
+            # Nothing is configured, so the device gets the empty Home and no
+            # invented reading. The card and its id are the real builder's.
+            self.assertEqual([card.id for card in parse_cards(payload)[0]], ['dash'])
+            self.assertEqual(source_rows(payload), [])
+            self.assertNotIn('demo', payload)
             client.token = 'admin-token'
             with self.assertRaises(Unauthorised):
                 await client.fetch_async()
@@ -145,7 +149,7 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
         spec = importlib.util.spec_from_file_location(
             'live_device_app_for_test', os.path.join(presto_path.PRESTO_DIR, 'main.py'))
         self.module = importlib.util.module_from_spec(spec)
-        with patch.dict(sys.modules, {'config': SimpleNamespace(STATIC_DEMO=False)}):
+        with patch.dict(sys.modules, {'config': SimpleNamespace()}):
             spec.loader.exec_module(self.module)
         self.device = SimpleNamespace(display=Display(), update=lambda: None,
             wifi=SimpleNamespace(isconnected=lambda: True, connect=AsyncMock(return_value=True)),
@@ -160,7 +164,7 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
         self.app.client.fetch_async = AsyncMock(return_value=self.payload())
 
     def payload(self, count=1):
-        payload = embedded_payload()
+        payload = sample_payload()
         payload['sources'] = [{'id': str(i), 'type': 'litellm', 'name': 'Gateway %s' % i,
             'status': 'ok', 'metrics': {'requests_today': 12 + i, 'tokens_today': 340}} for i in range(count)]
         return payload
@@ -170,7 +174,7 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
 
         The first has three windows and the second two, like the author's OpenCode Go
         and Claude; each bar is six pixels, so the rows are 54, 47, 40 and 40 pixels."""
-        payload = embedded_payload()
+        payload = sample_payload()
         payload['card_order'] = 'accounts'
         payload['updated_at'] = '2026-10-20T12:00:00+00:00'
         payload['sources'] = []
@@ -492,8 +496,14 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
         self.app.client.fetch_async.return_value = self.payload(0)
         await self.app.poll_once()
         self.app._render()
-        self.assertIn('No sources enabled', [row[0] for row in self.device.display.rows])
-        self.app.client.fetch_async.return_value = embedded_payload()
+        self.assertIn('No services set up', [row[0] for row in self.device.display.rows])
+        # An older daemon sends no "sources": the summary card is drawn instead.
+        self.app.client.fetch_async.return_value = {
+            'app': 'presto-ai-dash', 'updated_at': '2026-10-20T12:00:00+00:00',
+            'overall_status': 'ok',
+            'cards': [{'id': 'dash', 'title': 'AI Dash', 'status': 'ok',
+                       'primary': '1 live source', 'secondary': 'Ollama',
+                       'detail': ['Ollama: ok'], 'accent': 'green', 'alert': None}]}
         await self.app.poll_once()
         self.assertIsNone(self.app.live_rows)
         self.app._render()

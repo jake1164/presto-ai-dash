@@ -175,6 +175,7 @@ which is the better place for secrets.
 | `DASH_KEY_FILE` | `admin.key_file` |
 | `DASH_ENCRYPTION_KEY` | The encryption master key |
 | `DASH_INGEST_ENABLED` | `daemon.ingest_enabled`, the remote reports switch |
+| `DASH_DEMO` | `demo.enabled`, the demo-mode switch |
 | `DASH_OVERFLOW_ROWS` | `display.overflow_rows` |
 
 The full list, with every key and its default, is in

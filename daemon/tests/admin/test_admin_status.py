@@ -66,7 +66,10 @@ class StatusEndpointTests(AdminServerBase):
                         "last_problem"):
                 self.assertIn(key, account)
         names = [account["name"] for account in accounts]
-        self.assertIn("Fake", names)
+        # The seeded accounts are the source types dash.toml can configure;
+        # the removed demo source is not one of them.
+        self.assertIn("Ollama", names)
+        self.assertNotIn("Fake", names)
 
     def test_an_account_without_a_reading_says_so(self):
         _, _, body = self.request("/api/admin/status")
@@ -76,7 +79,6 @@ class StatusEndpointTests(AdminServerBase):
         self.assertEqual(waiting[0]["last_problem"], "no reading yet")
 
     def test_an_account_problem_is_reported_in_plain_words(self):
-        self.disable_fake()
         row = self.manager.save({"type": "litellm", "name": "Gateway",
                                   "enabled": True,
                                   "config": {"base_url": "http://localhost:4000"}})
@@ -110,7 +112,6 @@ class StatusEndpointTests(AdminServerBase):
         self.assertIsInstance(body["collectors"], list)
 
     def test_a_claude_reader_is_reported(self):
-        self.disable_fake()
         row = self.manager.save({"type": "claude", "name": "Claude",
                                   "enabled": True,
                                   "config": {"settings_path": str(Path(self.temp.name) / "s.json"),
@@ -128,7 +129,6 @@ class StatusEndpointTests(AdminServerBase):
         self.assertIn("no projects directory", reader["detail"])
 
     def test_a_remote_collector_is_reported(self):
-        self.disable_fake()
         row = self.manager.save({"type": "claude", "name": "Claude",
                                   "enabled": True,
                                   "config": {"settings_path": str(Path(self.temp.name) / "s.json")}})
@@ -146,7 +146,6 @@ class StatusEndpointTests(AdminServerBase):
         self.assertIn("a problem worth seeing", messages)
 
     def test_no_secret_is_published(self):
-        self.disable_fake()
         row = self.manager.save({"type": "litellm", "name": "Gateway",
                                   "enabled": True, "api_key": "test-provider-key",
                                   "config": {"base_url": "http://localhost:4000"}})

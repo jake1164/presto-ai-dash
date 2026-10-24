@@ -27,7 +27,7 @@ def load_app():
     spec = importlib.util.spec_from_file_location(
         "lazy_app_for_test", os.path.join(presto_path.PRESTO_DIR, "main.py"))
     module = importlib.util.module_from_spec(spec)
-    with patch.dict(sys.modules, {"config": SimpleNamespace(STATIC_DEMO=False)}):
+    with patch.dict(sys.modules, {"config": SimpleNamespace()}):
         spec.loader.exec_module(module)
     return module
 

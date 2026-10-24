@@ -8,7 +8,9 @@ The only module in this app that imports ``presto`` or ``machine``. Everything
 else (cards, gestures, alerts, net, ui) is pure Python and is unit-tested on a
 development machine. See docs/limitations.md for what cannot be automated.
 
-Select static preview or authenticated daemon polling with STATIC_DEMO.
+The app polls the daemon over the LAN with the shared token. Sample data has
+no place on the device: the demo is served by the daemon (see demo.py there),
+so what the screen shows is the same code path either way.
 Network tasks yield to the touch/render loop. No cloud services are contacted
 directly by this device.
 """
@@ -21,9 +23,9 @@ try:
     import config
 except ImportError:
     class config:
-        # The launcher should always deploy config.py. A missing config safely
-        # starts the static demo, rather than crashing on a dotted filename.
-        STATIC_DEMO = True
+        # The launcher should always deploy config.py. A missing one must not
+        # crash on a dotted filename: every setting falls back to its default.
+        pass
 
 from alerts import AlertTracker, led_brightness, led_pattern, worst_accent
 from cards import (clean_id, error_card, normalise_status, offline_card, overall_status,
@@ -35,7 +37,7 @@ from gestures import (
     TAP,
     GestureRecogniser,
 )
-from home import (DEMO_QUOTAS, HomeScroll, ROW_HEIGHT, SOURCE_HEIGHT, SOURCE_TOP,
+from home import (HomeScroll, SOURCE_HEIGHT, SOURCE_TOP,
                   alert_settings, alerts_flag, alerts_state, overflow_rows, row_at,
                   source_rows)
 from net import (
@@ -43,17 +45,12 @@ from net import (
     StatusError,
     Unauthorised,
     NetworkUnavailable,
-    embedded_payload,
-    load_static_payload,
 )
 from popup import PopToTop
 from ticks import Uptime
 from ui import (Palette, bell_hit, build_home_layout, dot_hit, draw_boot,
-                draw_card, draw_home, draw_sources, draw_message)
+                draw_card, draw_sources, draw_message)
 
-
-# Where to look for a sample payload, in order.
-SAMPLE_PATHS = ("sample-status.json", "/sample-status.json")
 
 # How long a detail view stays open before returning to the card.
 DETAIL_TIMEOUT_MS = 15000
@@ -108,7 +105,6 @@ class App(object):
         self.tap_debounce_ms = int(getattr(config, "TAP_DEBOUNCE_MS", 180))
 
         self.offline_after_s = int(getattr(config, "OFFLINE_AFTER_S", 30))
-        self.static_demo = bool(getattr(config, "STATIC_DEMO", True))
         self.poll_interval = max(1, int(getattr(config, "POLL_INTERVAL", 15)))
         self.retry_interval = max(1, int(getattr(config, "RETRY_INTERVAL", 12)))
         self.wifi_timeout = max(1, int(getattr(config, "WIFI_TIMEOUT", 10)))
@@ -154,10 +150,14 @@ class App(object):
         self.card_failed = set()
         # The LED shows the worst of every service, not just the open card.
         self.overall_accent = None
+        # The payload says the reading is sample data (a daemon in demo
+        # mode); the screen then shows a chip. Strictly a boolean: anything
+        # else is treated as real data.
+        self.demo = False
 
         self.cards = []
         self.index = 0
-        self.home_scroll = HomeScroll(len(DEMO_QUOTAS) * ROW_HEIGHT)
+        self.home_scroll = HomeScroll(0)
         self.home_layout = None
         self.live_rows = None
         self.card_rows = {}
@@ -213,28 +213,12 @@ class App(object):
 
     # -- data ---------------------------------------------------------------
 
-    def load_static(self):
-        """Load sample data for the static demo.
-
-        Tries a file first, then falls back to the embedded sample so the
-        device always has something to show.
-        """
-        for path in SAMPLE_PATHS:
-            try:
-                payload = load_static_payload(path)
-                self._set_payload(payload)
-                return True
-            except StatusError:
-                continue
-
-        self._set_payload(embedded_payload())
-        return True
-
     def _set_payload(self, payload):
         selected = self._current_card().id if self.cards else None
         cards, error = parse_cards(payload)
         self.cards = cards
         self.error = error
+        self.demo = payload.get("demo") is True
         if error is None:
             self.last_good_at = self.uptime.ms()
             # The rows carry the structured quota of every service, so a
@@ -244,15 +228,14 @@ class App(object):
             for row in self.live_rows or ():
                 if row.get("id"):
                     self.card_rows[row["id"]] = row
-            if not self.static_demo:
-                # The list scrolls by its total height: quota rows and the
-                # compact local rows are not the same height. The overflow
-                # strip takes its band out of the list, and the band is
-                # decided by the layout, not by the scroll position.
-                self.home_layout = build_home_layout(self.display, self.live_rows or [],
-                                                     overflow_rows(payload), self.width)
-                self.home_scroll.set_height(self.home_layout.total, SOURCE_TOP,
-                                            SOURCE_HEIGHT, self.home_layout.region)
+            # The list scrolls by its total height: quota rows and the
+            # compact local rows are not the same height. The overflow
+            # strip takes its band out of the list, and the band is
+            # decided by the layout, not by the scroll position.
+            self.home_layout = build_home_layout(self.display, self.live_rows or [],
+                                                 overflow_rows(payload), self.width)
+            self.home_scroll.set_height(self.home_layout.total, SOURCE_TOP,
+                                        SOURCE_HEIGHT, self.home_layout.region)
         self.index = next((i for i, card in enumerate(cards) if card.id == selected), 0)
         if selected is not None and self._current_card().id != selected:
             self.detail_open = False
@@ -377,10 +360,6 @@ class App(object):
 
     def _start_alert_write(self, service, enabled):
         """Send the change to the daemon without blocking the touch loop."""
-        if self.static_demo:
-            # The static demo has no daemon to write to.
-            self._fail_alert_write(service)
-            return
         try:
             import asyncio
             asyncio.create_task(self._write_alert(service, enabled))
@@ -494,11 +473,13 @@ class App(object):
     def _display_state(self):
         """What a payload replaces, so a refresh that fails can be put back."""
         return (self.cards, self.error, self.last_good_at, self.live_rows,
-                self.card_rows, self.home_layout, self.index, self.detail_open)
+                self.card_rows, self.home_layout, self.index, self.detail_open,
+                self.demo)
 
     def _restore_display_state(self, saved):
         (self.cards, self.error, self.last_good_at, self.live_rows,
-         self.card_rows, self.home_layout, self.index, self.detail_open) = saved
+         self.card_rows, self.home_layout, self.index, self.detail_open,
+         self.demo) = saved
 
     def _note_failure(self, reason):
         """Count the failure and log it to the serial console, not the screen."""
@@ -553,7 +534,7 @@ class App(object):
         self._needs_redraw = True
 
     def _connection_screen(self):
-        if self.static_demo or self.connection_error is None:
+        if self.connection_error is None:
             return None
         if (self.connection_error[2] or self.last_good_at is None or
                 self.uptime.ms() - self.last_good_at >= self.offline_after_s * 1000):
@@ -605,7 +586,7 @@ class App(object):
 
     def _maybe_load_detail(self):
         """Fetch the open card's detail, at most once per poll interval."""
-        if self.static_demo or not self.cards:
+        if not self.cards:
             return
         card = self._current_card()
         if card.id == "dash":
@@ -764,6 +745,11 @@ class App(object):
         card = self._current_card()
         if self.connection_error:
             accent = "red" if self._connection_screen() else "grey"
+        elif self.live_rows is not None and not self.live_rows:
+            # No service is set up: amber says "attention", where green would
+            # say "all healthy". The payload is unchanged; this is the device
+            # reading an empty list the same way it reads the empty screen.
+            accent = "yellow"
         else:
             # The worst of every service, so a warning on another account is
             # still visible from across the desk.
@@ -785,19 +771,14 @@ class App(object):
             draw_message(self.display, self.palette, screen[0], screen[1],
                          detail=["Retrying..."] + self._diag_lines() +
                          ["RESET returns to carousel"])
-        elif card.id == "dash" and self.static_demo:
-            draw_home(self.display, self.palette, DEMO_QUOTAS,
-                      self.index, len(self.cards), muted=self.alerts.muted,
-                      width=self.width, height=self.height,
-                      scroll=self.home_scroll.offset,
-                      mute_text=self.alerts.mute_label())
         elif card.id == "dash" and self.live_rows is not None:
             draw_sources(self.display, self.palette, self.live_rows,
                          self.index, len(self.cards), status=card.status,
                          muted=self.alerts.muted, width=self.width, height=self.height,
                          scroll=self.home_scroll.offset, stale=bool(self.connection_error),
                          layout=self.home_layout,
-                         mute_text=self.alerts.mute_label())
+                         mute_text=self.alerts.mute_label(),
+                         demo=self.demo)
         else:
             row = self.card_rows.get(card.id)
             detail = self.card_details.get(card.id)
@@ -817,6 +798,7 @@ class App(object):
                 failed=(card.id in self.card_failed),
                 detail_open=self.detail_open,
                 mute_text=self.alerts.mute_label(),
+                demo=self.demo,
             )
 
         self.presto.update()
@@ -856,36 +838,11 @@ class App(object):
     # -- main loop ----------------------------------------------------------
 
     def run(self):
-        """Run the selected mode; live mode never falls back to static values."""
+        """Run the app against the daemon; there is no offline sample mode."""
         self.started_at = self.uptime.ms()
         self._setup_buzzer()
-        if not self.static_demo:
-            self._poll_failed("Connecting...", "Joining Wi-Fi")
-            asyncio.run(self._run_live())
-            return
-        self.load_static()
-
-        while True:
-            try:
-                gestures = self._poll_touch()
-                self._handle_gestures(gestures)
-                self._poll_popup()
-                if self._expire_alerts():
-                    self._needs_redraw = True
-
-                # A detail view closes itself after a while.
-                if self.detail_open:
-                    if _ticks_diff(_now_ms(), self.detail_opened_at) > DETAIL_TIMEOUT_MS:
-                        self._close_detail()
-
-                if self._needs_redraw:
-                    self._update_leds()
-                    self._render()
-                    self._loop_error = None
-            except Exception as exc:
-                self._loop_failed(exc)
-
-            time.sleep_ms(20)
+        self._poll_failed("Connecting...", "Joining Wi-Fi")
+        asyncio.run(self._run_live())
 
     async def _run_live(self):
         poller = asyncio.create_task(self._network_loop())

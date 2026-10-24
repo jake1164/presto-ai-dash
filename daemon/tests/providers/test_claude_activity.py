@@ -876,7 +876,6 @@ class ActivityPrivacyEndToEndTests(ManagementBase):
 
     def setUp(self):
         super().setUp()
-        self.disable_fake()
         self.root = Path(self.temp.name)
         self.projects = self.root / "projects"
         now = datetime.now(timezone.utc)

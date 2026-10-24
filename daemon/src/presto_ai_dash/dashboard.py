@@ -1,4 +1,4 @@
-"""Render Home and per-account cards, preserving the original fake demo."""
+"""Render Home and per-account cards."""
 
 from . import __version__
 from . import quotas
@@ -186,10 +186,6 @@ def _reset_credit_lines(report, now):
 
 
 def build_status_payload(snapshots):
-    snapshot = snapshots.get("fake")
-    if snapshot:
-        return _fake_payload(snapshot)
-
     if any(key not in ("ollama", "litellm") for key in snapshots):
         from .sources import source_type
         instances = []
@@ -204,7 +200,9 @@ def build_status_payload(snapshots):
     live = {key: snapshots[key] for key in ("ollama", "litellm")
             if key in snapshots}
     if not live:
-        return _fake_payload(None)
+        # Nothing reported. The same shape an empty managed daemon sends: the
+        # device draws its first-run screen, and no sample reading is invented.
+        return build_instance_payload({}, [])
 
     def value(metrics, key):
         result = metrics.get(key)
@@ -282,39 +280,6 @@ def build_status_payload(snapshots):
         "app": "presto-ai-dash", "version": __version__,
         "updated_at": iso(updated),
         "overall_status": summary_status,
-        "cards": [card.to_dict() for card in cards],
-    }
-
-
-def _fake_payload(snapshot):
-    status = snapshot.status if snapshot else "offline"
-    metrics = snapshot.metrics if snapshot else {}
-    alert = None
-    if snapshot and snapshot.alerts:
-        worst = max(snapshot.alerts, key=lambda item: severity(item.get("severity")))
-        alert = {"severity": worst["severity"], "message": worst["message"]}
-
-    def metric(key):
-        value = metrics.get(key)
-        return "unavailable" if value is None else str(value)
-
-    secondary = "Demo data: fake source" if snapshot else "No fake source reporting"
-    cards = [
-        Card("dash", "AI Dash", status,
-             primary=metric("tokens_today") + " tokens today", secondary=secondary,
-             detail=["Requests: " + metric("requests_today")], alert=alert),
-        Card("ollama", "Ollama", status,
-             primary=metric("tokens_per_sec") + " tok/s", secondary=secondary,
-             detail=["Model: " + metric("top_model")], alert=alert),
-        Card("litellm", "LiteLLM", status,
-             primary=metric("requests_today") + " requests", secondary=secondary,
-             detail=["Spend today: " + metric("spend_today"),
-                     "Errors: " + metric("errors_today")], alert=alert),
-    ]
-    return {
-        "app": "presto-ai-dash", "version": __version__,
-        "updated_at": iso(snapshot.updated_at) if snapshot else None,
-        "overall_status": overall_status(cards),
         "cards": [card.to_dict() for card in cards],
     }
 
@@ -487,34 +452,33 @@ def build_instance_payload(snapshots, instances, alerts=None, now=None,
     enabled = [row for row in instances if row["enabled"]]
     reporting = {row["id"]: present_snapshot(snapshots[row["id"]], now)
                  for row in enabled if row["id"] in snapshots}
-    fake = next((row for row in enabled if row["type"] == "fake"), None)
-    if fake:
-        payload = _fake_payload(reporting.get(fake["id"]))
-    else:
-        states = [_account_card(row, reporting.get(row["id"])) for row in enabled]
-        states = [_with_threshold(card, reporting.get(row["id"]),
-                                   _resolution_for(row, alerts, resolutions), now)
-                  for card, row in zip(states, enabled)]
-        # A service whose alerts are off does not count towards the overall
-        # status: it must not colour the light or the Home card. Its own
-        # card keeps its true status, and its numbers are unchanged.
-        contributing = [card for card, row in zip(states, enabled)
-                        if _resolution_for(row, alerts, resolutions)["enabled"]]
-        status = overall_status(contributing) if contributing else "ok"
-        all_alerts = [alert for snapshot in reporting.values() for alert in snapshot.alerts]
-        worst = max(all_alerts, key=lambda alert: severity(alert.get("severity"))) if all_alerts else None
-        home = Card(
-            "dash", "AI Dash", status, primary="%d live sources" % len(enabled),
-            secondary="Configured source status",
-            detail=["%s: %s" % (card.title, card.status) for card in states],
-            alert={"severity": worst["severity"], "message": worst["message"]} if worst else None
-        )
-        payload = {"app": "presto-ai-dash", "version": __version__,
-                   "overall_status": status,
-                   "updated_at": iso(max((s.updated_at for s in reporting.values()), default=None)),
-                   "card_order": "accounts",
-                   "cards": [home.to_dict()] + [card.to_dict() for card in states]}
-    card_status = {card.id: card.status for card in states} if not fake else {}
+    # ``now`` is passed on: the card's reset wording and its quota age
+    # are judged against the same clock the windows were read with.
+    states = [_account_card(row, reporting.get(row["id"]), now)
+              for row in enabled]
+    states = [_with_threshold(card, reporting.get(row["id"]),
+                               _resolution_for(row, alerts, resolutions), now)
+              for card, row in zip(states, enabled)]
+    # A service whose alerts are off does not count towards the overall
+    # status: it must not colour the light or the Home card. Its own
+    # card keeps its true status, and its numbers are unchanged.
+    contributing = [card for card, row in zip(states, enabled)
+                    if _resolution_for(row, alerts, resolutions)["enabled"]]
+    status = overall_status(contributing) if contributing else "ok"
+    all_alerts = [alert for snapshot in reporting.values() for alert in snapshot.alerts]
+    worst = max(all_alerts, key=lambda alert: severity(alert.get("severity"))) if all_alerts else None
+    home = Card(
+        "dash", "AI Dash", status, primary="%d live sources" % len(enabled),
+        secondary="Configured source status",
+        detail=["%s: %s" % (card.title, card.status) for card in states],
+        alert={"severity": worst["severity"], "message": worst["message"]} if worst else None
+    )
+    payload = {"app": "presto-ai-dash", "version": __version__,
+               "overall_status": status,
+               "updated_at": iso(max((s.updated_at for s in reporting.values()), default=None)),
+               "card_order": "accounts",
+               "cards": [home.to_dict()] + [card.to_dict() for card in states]}
+    card_status = {card.id: card.status for card in states}
     payload["sources"] = [
         {"id": row["id"], "type": row["type"], "name": row["name"],
          "status": card_status.get(
@@ -535,7 +499,10 @@ def build_instance_payload(snapshots, instances, alerts=None, now=None,
     for source in payload["sources"]:
         report = source["metrics"].get("quota")
         if report:
-            source["quota"] = present_quota(report)
+            # The same clock the cards were judged against: a payload built
+            # for a fixed moment must not re-age under the real clock, and
+            # its window states must agree with the statuses next to them.
+            source["quota"] = present_quota(report, now)
     return payload
 
 
@@ -566,7 +533,9 @@ DEVICE_DETAIL_KEYS = ("id", "tiles", "lines")
 # The keys of one tile.
 DEVICE_TILE_KEYS = ("label", "value", "tone")
 # The top-level keys the device reads, and the keys inside "alerts".
-DEVICE_TOP_KEYS = ("sources", "card_order", "updated_at", "display", "alerts")
+# "demo" marks sample data: the device draws a chip from it and nothing else.
+DEVICE_TOP_KEYS = ("sources", "card_order", "updated_at", "display", "alerts",
+                   "demo")
 DEVICE_ALERT_KEYS = ("quiet", "sound", "pop_to_top", "enabled", "mute_hours")
 
 
@@ -588,6 +557,18 @@ def _device_quota(quota):
     if isinstance(result.get("last_update"), dict):
         result["last_update"] = _pick(result["last_update"], DEVICE_UPDATE_KEYS)
     return result
+
+
+def lazy_cards(payload):
+    """Drop every card's lines: they travel in the card detail instead.
+
+    The poll stays small; a card's lines and tiles are fetched when it is
+    opened. Returns the same payload, changed in place.
+    """
+    for card in payload.get("cards", []):
+        if isinstance(card, dict):
+            card.pop("detail", None)
+    return payload
 
 
 def device_view(payload):

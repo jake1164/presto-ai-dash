@@ -45,10 +45,12 @@ no account anywhere.
 
 Within one poll interval the account appears on the Presto.
 
-If you do not run Ollama or LiteLLM, add the **Fake** source instead. It
-cycles through every status the display can show, so you can check the LEDs
-and the sounds without a provider. Fake cannot run at the same time as a live
-source; disable it before you enable a real one.
+If you do not run Ollama or LiteLLM yet, turn on **Demo mode** on the
+**Settings** tab instead. It shows six sample accounts, marks them with a
+**DEMO - SAMPLE DATA** chip, and cycles through every status the display can
+show, so you can check the LEDs and the sounds without a provider. It overrides
+the real readings without changing them, and switching it off is all it takes
+to go back.
 
 ## Then add a subscription account
 

@@ -150,7 +150,6 @@ class ServiceAlertAdminTests(AdminServerBase):
     """The admin page's per-service alert controls."""
 
     def add_service(self):
-        self.disable_fake()
         return self.add_litellm("Gateway", enabled=True)
 
     def test_the_state_is_read(self):

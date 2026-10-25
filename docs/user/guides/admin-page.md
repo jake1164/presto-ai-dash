@@ -84,7 +84,7 @@ foreground.
 | Section | What it shows |
 | --- | --- |
 | Daemon | Version, database schema version, uptime, poll interval, start time, the bind address, the log level |
-| Clients | Every device that fetches the status endpoint: its name, address, when it last fetched, how often, and the app revision it reports |
+| Clients | Every device that fetches the status endpoint: its name, address, when it last fetched, how often, the app revision it reports, and what it says about itself: last error, failures since boot, free memory, signal and uptime |
 | Accounts | One row per account: when it was last collected, its status, and the last problem in plain words |
 | Readers and collectors | The local activity reader, the usage cache reader, and the remote collectors with their last report and host |
 | Problems | The recent `WARNING` and `ERROR` messages, de-duplicated |
@@ -101,6 +101,13 @@ only.
 The address is best effort. Behind NAT, a reverse proxy or a container
 runtime several clients can share one address, so the name is what identifies
 a client.
+
+A client may also send `X-Presto-Diag`, a short summary of its own state:
+the last failed fetch and where it stopped, the failure count, the free heap,
+the uptime, the signal and the Wi-Fi drops. The daemon checks every pair
+against a fixed list, keeps only what it knows, and forgets it all when it
+restarts. A device that cannot reach the daemon cannot report a problem
+either, so read **Last seen** first.
 
 The **Problems** list holds only the log message: paths and
 credential-shaped text are replaced and an exception contributes its type

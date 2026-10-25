@@ -3,10 +3,12 @@
 The daemon has one shared token, so authentication cannot tell clients apart.
 Each client declares a name in a request header; the daemon remembers what it
 saw, in memory only. Hostile header values must never reach the page as
-anything but "unknown".
+anything but "unknown", and the diagnostics header must never carry anything
+that was not checked against a whitelist.
 """
 
 import json
+import logging
 from pathlib import Path
 import sys
 import unittest
@@ -16,7 +18,8 @@ from urllib.request import Request, build_opener, ProxyHandler
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from presto_ai_dash.api import ApiServer
-from presto_ai_dash.clients import MAX_CLIENTS, ClientRegistry, sanitize_header
+from presto_ai_dash.clients import (MAX_CLIENTS, ClientRegistry, parse_diag,
+                                    sanitize_header)
 from admin.test_management import ManagementBase
 
 
@@ -120,6 +123,199 @@ class ClientRegistryTests(unittest.TestCase):
         self.assertEqual(ClientRegistry().clients(), [])
 
 
+class ParseDiagTests(unittest.TestCase):
+    """The diagnostics header is untrusted input: a whitelist, not a hint."""
+
+    def test_the_documented_example_is_accepted(self):
+        parsed = parse_diag("err=OSError 110;st=conn;n=3;free=41;up=312;rssi=-61;drops=1")
+        self.assertEqual(parsed, {"err": "OSError 110", "st": "conn", "n": 3,
+                                  "free": 41, "up": 312, "rssi": -61, "drops": 1})
+
+    def test_a_missing_header_is_nothing(self):
+        self.assertIsNone(parse_diag(None))
+        self.assertIsNone(parse_diag(""))
+
+    def test_a_header_over_the_limit_is_refused_whole(self):
+        self.assertIsNone(parse_diag("err=OSError 110;" + "n=1" * 60))
+
+    def test_a_header_with_a_control_character_is_refused_whole(self):
+        for value in ("err=OSError\x00", "err=OSError\n110", "err=OSError\r"):
+            with self.subTest(value=value):
+                self.assertIsNone(parse_diag(value))
+
+    def test_a_header_that_is_not_ascii_is_refused_whole(self):
+        self.assertIsNone(parse_diag("err=OSErroré"))
+
+    def test_an_unknown_key_is_ignored(self):
+        parsed = parse_diag("err=OSError;secret=token;n=2")
+        self.assertEqual(parsed, {"err": "OSError", "n": 2})
+
+    def test_a_repeated_key_is_ignored(self):
+        parsed = parse_diag("n=1;n=2;err=OSError;err=Other")
+        self.assertEqual(parsed, {"n": 1, "err": "OSError"})
+
+    def test_a_malformed_number_is_dropped(self):
+        for value in ("n=abc", "n=", "n=1.5", "n=+3", "n=1_0", "n= 3"):
+            with self.subTest(value=value):
+                self.assertNotIn("n", parse_diag(value) or {})
+
+    def test_an_out_of_range_number_is_dropped_and_not_clamped(self):
+        for value, key in (("n=1000000", "n"), ("free=65536", "free"),
+                           ("up=100000000", "up"), ("rssi=1", "rssi"),
+                           ("rssi=-128", "rssi"), ("drops=10000", "drops")):
+            with self.subTest(value=value):
+                self.assertNotIn(key, parse_diag(value) or {})
+
+    def test_the_edge_values_are_accepted(self):
+        parsed = parse_diag("n=999999;free=65535;up=99999999;rssi=-127;drops=9999")
+        self.assertEqual(parsed["n"], 999999)
+        self.assertEqual(parsed["free"], 65535)
+        self.assertEqual(parsed["up"], 99999999)
+        self.assertEqual(parsed["rssi"], -127)
+        self.assertEqual(parsed["drops"], 9999)
+        self.assertEqual(parse_diag("n=0;free=0;up=0;rssi=0;drops=0")["rssi"], 0)
+
+    def test_the_stage_must_be_one_the_daemon_knows(self):
+        self.assertEqual(parse_diag("st=parse")["st"], "parse")
+        self.assertNotIn("st", parse_diag("st=elsewhere") or {})
+
+    def test_a_hostile_error_label_is_dropped(self):
+        # A part that is not a pair at all is refused whole, so nothing of it
+        # can reach the page or the log.
+        self.assertIsNone(parse_diag("err=x;rm -rf"))
+        self.assertIsNone(parse_diag("err=x;rm -rf /"))
+        # A pair with a value that is not a label is dropped on its own.
+        self.assertNotIn("err", parse_diag("err=<script>alert(1)</script>") or {})
+
+    def test_a_very_long_error_label_is_dropped(self):
+        self.assertNotIn("err", parse_diag("err=" + "a" * 5000) or {})
+
+    def test_an_error_label_with_markup_is_dropped(self):
+        for value in ("err=<script>alert(1)</script>", "err=OS Error",
+                      "err=OSError;rm"):
+            with self.subTest(value=value):
+                self.assertNotIn("err", parse_diag(value) or {})
+
+    def test_an_error_label_with_an_errno_is_accepted(self):
+        self.assertEqual(parse_diag("err=OSError 110")["err"], "OSError 110")
+        self.assertEqual(parse_diag("err=OSError -2")["err"], "OSError -2")
+
+    def test_a_pair_without_a_value_is_ignored(self):
+        self.assertEqual(parse_diag("=5;n=1"), {"n": 1})
+
+
+class ClientRegistryDiagTests(unittest.TestCase):
+    """The diagnostics of a client, kept in memory and never logged twice."""
+
+    def setUp(self):
+        self.registry = ClientRegistry()
+        self.now = 1000.0
+        self.logger = logging.getLogger("presto_ai_dash.clients")
+        self.level = self.logger.level
+        self.logger.setLevel(logging.INFO)
+        self.lines = []
+        self.handler = logging.Handler()
+        self.handler.emit = lambda record: self.lines.append(record.getMessage())
+        self.logger.addHandler(self.handler)
+        self.addCleanup(self.logger.removeHandler, self.handler)
+        self.addCleanup(self.logger.setLevel, self.level)
+
+    def record(self, diag=None, name="presto", address="10.0.0.5"):
+        self.now += 1
+        return self.registry.record(name, address, "abc123", now=self.now, diag=diag)
+
+    def test_a_poll_stores_the_diagnostics(self):
+        record = self.record("err=OSError 110;st=conn;n=3;free=41;up=312")
+        self.assertEqual(record["diag"]["err"], "OSError 110")
+        self.assertEqual(record["diag"]["n"], 3)
+        self.assertEqual(self.registry.clients()[0]["diag"]["st"], "conn")
+
+    def test_a_healthy_poll_keeps_the_last_error_and_stage(self):
+        self.record("err=OSError 110;st=conn;n=3")
+        record = self.record("n=4;free=41")
+        self.assertEqual(record["diag"]["err"], "OSError 110")
+        self.assertEqual(record["diag"]["st"], "conn")
+        self.assertEqual(record["diag"]["n"], 4)
+
+    def test_a_restarted_device_does_not_keep_the_old_error(self):
+        self.record("err=OSError 110;st=conn;n=3;up=312")
+        record = self.record("n=0;free=60;up=5")
+        self.assertNotIn("err", record["diag"])
+        self.assertNotIn("st", record["diag"])
+        # A restart that reports only its uptime is recognised too.
+        self.record("err=OSError 110;st=conn;up=900")
+        record = self.record("up=4")
+        self.assertNotIn("err", record["diag"])
+
+    def test_a_poll_replaces_the_other_diagnostics(self):
+        self.record("n=3;free=41;up=312")
+        record = self.record("n=4")
+        self.assertNotIn("free", record["diag"])
+        self.assertNotIn("up", record["diag"])
+
+    def test_a_hostile_header_leaves_nothing_behind(self):
+        record = self.record("err=<script>alert(1)</script>")
+        self.assertEqual(record["diag"], {})
+
+    def test_one_log_line_per_change(self):
+        self.record("err=OSError 110;st=conn;n=1")
+        self.record("err=OSError 110;st=conn;n=1")
+        self.record("err=OSError 110;st=conn;n=2")
+        problems = [line for line in self.lines if "fetch problem" in line]
+        self.assertEqual(len(problems), 2)
+        self.assertIn("err=OSError 110", problems[0])
+        self.assertIn("st=conn", problems[0])
+
+    def test_a_rejected_value_is_never_logged(self):
+        self.record("err=" + "a" * 5000)
+        self.record("err=<script>alert(1)</script>")
+        for line in self.lines:
+            self.assertNotIn("script", line)
+            self.assertNotIn("a" * 100, line)
+
+    def test_a_healthy_client_says_nothing(self):
+        self.record("n=0;free=41;up=312")
+        self.assertEqual([line for line in self.lines if "fetch problem" in line], [])
+
+    def test_the_diagnostics_survive_a_restart_only_in_memory(self):
+        self.record("err=OSError 110")
+        self.assertEqual(len(self.registry.clients()), 1)
+        self.assertEqual(ClientRegistry().clients(), [])
+
+
+class DeviceHeaderMatchesTheParserTests(unittest.TestCase):
+    """What the device builds is exactly what the daemon accepts."""
+
+    def setUp(self):
+        import presto_path  # noqa: F401  (puts the device modules on the path)
+        import net
+
+        self.net = net
+
+    def test_a_built_header_is_accepted_whole(self):
+        state = {"err": "OSError 110", "st": "conn", "n": 3, "free": 41,
+                 "up": 312, "rssi": -61, "drops": 1}
+        value = self.net.build_diag(state)
+        self.assertEqual(parse_diag(value), state)
+
+    def test_a_built_header_is_never_too_long(self):
+        state = {"err": "A" * 24, "st": "parse", "n": 999999, "free": 65535,
+                 "up": 99999999, "rssi": -127, "drops": 9999}
+        value = self.net.build_diag(state)
+        self.assertLessEqual(len(value), 120)
+        self.assertEqual(parse_diag(value), state)
+
+    def test_the_daemon_drops_nothing_the_device_sent(self):
+        for state in ({"n": 0, "free": 0, "up": 0, "rssi": 0, "drops": 0},
+                      {"err": "MemoryError", "st": "parse"},
+                      {"err": "TimeoutError", "st": "head", "n": 1},
+                      {"rssi": -127, "drops": 9999, "up": 99999999}):
+            with self.subTest(state=state):
+                value = self.net.build_diag(state)
+                self.assertIsNotNone(value)
+                self.assertEqual(parse_diag(value), state)
+
+
 class ApiClientRecordingTests(ManagementBase):
     """The status route remembers its clients without changing its answer."""
 
@@ -160,6 +356,26 @@ class ApiClientRecordingTests(ManagementBase):
         _, first = self.status()
         _, second = self.status({"X-Presto-Client": "presto"})
         self.assertEqual(first, second)
+
+    def test_the_diagnostics_header_is_kept(self):
+        status, _ = self.status({"X-Presto-Client": "presto",
+                                  "X-Presto-Diag": "err=OSError 110;st=conn;n=3;free=41"})
+        self.assertEqual(status, 200)
+        diag = self.registry.clients()[0]["diag"]
+        self.assertEqual(diag["err"], "OSError 110")
+        self.assertEqual(diag["st"], "conn")
+        self.assertEqual(diag["n"], 3)
+        self.assertEqual(diag["free"], 41)
+
+    def test_the_response_is_unchanged_by_the_diagnostics_header(self):
+        _, first = self.status()
+        _, second = self.status({"X-Presto-Diag": "err=OSError 110;st=conn;n=3"})
+        self.assertEqual(first, second)
+
+    def test_a_hostile_diagnostics_header_never_reaches_the_registry(self):
+        self.status({"X-Presto-Diag": "err=<script>alert(1)</script>;secret=token"})
+        diag = self.registry.clients()[0]["diag"]
+        self.assertEqual(diag, {})
 
     def test_a_refused_request_is_not_counted_as_a_client(self):
         request = Request(self.base_url + "/api/v1/status",

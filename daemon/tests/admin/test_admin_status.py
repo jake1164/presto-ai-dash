@@ -107,6 +107,28 @@ class StatusEndpointTests(AdminServerBase):
         _, _, body = self.request("/api/admin/status")
         self.assertFalse(body["clients"][0]["connected"])
 
+    def test_the_clients_carry_their_diagnostics(self):
+        self.manager.clients.record("presto", "10.0.0.9", "abc123",
+                                    diag="err=OSError 110;st=conn;n=3;free=41")
+        _, _, body = self.request("/api/admin/status")
+        diag = body["clients"][0]["diag"]
+        self.assertEqual(diag["err"], "OSError 110")
+        self.assertEqual(diag["st"], "conn")
+        self.assertEqual(diag["n"], 3)
+        self.assertEqual(diag["free"], 41)
+
+    def test_a_client_without_diagnostics_carries_an_empty_dict(self):
+        self.manager.clients.record("presto", "10.0.0.9", "abc123")
+        _, _, body = self.request("/api/admin/status")
+        self.assertEqual(body["clients"][0]["diag"], {})
+
+    def test_a_hostile_diagnostics_header_never_reaches_the_page(self):
+        self.manager.clients.record("presto", "10.0.0.9", "abc123",
+                                    diag="err=<script>alert(1)</script>;secret=token")
+        _, _, body = self.request("/api/admin/status")
+        self.assertEqual(body["clients"][0]["diag"], {})
+        self.assertNotIn("script", json.dumps(body))
+
     def test_the_readers_and_the_collectors_are_listed(self):
         _, _, body = self.request("/api/admin/status")
         self.assertIsInstance(body["readers"], list)
@@ -210,6 +232,42 @@ class PageWiringTests(AdminServerBase):
         for marker in (b"#services", b"#status", b"#settings", b"localStorage",
                        b"try {", b"catch (_)"):
             self.assertIn(marker, script)
+
+
+class ClientDiagnosticsPageTests(AdminServerBase):
+    """The Status tab shows what the device reported about itself."""
+
+    def script(self):
+        status, _, script = self.request("/admin.js")
+        self.assertEqual(status, 200)
+        return script.decode("utf-8")
+
+    def test_the_table_has_the_diagnostics_columns(self):
+        script = self.script()
+        self.assertIn("buildClientTable", script)
+        for column in ("Last error", "Failures", "Free", "Signal", "Uptime"):
+            self.assertIn('"%s"' % column, script)
+
+    def test_a_missing_value_is_a_dash_and_never_undefined(self):
+        script = self.script()
+        self.assertIn("NO_VALUE", script)
+        self.assertIn("undefined", script)  # the guard, not a printed value
+        # The cells are built from the helpers, so nothing says "undefined".
+        for call in ("diagValue(diag, \"n\")", "diagWithUnit(diag, \"free\", \"KB\")",
+                     "diagWithUnit(diag, \"rssi\", \"dBm\")", "diagUptime(diag.up)",
+                     "diagError(diag)"):
+            self.assertIn(call, script)
+
+    def test_the_help_note_says_a_silent_device_must_be_checked_otherwise(self):
+        script = self.script()
+        self.assertIn("A device that cannot reach the daemon cannot report a problem here",
+                      script)
+        self.assertIn("Last seen", script)
+
+    def test_the_values_are_never_written_as_html(self):
+        script = self.script()
+        self.assertNotIn("innerHTML", script)
+        self.assertIn("textContent", script)
 
 
 if __name__ == "__main__":

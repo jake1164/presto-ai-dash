@@ -1,5 +1,6 @@
 """Tests for presto/net.py - URL building, headers and payload parsing."""
 
+import asyncio
 import unittest
 
 import presto_path  # noqa: F401
@@ -10,6 +11,7 @@ from net import (
     StatusClient,
     StatusError,
     Unauthorised,
+    build_diag,
     build_headers,
     build_url,
     parse_payload,
@@ -183,6 +185,192 @@ class TestStatusClient(unittest.TestCase):
         with self.assertRaises(StatusError):
             client.fetch()
         self.assertTrue(response.closed)
+
+
+class TestBuildDiag(unittest.TestCase):
+    """The diagnostics header the device builds: short, ASCII and bounded."""
+
+    def test_the_documented_example(self):
+        self.assertEqual(
+            build_diag({"err": "OSError 110", "st": "conn", "n": 3,
+                        "free": 41, "up": 312, "rssi": -61, "drops": 1}),
+            "err=OSError 110;st=conn;n=3;free=41;up=312;rssi=-61;drops=1")
+
+    def test_the_pairs_are_written_in_a_fixed_order(self):
+        value = build_diag({"up": 312, "n": 3, "st": "conn"})
+        self.assertEqual(value, "st=conn;n=3;up=312")
+
+    def test_a_missing_pair_is_left_out(self):
+        self.assertEqual(build_diag({"n": 3}), "n=3")
+
+    def test_an_empty_state_is_no_header(self):
+        self.assertIsNone(build_diag({}))
+        self.assertIsNone(build_diag(None))
+        self.assertIsNone(build_diag("not a dict"))
+
+    def test_every_pair_at_its_maximum_still_fits(self):
+        value = build_diag({"err": "A" * 24, "st": "parse", "n": 999999,
+                            "free": 65535, "up": 99999999, "rssi": -127,
+                            "drops": 9999})
+        self.assertLessEqual(len(value), net.DIAG_MAX_CHARS)
+        self.assertIn("err=" + "A" * 24, value)
+        self.assertIn("n=999999", value)
+
+    def test_the_value_is_never_longer_than_the_daemon_accepts(self):
+        for state in ({"err": "OSError 110", "st": "conn", "n": 999999,
+                       "free": 65535, "up": 99999999, "rssi": -127,
+                       "drops": 9999},
+                      {"err": "A" * 24, "up": 99999999},
+                      {"n": 1, "free": 65535, "up": 99999999}):
+            with self.subTest(state=state):
+                self.assertLessEqual(len(build_diag(state)), net.DIAG_MAX_CHARS)
+
+    def test_the_lowest_priority_pairs_are_left_out_first(self):
+        state = {"err": "OSError 110", "st": "conn", "n": 3, "free": 41,
+                 "up": 312, "rssi": -61, "drops": 1}
+        # The whole thing is 59 characters long.
+        self.assertEqual(len(build_diag(state)), 59)
+        # drops goes first, then the signal, then the uptime.
+        self.assertNotIn("drops", build_diag(state, limit=57))
+        self.assertIn("rssi", build_diag(state, limit=57))
+        self.assertNotIn("rssi", build_diag(state, limit=50))
+        self.assertIn("up", build_diag(state, limit=50))
+        self.assertNotIn("up", build_diag(state, limit=40))
+        # The important pairs are never the ones dropped.
+        self.assertIn("err=OSError 110", build_diag(state, limit=40))
+        self.assertIn("st=conn", build_diag(state, limit=40))
+
+    def test_a_label_the_daemon_would_not_accept_is_left_out(self):
+        for label in ("<script>alert(1)</script>", "OS Error", "OSError;rm",
+                      "OSError 12345", "", "OSError 110 220", "OSError 1-23",
+                      "OSError 1 2"):
+            with self.subTest(label=label):
+                value = build_diag({"err": label, "n": 1})
+                self.assertNotIn("err", value)
+
+    def test_an_unknown_stage_is_left_out(self):
+        self.assertEqual(build_diag({"st": "elsewhere", "n": 1}), "n=1")
+
+    def test_a_number_that_is_not_a_number_is_left_out(self):
+        self.assertEqual(build_diag({"n": "3", "free": 41}), "free=41")
+
+    def test_a_boolean_is_not_a_number(self):
+        self.assertEqual(build_diag({"n": True}), None)
+
+    def test_the_value_is_printable_ascii(self):
+        value = build_diag({"err": "OSError 110", "st": "conn", "n": 3,
+                            "free": 41, "up": 312, "rssi": -61, "drops": 1})
+        for char in value:
+            self.assertTrue(32 <= ord(char) < 127)
+
+
+class TestErrorLabel(unittest.TestCase):
+    """The label says what went wrong, never what the text says."""
+
+    def test_the_type_name_is_used(self):
+        self.assertEqual(net.error_label(ValueError("x")), "ValueError")
+        self.assertEqual(net.error_label(MemoryError("x")), "MemoryError")
+
+    def test_an_errno_is_used_too(self):
+        label = net.error_label(OSError(110, "timed out"))
+        self.assertTrue(label.endswith(" 110"), label)
+
+    def test_the_exception_text_is_never_used(self):
+        label = net.error_label(ValueError("Bearer abc123 http://10.0.0.5"))
+        self.assertEqual(label, "ValueError")
+        self.assertNotIn("abc123", label)
+        self.assertNotIn("10.0.0.5", label)
+
+    def test_the_label_is_short_enough_for_the_daemon(self):
+        for exc in (ValueError("x"), OSError(110, "x"), MemoryError("x")):
+            with self.subTest(exc=exc):
+                self.assertLessEqual(len(net.error_label(exc)), net.DIAG_MAX_ERR)
+
+
+class TestDiagHeader(unittest.IsolatedAsyncioTestCase):
+    """Every request the device makes carries the diagnostics."""
+
+    async def _server(self, reply):
+        self.requests = []
+
+        async def handle(reader, writer):
+            try:
+                self.requests.append(await reader.readuntil(b"\r\n\r\n"))
+            except OSError:
+                pass
+            try:
+                writer.write(reply)
+                await writer.drain()
+            except OSError:
+                pass
+            writer.close()
+
+        server = await asyncio.start_server(handle, "127.0.0.1", 0)
+        self.addAsyncCleanup(server.wait_closed)
+        self.addCleanup(server.close)
+        return server.sockets[0].getsockname()[1]
+
+    async def test_the_get_carries_the_diagnostics(self):
+        port = await self._server(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
+        client = StatusClient("127.0.0.1", port, "tok", timeout=2,
+                              diag_provider=lambda: {"n": 3, "free": 41,
+                                                     "up": 312})
+        await client.fetch_async()
+        self.assertIn(b"X-Presto-Diag: n=3;free=41;up=312\r\n", self.requests[0])
+
+    async def test_the_post_carries_the_diagnostics(self):
+        body = b'{"enabled": true}'
+        reply = (b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\n\r\n" % len(body)) + body
+        port = await self._server(reply)
+        client = StatusClient("127.0.0.1", port, "tok", timeout=2,
+                              diag_provider=lambda: {"err": "OSError 110",
+                                                     "st": "conn", "n": 1})
+        await client.post_alert("claude", True)
+        self.assertIn(b"X-Presto-Diag: err=OSError 110;st=conn;n=1\r\n",
+                      self.requests[0])
+
+    async def test_a_request_without_diagnostics_looks_as_it_did(self):
+        port = await self._server(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
+        client = StatusClient("127.0.0.1", port, "tok", timeout=2)
+        await client.fetch_async()
+        self.assertNotIn(b"X-Presto-Diag", self.requests[0])
+        self.assertIn(b"X-Presto-Client: presto\r\n", self.requests[0])
+
+    async def test_a_probe_that_raises_does_not_break_the_fetch(self):
+        port = await self._server(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
+
+        def broken():
+            raise RuntimeError("no probe here")
+
+        client = StatusClient("127.0.0.1", port, "tok", timeout=2,
+                              diag_provider=broken)
+        self.assertEqual(await client.fetch_async(), {})
+        self.assertNotIn(b"X-Presto-Diag", self.requests[0])
+
+    async def test_a_failure_is_reported_by_the_next_request(self):
+        # The first request cannot reach the daemon, so it carries nothing
+        # useful. The second one works, and it carries what the first one
+        # left behind.
+        client = None
+
+        def provider():
+            return {"err": client.last_error, "st": client.last_stage,
+                    "n": 1}
+
+        client = StatusClient("127.0.0.1", 1, "tok", timeout=.2,
+                              diag_provider=provider)
+        with self.assertRaises(NetworkUnavailable):
+            await client.fetch_async()
+        self.assertEqual(client.last_stage, "conn")
+        self.assertTrue(client.last_error)
+
+        port = await self._server(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")
+        client.host = "127.0.0.1"
+        client.port = port
+        client.timeout = 2
+        await client.fetch_async()
+        self.assertIn(b"X-Presto-Diag: err=", self.requests[0])
+        self.assertIn(b"st=conn", self.requests[0])
 
 
 if __name__ == "__main__":

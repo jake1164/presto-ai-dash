@@ -694,7 +694,8 @@ class SourceConfiguration:
                 "port": self.config["daemon"]["port"],
             },
             "clients": [dict(record, last_seen=_stamp(record["last_seen"]),
-                            first_seen=_stamp(record["first_seen"]))
+                            first_seen=_stamp(record["first_seen"]),
+                            diag=dict(record.get("diag") or {}))
                         for record in self.clients.clients(poll_interval=poll_interval)],
             "accounts": [self._account_health(source, snapshots.get(source["id"]))
                          for source in sources],

@@ -190,6 +190,16 @@ class DemoClientTests(unittest.TestCase):
         client.simulate_failure = False
         self.assertIs(asyncio.run(client.fetch_async())["demo"], True)
 
+    def test_a_bell_tap_recalculates_the_demo_home(self):
+        import asyncio
+
+        client = self.client(second=54)
+        asyncio.run(client.post_alert("demo-claude", False))
+        payload = asyncio.run(client.fetch_async())
+        self.assertEqual(payload["overall_status"], "ok")
+        self.assertEqual(payload["cards"][0]["status"], "ok")
+        self.assertEqual(payload["cards"][0]["accent"], "green")
+
 
 class LivePreviewTests(unittest.TestCase):
     def test_offline_screen_is_the_devices_connection_error(self):

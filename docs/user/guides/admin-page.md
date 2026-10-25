@@ -140,6 +140,10 @@ The switch is on the Settings tab. It is off by default. When the
 demonstration is over, switch it off and the Presto goes back to the real
 readings on its next poll, with no restart.
 
+The Presto polls every three seconds while demo mode is on so the short
+scenes are all visible. Its configured live polling interval resumes when
+demo mode is turned off.
+
 Two shortcuts save a new reader from hunting for it. While no account exists,
 the **Services** tab offers **Want to see how it works first? Show sample
 data.**, and the button turns demo mode on. While demo mode is on, the banner

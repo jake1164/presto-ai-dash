@@ -280,6 +280,7 @@
     running: function () { return running && !paused && !stopped; },
     frames: function () { return running ? Number(read("driver.driver.presto.frames")) : 0; },
     card: function () { return running ? String(read("driver.driver.app._current_card().id")) : ""; },
+    homeStatus: function () { return running ? String(read("driver.driver.app.cards[0].status")) : ""; },
     stale: function () { return running ? read("driver.driver.app.connection_error") !== null : false; },
     // Times one tick per touch sample ("kind,x,y" strings), for the drag
     // benchmark. Pause the demo first so the timer does not interleave.

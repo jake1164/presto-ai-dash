@@ -25,6 +25,7 @@ account.
 from datetime import timedelta
 
 from . import dashboard, quotas
+from .alert_policy import resolve_alert_settings
 from .models import SourceSnapshot, now_utc
 
 # The loop: 90 seconds, sampled every 3 seconds.
@@ -296,7 +297,7 @@ def _builders(pairs):
             [row for row, _ in pairs])
 
 
-def demo_payload(t, now=None):
+def demo_payload(t, now=None, alert_overrides=None):
     """The status payload a daemon in demo mode serves, at loop second ``t``.
 
     Built by the real builders and cut to the device view, so it is exactly
@@ -304,8 +305,12 @@ def demo_payload(t, now=None):
     """
     now = now or now_utc()
     snapshots, instances = _builders(demo_pairs(t, now))
+    overrides = alert_overrides or {}
+    resolutions = {row["id"]: resolve_alert_settings(
+        ALERT_SETTINGS, {"enabled": overrides.get(row["id"], True)})
+        for row in instances}
     payload = dashboard.build_instance_payload(snapshots, instances,
-                                               ALERT_SETTINGS, now)
+                                               ALERT_SETTINGS, now, resolutions)
     payload = dashboard.device_view(payload)
     payload["display"] = dict(DEVICE_DISPLAY)
     payload["alerts"] = dict(DEVICE_ALERTS)

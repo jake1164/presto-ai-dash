@@ -148,6 +148,36 @@ try {
   await drive(3);
   check(read("driver.driver.app.connection_error") === null, "the screen did not recover after Stale");
 
+  run("driver.jump(54)");
+  await drive(3);
+  check(read("driver.driver.app.cards[0].status") === "critical", "critical scene did not reach Home");
+  run("driver.run_now(driver.driver.client.post_alert('demo-claude', False))\ndriver.driver.poll_soon()");
+  await drive(3);
+  check(read("driver.driver.app.cards[0].status") === "ok", "the demo bell did not update Home");
+  check(read("driver.driver.app.overall_accent") === "green", "the demo bell did not update the LED");
+  check(read("next(card.status for card in driver.driver.app.cards if card.id == 'demo-claude')") === "critical",
+    "the demo bell hid the service's real status");
+
+  // Exercise the driver's poll scheduler across a full loop without sleeping.
+  run(`
+review_ticks = driver.time.ticks_ms
+review_clock = [0]
+driver.time.ticks_ms = lambda: review_clock[0]
+try:
+    driver.start(${demo.loop_seconds}, ${demo.step_seconds}, ${demo.steps.length})
+    review_seen = set()
+    for second in range(${demo.loop_seconds}):
+        review_clock[0] = second * 1000
+        driver.tick(1000)
+        review_seen.add(driver.driver.app.cards[0].status)
+finally:
+    driver.time.ticks_ms = review_ticks
+`);
+  for (const status of ["ok", "active", "warning", "near_limit", "critical", "rate_limited", "offline"]) {
+    check(read(JSON.stringify(status) + " in review_seen") === true, "automatic playback missed " + status);
+  }
+
+  run("driver.start(" + demo.loop_seconds + ", " + demo.step_seconds + ", " + demo.steps.length + ")");
   run("driver.jump(" + demo.scenes[demo.scenes.length - 1].start + ")");
   await drive(3);
   check(frames.length >= 5, "ticks after a scene jump drew nothing");

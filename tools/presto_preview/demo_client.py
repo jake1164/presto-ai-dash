@@ -77,11 +77,7 @@ class DemoClient(object):
     async def fetch_async(self):
         """The status payload for this moment, with the bells as tapped."""
         self._refuse_if_failing()
-        payload = demo.demo_payload(self.second())
-        for source in payload.get("sources", ()):
-            if isinstance(source, dict) and source.get("id") in self.alerts:
-                source["alerts"] = self.alerts[source["id"]]
-        return payload
+        return demo.demo_payload(self.second(), alert_overrides=self.alerts)
 
     async def fetch_card(self, card_id):
         """One card's lazy detail, or None for an id the demo does not have."""

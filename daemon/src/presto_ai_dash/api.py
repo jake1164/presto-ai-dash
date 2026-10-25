@@ -351,13 +351,11 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
             """The demo's own payload, with the bells this server was told.
 
             It is built by the daemon's builders in demo.py, so it has the
-            same shape and size as a real payload. The in-memory bell taps
-            are applied on top: nothing here reads the database.
+            same shape and size as a real payload. The builder resolves the
+            in-memory bell taps before computing Home: no stored setting is read.
             """
-            payload = demo.demo_payload(demo_second() if demo_second else 0)
-            for source in payload.get("sources", ()):
-                if isinstance(source, dict) and source.get("id") in demo_alerts:
-                    source["alerts"] = demo_alerts[source["id"]]
+            payload = demo.demo_payload(demo_second() if demo_second else 0,
+                                        alert_overrides=demo_alerts)
             if LAZY_QUERY in (query or ""):
                 lazy_cards(payload)
             return payload

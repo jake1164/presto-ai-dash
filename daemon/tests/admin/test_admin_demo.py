@@ -251,6 +251,23 @@ class DemoApiTests(ManagementBase):
         status, _ = self.post_alert(self.managed(), real["id"], False)
         self.assertEqual(status, 404)
 
+    def test_demo_bell_updates_home_and_aggregate_without_hiding_service_status(self):
+        base = self.managed(second=54)
+        before = self.stored_settings()
+        _, original = self.get(base, "/api/v1/status")
+        self.assertEqual(original["overall_status"], "critical")
+        self.assertEqual(self.post_alert(base, "demo-claude", False)[0], 200)
+        _, payload = self.get(base, "/api/v1/status")
+        self.assertEqual(payload["overall_status"], "ok")
+        self.assertEqual(payload["cards"][0]["status"], "ok")
+        self.assertEqual(payload["cards"][0]["accent"], "green")
+        claude = next(source for source in payload["sources"] if source["id"] == "demo-claude")
+        self.assertEqual(claude["status"], "critical")
+        self.assertIs(claude["alerts"], False)
+        self.assertEqual(self.stored_settings(), before)
+        self.post_alert(base, "demo-claude", True)
+        self.assertEqual(self.get(base, "/api/v1/status")[1]["overall_status"], "critical")
+
     def test_a_demo_prefixed_id_the_demo_does_not_produce_is_refused(self):
         """The in-memory map only ever holds ids demo.py really serves."""
         before = self.stored_settings()

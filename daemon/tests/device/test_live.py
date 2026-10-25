@@ -169,6 +169,42 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
             'status': 'ok', 'metrics': {'requests_today': 12 + i, 'tokens_today': 340}} for i in range(count)]
         return payload
 
+    async def test_network_loop_observes_every_demo_status_at_its_actual_cadence(self):
+        sys.path.append(os.path.join(presto_path.REPO_ROOT, 'tools', 'presto_preview'))
+        from demo_client import DemoClient
+        from presto_ai_dash import demo, models
+
+        for offset in (0, 1.5, 2.9):
+            with self.subTest(offset=offset):
+                elapsed = [0]
+                seen = set()
+                self.app.client = DemoClient(offset=offset, clock=lambda: elapsed[0])
+
+                async def advance(delay):
+                    seen.add(self.app.cards[0].status)
+                    elapsed[0] += delay
+                    if elapsed[0] >= demo.LOOP_SECONDS:
+                        raise asyncio.CancelledError()
+
+                with patch('asyncio.sleep', side_effect=advance):
+                    with self.assertRaises(asyncio.CancelledError):
+                        await self.app._network_loop()
+                self.assertEqual(seen, set(models.STATUS_ORDER))
+
+    async def test_demo_exit_restores_live_cadence_and_failures_keep_retry_delay(self):
+        from presto_ai_dash import demo
+
+        self.app.client.fetch_async.return_value = demo.demo_payload(0)
+        await self.app.poll_once()
+        self.assertEqual(self.app._poll_delay(), 3)
+        self.assertEqual(self.app._poll_delay(False), self.app.retry_interval)
+        self.app.poll_interval = 1
+        self.assertEqual(self.app._poll_delay(), 1)
+        self.app.poll_interval = 15
+        self.app.client.fetch_async.return_value = self.payload()
+        await self.app.poll_once()
+        self.assertEqual(self.app._poll_delay(), 15)
+
     def mixed_payload(self):
         """Four quota accounts and two local services, in the saved order.
 

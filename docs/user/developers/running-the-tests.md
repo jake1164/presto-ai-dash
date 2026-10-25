@@ -146,10 +146,18 @@ python -m venv .venv-browser
 .venv-browser/Scripts/python -m pip install playwright
 .venv-browser/Scripts/python -m playwright install chromium
 .venv-browser/Scripts/python tools/check_admin_help_browser.py
+.venv-browser/Scripts/python tools/check_demo_browser.py
 ```
 
 The throwaway daemon itself still runs with the repository's `.venv`; only
 the checker needs Playwright. Delete `.venv-browser` when you are done.
+
+The demo checker verifies that two admin tabs follow the demo switch, that
+an old background response cannot undo a new setting, and that the browser
+demo loads, navigates, updates Home after a bell tap and recovers from a lost
+connection. It also runs the real Presto preview against sample data. Its
+screenshots are saved under `.preview/demo-browser/`; no live configuration
+or provider is used.
 
 ## Before you call the work done
 

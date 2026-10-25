@@ -130,6 +130,16 @@ class DemoClient(object):
         for source in payload.get("sources", ()):
             if isinstance(source, dict) and source.get("id") in self.alerts:
                 source["alerts"] = self.alerts[source["id"]]
+        # The static readings have already been built. Use the app's own
+        # aggregation on their cards after applying the browser's bell taps.
+        cards, _error = main.parse_cards(payload)
+        alerting = {source["id"] for source in payload["sources"] if source["alerts"]}
+        status = main.overall_status([card for card in cards if card.id in alerting]) if alerting else "ok"
+        payload["overall_status"] = status
+        for card in payload["cards"]:
+            if card["id"] == "dash":
+                card["status"] = status
+                card.pop("accent", None)  # the app derives it from the status
         return payload
 
     async def fetch_card(self, card_id):
@@ -169,7 +179,7 @@ class Driver(object):
             except Exception as exc:
                 app._poll_failed("Poll error", type(exc).__name__)
                 good = False
-            wait = app.poll_interval if good else app.retry_interval
+            wait = app._poll_delay(good)
             self.next_poll = time.ticks_add(now, wait * 1000)
         app._tick()
 

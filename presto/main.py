@@ -55,6 +55,9 @@ from ui import (Palette, bell_hit, build_home_layout, dot_hit, draw_boot,
 # How long a detail view stays open before returning to the card.
 DETAIL_TIMEOUT_MS = 15000
 
+# The shortest demo states fit between normal 15-second polls.
+DEMO_POLL_INTERVAL_S = 3
+
 # How long the optimistic bell state is held before the payload wins again.
 ALERT_HOLD_MS = 20000
 # How long a one-line message stays above the dots.
@@ -551,7 +554,13 @@ class App(object):
                 print("AI Dash: poll failed: %s" % reason)
                 self._poll_failed("Poll error", reason)
                 good = False
-            await asyncio.sleep(self.poll_interval if good else self.retry_interval)
+            await asyncio.sleep(self._poll_delay(good))
+
+    def _poll_delay(self, good=True):
+        """Keep short demo scenes visible and restore live cadence on exit."""
+        if not good:
+            return self.retry_interval
+        return min(self.poll_interval, DEMO_POLL_INTERVAL_S) if self.demo else self.poll_interval
 
     # -- interaction --------------------------------------------------------
 
@@ -594,7 +603,7 @@ class App(object):
         detail = self.card_details.get(card.id)
         now = _now_ms()
         if detail is not None:
-            if _ticks_diff(now, detail["at"]) <= self.poll_interval * 1000:
+            if _ticks_diff(now, detail["at"]) <= self._poll_delay() * 1000:
                 return
             # Older than one poll interval: fetch it again.
             del self.card_details[card.id]

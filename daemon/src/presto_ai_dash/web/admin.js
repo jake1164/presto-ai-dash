@@ -9,6 +9,7 @@
   let busy = false;
   let dragging = null;
   let ingestState = null, tokenReveal = null, displayState = null, demoState = null;
+  let demoReadVersion = 0;
   let alertsState = null;
   // The master switch: alerts on or off for every service. It is kept apart
   // from the form, so a background refresh never rewrites what the reader
@@ -262,8 +263,11 @@
   }
   async function loadDemo() {
     // Demo mode is read on its own too, so the banner follows the switch.
+    const version = ++demoReadVersion;
     try {
-      demoState = await request("/api/admin/demo");
+      const state = await request("/api/admin/demo");
+      if (version !== demoReadVersion) return;
+      demoState = state;
       renderDemo();
     } catch (_) { /* keep the last known state */ }
   }
@@ -293,6 +297,7 @@
     // callout and the banner's Turn demo off button.
     if (busy) { renderDemo(); return; }
     busy = true;
+    ++demoReadVersion; // an older background read must not undo this write
     try {
       demoState = await request("/api/admin/demo", "PUT", {enabled: enabled});
       message(enabled ?
@@ -1379,6 +1384,7 @@
     csrfToken = ""; unlocked = false; sources = []; catalog = []; editing = null;
     ingestState = null; tokenReveal = null; displayState = null;
     demoState = null;
+    ++demoReadVersion;
     alertsState = null; masterOn = true; lastMasterOn = null;
     serviceAlertStates.clear(); serviceAlertDrafts.clear(); serviceAlertLoading.clear();
     statusState = null; configState = null; expanded.clear();
@@ -1555,7 +1561,11 @@
     if (!unlocked || busy) return;
     reload(true).catch((error) => message(error.message, true));
     loadAlerts(true);
+    loadDemo();
   }, 10000);
+  document.addEventListener("visibilitychange", () => {
+    if (unlocked && !busy && document.visibilityState === "visible") loadDemo();
+  });
   // The status tab refreshes itself while it is open and the browser tab is in
   // the foreground. Nothing is fetched while another tab is showing.
   setInterval(() => {

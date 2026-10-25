@@ -93,6 +93,55 @@ keep the daemon from answering the Presto:
 - A body is refused with `413`, before it is read, over 16 KiB on the ingest
   route, 256 bytes on the alerts write and 64 KiB on the admin port.
 
+### The headers a client may send
+
+A request to the status port may carry three extra headers. They say who is
+asking and how the device is doing. They change nothing about the answer: the
+status payload is the same with or without them.
+
+| Header | What it carries |
+| --- | --- |
+| `X-Presto-Client` | The client's name, at most 32 printable ASCII characters |
+| `X-Presto-Revision` | The app revision the client runs |
+| `X-Presto-Diag` | The client's own diagnostics, at most 120 characters |
+
+A header value that is not printable ASCII, or that is too long, is dropped
+rather than partly trusted. Nothing about a client is stored: the daemon keeps
+all three in memory only, and forgets them when it restarts.
+
+`X-Presto-Diag` is a list of `key=value` pairs, separated by `;`:
+
+```text
+X-Presto-Diag: err=OSError 110;st=conn;n=3;free=41;up=312;rssi=-61;drops=1
+```
+
+| Key | What it is | The range the daemon accepts |
+| --- | --- | --- |
+| `err` | The last fetch failure: the exception's type and, at most, its errno | A name, then at most one errno, 24 characters in all |
+| `st` | Where the last fetch stopped | `conn`, `send`, `head`, `body` or `parse` |
+| `n` | The failures since the client was switched on | 0 to 999999 |
+| `free` | The free heap, in KiB | 0 to 65535 |
+| `up` | The seconds since the client started | 0 to 99999999 |
+| `rssi` | The Wi-Fi signal, in dBm | -127 to 0 |
+| `drops` | The Wi-Fi drops since the client started | 0 to 9999 |
+
+The whole header is at most 120 characters. A pair the daemon does not know,
+or whose value is out of range, is left out and the rest of the header is
+still used. The value of `err` is never the text of an exception, only its
+type and errno, so no address, token or response body can travel in it.
+
+When a client reports a problem, and the problem changes, the daemon writes
+one line to its log:
+
+```text
+client "presto" reported a fetch problem: err=OSError 110 st=conn n=3
+```
+
+A client can only report a failure on a *later* successful poll: the request
+that failed never reached the daemon. A device that has never been seen at
+all therefore cannot report anything, and the Status tab's "Last seen" column
+is the one to read first.
+
 ## The admin port
 
 The admin port serves the configuration page and its API.

@@ -174,6 +174,82 @@
     return wrapper;
   }
 
+  // -- the clients of the status tab ----------------------------------------
+
+  // A missing value is a dash, never the word "undefined".
+  const NO_VALUE = "—";
+
+  function diagValue(diag, key) {
+    if (!diag) return NO_VALUE;
+    const value = diag[key];
+    if (value === undefined || value === null || value === "") return NO_VALUE;
+    return String(value);
+  }
+
+  function diagWithUnit(diag, key, unit) {
+    if (!diag) return NO_VALUE;
+    const value = diag[key];
+    if (value === undefined || value === null || value === "") return NO_VALUE;
+    return String(value) + " " + unit;
+  }
+
+  function diagError(diag) {
+    if (!diag) return NO_VALUE;
+    const err = diag.err;
+    const stage = diag.st;
+    if (!err && !stage) return NO_VALUE;
+    if (err && stage) return err + " (" + stage + ")";
+    return err || stage;
+  }
+
+  function diagUptime(seconds) {
+    const total = Number(seconds);
+    if (!isFinite(total) || total < 0) return NO_VALUE;
+    const days = Math.floor(total / 86400);
+    const hours = Math.floor((total % 86400) / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    if (days) return days + "d " + hours + "h";
+    if (hours) return hours + "h " + minutes + "m";
+    return minutes + "m";
+  }
+
+  function buildClientTable(clients) {
+    const table = el("table", "grid compact");
+    const head = el("thead");
+    const headRow = el("tr");
+    for (const header of ["Name", "Address", "Last seen", "Fetches", "Revision",
+                          "Last error", "Failures", "Free", "Signal", "Uptime", "State"]) {
+      headRow.append(el("th", "", header));
+    }
+    head.append(headRow);
+    const body = el("tbody");
+    for (const client of clients) {
+      const diag = client.diag || {};
+      const line = el("tr");
+      const cells = [
+        client.name,
+        client.address,
+        whenText(client.last_seen) + " (" + agoText(client.last_seen) + ")",
+        String(client.fetches),
+        client.revision,
+        diagError(diag),
+        diagValue(diag, "n"),
+        diagWithUnit(diag, "free", "KB"),
+        diagWithUnit(diag, "rssi", "dBm"),
+        diagUptime(diag.up),
+        client.connected ? "connected" : "not connected",
+      ];
+      for (const cell of cells) line.append(el("td", "", cell));
+      body.append(line);
+    }
+    table.append(head, body);
+    const wrapper = el("div", "table-wrap");
+    wrapper.append(table);
+    wrapper.append(el("p", "note",
+      "A device that cannot reach the daemon cannot report a problem here, so check \"Last seen\" first. Last error is the device's most recent failure since it last started; Failures counts them since then."));
+    return wrapper;
+  }
+
   // -- requests -------------------------------------------------------------
 
   async function request(path, method = "GET", data, adminToken) {
@@ -1447,11 +1523,7 @@
     if (!clients.length) {
       clientBox.append(el("p", "note", "No client has fetched the status endpoint yet."));
     } else {
-      clientBox.append(buildTable(["Name", "Address", "Last seen", "Fetches", "Revision", "State"],
-        clients.map(client => [client.name, client.address,
-          whenText(client.last_seen) + " (" + agoText(client.last_seen) + ")",
-          String(client.fetches), client.revision,
-          client.connected ? "connected" : "not connected"])));
+      clientBox.append(buildClientTable(clients));
     }
     const accounts = state.accounts || [];
     const accountBox = element("status-accounts");

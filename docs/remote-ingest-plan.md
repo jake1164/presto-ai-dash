@@ -239,14 +239,27 @@ Shipped (2026-10-20): the offline screen and the serial log show the
 exception type, where the fetch stopped (conn/send/head/body/parse), the
 failure count, uptime, free memory and Wi-Fi state; the device sends
 `X-Presto-Client` and `X-Presto-Revision` on every request and the Status tab
-lists each client. Still open, from step C of the closed connectivity item:
+lists each client.
 
-- An `X-Presto-Diag` header (for example
-  `err=MemoryError;n=3;free=41200;up=312`, at most 120 ASCII characters;
-  untrusted input, sanitised, memory only). The daemon logs a change of
-  diagnostics once, and the Status tab shows each client's last error and
-  free memory, so a failure is visible without a serial cable. Not built
-  (checked 2026-10-21: no `X-Presto-Diag` in `presto/` or the daemon).
+Shipped (2026-10-25): the `X-Presto-Diag` header, for example
+`err=OSError 110;st=conn;n=3;free=41;up=312;rssi=-61;drops=1`, at most 120
+ASCII characters. The device builds it from the same probe function that
+feeds the offline screen, so the two cannot drift apart; it never carries the
+text of an exception, only the type and the errno. The daemon treats it as
+untrusted input: it is parsed against a fixed whitelist, a pair it does not
+know or that is out of range is dropped rather than clamped, and a rejected
+value is never echoed into a log, a response or the page. The daemon logs a
+change of diagnostics once, and the Status tab shows each client's last
+error, failure count, free memory, signal and uptime.
+
+Memory only: the daemon keeps at most 16 client records, each with at most
+seven short values, and forgets them when it restarts. Nothing is written to
+the database and no new endpoint or table was added.
+
+The one limitation: a device that cannot reach the daemon cannot report the
+failure, because the request that failed never arrived. The header therefore
+carries what an earlier failure left behind, and the Status tab's "Last seen"
+column is what says a device is silent at all.
 
 ### Several Presto devices
 

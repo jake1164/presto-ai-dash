@@ -9,6 +9,11 @@ device's name (``DEVICE_NAME`` in the device's own ``config.py``, "presto" by
 default) and ``X-Presto-Revision`` the app revision it runs. The daemon keeps
 both in memory to show who is connected; it never stores them.
 
+A request may also carry ``X-Presto-Diag``: a short summary of the device's
+own state, so the daemon can say why a device is unhappy without a serial
+cable. It is built by ``build_diag`` from values the app already gathered,
+it never carries an exception's text, and it is at most 120 characters long.
+
 MicroPython's ``requests`` supports custom headers (verified in
 micropython-lib ``python-ecosys/requests``), which is what lets the Presto send
 the shared bearer token the daemon requires.
@@ -30,6 +35,22 @@ REVISION_OVERRIDE = None
 REVISION_FILE = "revision.txt"
 REVISION_FILES = (REVISION_FILE, "/ai_dash_files/revision.txt")
 MAX_LABEL = 32
+
+# The diagnostics header: what the device says about itself.
+DIAG_HEADER = "X-Presto-Diag"
+# The daemon refuses a longer header, so the device never sends one.
+DIAG_MAX_CHARS = 120
+# The stages a fetch can stop at. The daemon accepts only these.
+DIAG_STAGES = ("conn", "send", "head", "body", "parse")
+# The order the pairs are written in.
+DIAG_ORDER = ("err", "st", "n", "free", "up", "rssi", "drops")
+# The error label is at most this long, and the daemon drops a longer one.
+DIAG_MAX_ERR = 24
+# The characters an error label may carry: letters, digits and an underscore.
+DIAG_NAME_CHARS = ("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
+                   "0123456789_")
+# The digits an errno may have.
+DIAG_DIGITS = "0123456789"
 
 
 def _collect():
@@ -60,6 +81,109 @@ def describe_error(exc, stage=None):
     if stage:
         text += " @" + stage
     return "".join(ch if " " <= ch <= "~" else "?" for ch in text)[:30]
+
+
+def error_label(exc):
+    """A short label for a failure: its type name and, maybe, its errno.
+
+    The exception's own text is never used: it can carry an address, a token
+    or a response body. Only the name and an integer errno are kept, so the
+    label is safe to put in a request header, and it is the shape the daemon
+    accepts: the name, then at most one errno.
+    """
+    name = type(exc).__name__
+    for char in name:
+        if char not in DIAG_NAME_CHARS:
+            return None
+    errno = None
+    args = getattr(exc, "args", None)
+    if isinstance(exc, OSError) and args and type(args[0]) is int:
+        errno = args[0]
+    if errno is None:
+        return name[:DIAG_MAX_ERR]
+    tail = " %d" % errno
+    if len(name) + len(tail) <= DIAG_MAX_ERR and len(str(abs(errno))) <= 4:
+        return name + tail
+    return name[:DIAG_MAX_ERR]
+
+
+def _is_error_label(text):
+    """Whether a label is the shape the daemon accepts.
+
+    The daemon's rule is a name, then at most one errno: digits, with an
+    optional minus in front. Anything else is not sent.
+    """
+    if not text or len(text) > DIAG_MAX_ERR:
+        return False
+    name, sep, tail = text.partition(" ")
+    if not name or not all(char in DIAG_NAME_CHARS for char in name):
+        return False
+    if not sep:
+        return True
+    digits = tail[1:] if tail.startswith("-") else tail
+    if not digits or len(digits) > 4:
+        return False
+    return all(char in DIAG_DIGITS for char in digits)
+
+
+def _render_diag(pairs):
+    """The header value for a list of (key, value) pairs."""
+    return ";".join("%s=%s" % (key, value) for key, value in pairs)
+
+
+def build_diag(state, limit=DIAG_MAX_CHARS):
+    """The diagnostics header value for a state dict, or None.
+
+    Pure, so it can be checked on a development machine. The pairs are
+    written in the order the daemon reads them. The whole value stays
+    within the length the daemon accepts: the lowest-priority pairs
+    (``drops``, then ``rssi``, then ``up``) are left out first, and only
+    then is the error label shortened. A label the daemon would not accept
+    is left out rather than sent.
+    """
+    if not isinstance(state, dict):
+        return None
+    pairs = []
+    for key in DIAG_ORDER:
+        value = state.get(key)
+        if value is None:
+            continue
+        if key == "err":
+            text = value if _is_error_label(value) else ""
+        elif key == "st":
+            text = value if value in DIAG_STAGES else ""
+        elif isinstance(value, bool) or not isinstance(value, int):
+            continue
+        else:
+            text = str(value)
+        if text:
+            pairs.append((key, text))
+    text = _render_diag(pairs)
+    for key in ("drops", "rssi", "up"):
+        if len(text) <= limit:
+            break
+        pairs = [(name, value) for name, value in pairs if name != key]
+        text = _render_diag(pairs)
+    if len(text) > limit:
+        # Only a long error label can still be too long: shorten it.
+        pairs = [(name, value[:DIAG_MAX_ERR] if name == "err" else value)
+                 for name, value in pairs]
+        text = _render_diag(pairs)
+    return text or None
+
+
+def request_headers(headers):
+    """The request header lines, in the order they are sent.
+
+    Only the headers that are present are written, so a request without
+    diagnostics looks exactly as it did before.
+    """
+    lines = []
+    for name in ("Authorization", "X-Presto-Client", "X-Presto-Revision", DIAG_HEADER):
+        value = headers.get(name)
+        if value:
+            lines.append("%s: %s" % (name, value))
+    return "".join(line + "\r\n" for line in lines)
 
 
 class Unauthorised(Exception):
@@ -166,16 +290,20 @@ def current_revision():
     return read_revision()
 
 
-def build_headers(token, client=None, revision=None):
+def build_headers(token, client=None, revision=None, diag=None):
     """The request headers, including the shared bearer token.
 
     An empty token is still sent as an empty bearer so the daemon's error is a
     clean 401 rather than a confusing connection failure. Every request also
-    names the client and the app revision it runs.
+    names the client and the app revision it runs, and carries the device's
+    own diagnostics when they are known.
     """
-    return {"Authorization": "Bearer {}".format(token or ""),
-            "X-Presto-Client": safe_label(client) if client else current_client_name(),
-            "X-Presto-Revision": safe_label(revision) if revision else current_revision()}
+    headers = {"Authorization": "Bearer {}".format(token or ""),
+               "X-Presto-Client": safe_label(client) if client else current_client_name(),
+               "X-Presto-Revision": safe_label(revision) if revision else current_revision()}
+    if diag:
+        headers[DIAG_HEADER] = diag
+    return headers
 
 
 def parse_payload(text):
@@ -200,20 +328,31 @@ class StatusClient(object):
     ``transport`` is a callable taking ``(url, headers, timeout)`` and
     returning an object with ``status_code`` and ``text``. It defaults to
     MicroPython's ``requests.get``. Tests pass a fake.
+
+    ``diag_provider`` is a callable returning the device's own state as a
+    dict, or None. Its values are sent in the ``X-Presto-Diag`` header, so
+    the daemon can say why a device is unhappy without a serial cable. It
+    is called at most once per request, and a probe that fails is simply
+    not reported.
     """
 
     def __init__(self, host, port, token, timeout=8,
-                 path="/api/v1/status", transport=None):
+                 path="/api/v1/status", transport=None, diag_provider=None):
         self.host = host
         self.port = port
         self.token = token
         self.timeout = timeout
         self.path = path
         self._transport = transport
+        self.diag_provider = diag_provider
         # Where the last async fetch got to and why it ended; the screen and
         # the serial log report these when the daemon looks unreachable.
         self.stage = "start"
         self.received = 0
+        # The last failure, kept after it clears: a healthy poll then still
+        # says what went wrong before it. Both are the header's own values.
+        self.last_error = None
+        self.last_stage = None
 
     @property
     def url(self):
@@ -221,7 +360,40 @@ class StatusClient(object):
 
     @property
     def headers(self):
-        return build_headers(self.token)
+        return build_headers(self.token, diag=self.diag_header())
+
+    def diag_header(self):
+        """The diagnostics header value for this request, or None.
+
+        The provider is asked once and never breaks a fetch: a probe that
+        raises is reported as nothing.
+        """
+        provider = self.diag_provider
+        if provider is None:
+            return None
+        try:
+            state = provider()
+        except Exception:
+            return None
+        if not state:
+            return None
+        try:
+            return build_diag(state)
+        except Exception:
+            return None
+
+    def _note_failure(self, exc):
+        """Remember the last failure, so the next poll can still report it.
+
+        The label is the exception's type and errno, never its text: the text
+        can carry an address or a token. Both stay after the failure clears,
+        so a healthy poll still says what went wrong before it.
+        """
+        label = error_label(exc)
+        if label:
+            self.last_error = label
+        if self.stage in DIAG_STAGES:
+            self.last_stage = self.stage
 
     def _default_transport(self, url, headers, timeout):
         import requests
@@ -292,9 +464,11 @@ class StatusClient(object):
         try:
             return await asyncio.wait_for(self._fetch_stream(path, limit),
                                           self.timeout)
-        except (Unauthorised, StatusError):
+        except (Unauthorised, StatusError) as exc:
+            self._note_failure(exc)
             raise
         except Exception as exc:
+            self._note_failure(exc)
             error = NetworkUnavailable("cannot reach daemon")
             error.reason = describe_error(exc, self.stage)
             raise error
@@ -313,11 +487,8 @@ class StatusClient(object):
                    for char in ("\r", "\n")):
                 raise StatusError("invalid connection settings")
             reader, writer = await asyncio.open_connection(self.host, self.port)
-            request = ("GET %s HTTP/1.1\r\nHost: %s:%s\r\n"
-                       "Authorization: %s\r\nX-Presto-Client: %s\r\n"
-                       "X-Presto-Revision: %s\r\nConnection: close\r\n\r\n" %
-                       (path, self.host, self.port, headers["Authorization"],
-                        headers["X-Presto-Client"], headers["X-Presto-Revision"]))
+            request = ("GET %s HTTP/1.1\r\nHost: %s:%s\r\n%sConnection: close\r\n\r\n" %
+                       (path, self.host, self.port, request_headers(headers)))
             self.stage = "send"
             writer.write(request.encode("utf-8"))
             await writer.drain()
@@ -394,9 +565,11 @@ class StatusClient(object):
         try:
             return await asyncio.wait_for(self._post_alert_stream(service, enabled),
                                           self.timeout)
-        except (Unauthorised, StatusError):
+        except (Unauthorised, StatusError) as exc:
+            self._note_failure(exc)
             raise
         except Exception as exc:
+            self._note_failure(exc)
             error = NetworkUnavailable("cannot reach daemon")
             error.reason = describe_error(exc, self.stage)
             raise error
@@ -419,12 +592,10 @@ class StatusClient(object):
                 raise StatusError("invalid connection settings")
             body = json.dumps({"enabled": enabled})
             reader, writer = await asyncio.open_connection(self.host, self.port)
-            request = ("POST %s HTTP/1.1\r\nHost: %s:%s\r\n"
-                       "Authorization: %s\r\nX-Presto-Client: %s\r\n"
-                       "X-Presto-Revision: %s\r\nContent-Type: application/json\r\n"
+            request = ("POST %s HTTP/1.1\r\nHost: %s:%s\r\n%s"
+                       "Content-Type: application/json\r\n"
                        "Content-Length: %d\r\nConnection: close\r\n\r\n%s" %
-                       (path, self.host, self.port, headers["Authorization"],
-                        headers["X-Presto-Client"], headers["X-Presto-Revision"],
+                       (path, self.host, self.port, request_headers(headers),
                         len(body), body))
             self.stage = "send"
             writer.write(request.encode("utf-8"))

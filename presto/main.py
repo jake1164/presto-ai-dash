@@ -119,6 +119,9 @@ class App(object):
             # The small summary: the card's lines and tiles are fetched when
             # the card is opened, so one poll stays small.
             path="/api/v1/status?cards=lazy")
+        # The device tells the daemon what it can about itself, so the Status
+        # tab can say why a device is unhappy without a serial cable.
+        self.client.diag_provider = self._diag_state
 
         self.gestures = GestureRecogniser(
             long_press_ms=self.long_press_ms,
@@ -172,6 +175,10 @@ class App(object):
         self.last_good_at = None
         self.connection_error = None
         self.fail_count = 0
+        # The failures since boot. The count above is the consecutive one and
+        # resets on a good poll; this one does not, so the daemon can show how
+        # many times the device has been unable to reach it.
+        self.fail_total = 0
         self.wifi_drops = 0
         self.started_at = None
         self._last_screen = None
@@ -443,11 +450,13 @@ class App(object):
             if error:
                 raise StatusError("invalid cards")
         except Unauthorised:
+            self.fail_total += 1
             self._poll_failed("Unauthorised", "Check shared token", immediate=True)
             return False
         except StatusError as exc:
             # Retain recent valid readings during a failed refresh, as for a
             # connection interruption. Never replace them with invalid data.
+            self.fail_total += 1
             print("AI Dash: rejected refresh: %s" % exc)
             self._poll_failed("Bad data", str(exc))
             return False
@@ -487,29 +496,45 @@ class App(object):
     def _note_failure(self, reason):
         """Count the failure and log it to the serial console, not the screen."""
         self.fail_count += 1
+        self.fail_total += 1
         print("AI Dash: fetch failed (%d): %s; %s" %
               (self.fail_count, reason, " | ".join(self._diag_lines())))
 
-    def _diag_lines(self):
-        """Short ASCII lines on the link and memory, for the offline screen.
+    def _diag_state(self):
+        """Everything the device knows about itself, in one dict.
 
-        Every probe is optional: the firmware wrapper and MicroPython differ,
-        and a diagnostic must never raise.
+        The offline screen and the diagnostics header read the same values,
+        so the two cannot drift apart. Every probe is optional: the
+        firmware wrapper and MicroPython differ, and a diagnostic must
+        never raise. A probe that could not run is left out of the dict
+        instead of being guessed.
+
+        The header uses ``err``, ``st``, ``n``, ``free``, ``up``, ``rssi``
+        and ``drops``. The rest is for the screen alone: ``fails`` counts
+        the consecutive failures, ``wifi`` says whether the radio is up,
+        and ``wlan`` is the radio's own status code.
         """
         if self.started_at is None:
             self.started_at = self.uptime.ms()
         up = (self.uptime.ms() - self.started_at) // 1000
-        lines = ["fails %d  up %dh%02dm" % (self.fail_count, up // 3600, up // 60 % 60)]
-        parts = []
+        state = {"fails": self.fail_count, "n": self.fail_total, "up": up,
+                 "drops": self.wifi_drops}
+        client = self.client
+        error = getattr(client, "last_error", None)
+        if error:
+            state["err"] = error
+        stage = getattr(client, "last_stage", None)
+        if stage:
+            state["st"] = stage
         try:
             import gc
             free = getattr(gc, "mem_free", None)
             if free:
-                parts.append("free %dK" % (free() // 1024))
+                state["free"] = free() // 1024
         except Exception:
             pass
         try:
-            parts.append("wifi " + ("up" if self.presto.wifi.isconnected() else "DOWN"))
+            state["wifi"] = bool(self.presto.wifi.isconnected())
         except Exception:
             pass
         try:
@@ -519,15 +544,36 @@ class App(object):
             wlan = None
         if wlan is not None:
             try:
-                parts.append("st %s" % (wlan.status(),))
+                state["wlan"] = wlan.status()
             except Exception:
                 pass
             try:
-                parts.append("rssi %s" % (wlan.status("rssi"),))
+                state["rssi"] = wlan.status("rssi")
             except Exception:
                 pass
-        if self.wifi_drops:
-            parts.append("drops %d" % self.wifi_drops)
+        return state
+
+    def _diag_lines(self):
+        """Short ASCII lines on the link and memory, for the offline screen.
+
+        Every probe is optional: the firmware wrapper and MicroPython differ,
+        and a diagnostic must never raise.
+        """
+        state = self._diag_state()
+        up = state["up"]
+        lines = ["fails %d  up %dh%02dm" % (state["fails"], up // 3600,
+                                             up // 60 % 60)]
+        parts = []
+        if "free" in state:
+            parts.append("free %dK" % state["free"])
+        if "wifi" in state:
+            parts.append("wifi " + ("up" if state["wifi"] else "DOWN"))
+        if "wlan" in state:
+            parts.append("st %s" % (state["wlan"],))
+        if "rssi" in state:
+            parts.append("rssi %s" % (state["rssi"],))
+        if state["drops"]:
+            parts.append("drops %d" % state["drops"])
         if parts:
             lines.append("  ".join(parts))
         return lines

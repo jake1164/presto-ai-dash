@@ -126,6 +126,36 @@ intervals is shown as *not connected*.
 If the Presto is listed there and fetching normally, the problem is on the
 device's network side, not in the daemon.
 
+### The device's own columns
+
+The same table carries five more columns, filled in from what the device
+reported about itself in its `X-Presto-Diag` header:
+
+| Column | What it says |
+| --- | --- |
+| **Last error** | The type of the last failed fetch and where it stopped, for example `OSError 110 (conn)`. It stays after the device recovers, and it is cleared when the device restarts, so it always belongs to the device's current run |
+| **Failures** | How many times the fetch has failed since the device was switched on |
+| **Free** | The free heap on the device, in KiB |
+| **Signal** | The Wi-Fi signal, in dBm |
+| **Uptime** | How long the app has been running |
+
+A dash means the device did not report that value. It is not an error: an
+older device, or one that has never polled, sends nothing.
+
+**Read "Last seen" first.** A device that cannot reach the daemon cannot
+report a problem either: the request that failed never arrived. So a row with
+an old "Last seen" and empty diagnostic columns means the device is not
+getting through at all, and the columns above are the wrong place to look.
+When the device does get through, the next poll carries the failure that
+happened before it, so the columns fill in.
+
+The daemon also writes one line to its log when a client reports a problem
+and that problem changes:
+
+```text
+client "presto" reported a fetch problem: err=OSError 110 st=conn n=3
+```
+
 ## 8. Other causes
 
 | Symptom | Cause |

@@ -402,11 +402,14 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                 return
             if client_registry is not None:
                 # Who is polling: remembered in memory only, and never part of
-                # the response, which stays exactly as it was.
+                # the response, which stays exactly as it was. The device's
+                # own diagnostics come along in a header and are validated
+                # against a whitelist before they are kept.
                 try:
                     client_registry.record(self.headers.get("X-Presto-Client"),
                                            self.client_address[0],
-                                           self.headers.get("X-Presto-Revision"))
+                                           self.headers.get("X-Presto-Revision"),
+                                           diag=self.headers.get("X-Presto-Diag"))
                 except Exception:
                     log.debug("could not record the client", exc_info=True)
             self._send_json(200, payload)

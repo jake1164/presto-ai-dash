@@ -405,6 +405,58 @@ class UptimeTests(unittest.TestCase):
         Uptime(no_clock, ticks_diff)
 
 
+class DiagnosticsStateTests(PatchedModule):
+    """One probe function feeds the offline screen and the diagnostics header."""
+
+    def test_the_offline_lines_stay_the_same(self):
+        app, _device, clock = make_app(self.module)
+        app._diag_lines()  # the first reading starts the uptime
+        clock.advance(3600 * 1000)
+        lines = app._diag_lines()
+        self.assertEqual(lines[0], "fails 0  up 1h00m")
+        self.assertIn("wifi up", lines[1])
+        for line in lines:
+            self.assertTrue(line.isascii())
+
+    def test_the_state_carries_what_the_header_needs(self):
+        app, _device, _clock = make_app(self.module)
+        state = app._diag_state()
+        self.assertEqual(state["fails"], 0)
+        self.assertEqual(state["n"], 0)
+        self.assertEqual(state["drops"], 0)
+        self.assertIn("up", state)
+        # Nothing has failed yet, so there is no error to report.
+        self.assertNotIn("err", state)
+        self.assertNotIn("st", state)
+
+    def test_the_failure_count_is_never_reset(self):
+        app, _device, _clock = make_app(self.module)
+        app._note_failure("boom")
+        app._note_failure("boom")
+        self.assertEqual(app.fail_count, 2)
+        self.assertEqual(app.fail_total, 2)
+        # A good poll clears the consecutive count, never the total.
+        app.fail_count = 0
+        self.assertEqual(app.fail_total, 2)
+        self.assertEqual(app._diag_state()["n"], 2)
+
+    def test_the_client_is_told_where_to_get_the_diagnostics(self):
+        app, _device, _clock = make_app(self.module)
+        self.assertIsNotNone(app.client.diag_provider)
+        self.assertEqual(app.client.diag_provider, app._diag_state)
+
+    def test_a_probe_that_fails_does_not_break_the_state(self):
+        app, device, _clock = make_app(self.module)
+
+        def broken():
+            raise RuntimeError("no radio here")
+
+        device.wifi.isconnected = broken
+        state = app._diag_state()
+        self.assertNotIn("wifi", state)
+        self.assertIn("fails", state)
+
+
 class RolloverBehaviourTests(PatchedModule):
     def test_raw_ticks_would_break_the_debounce_across_the_wrap(self):
         """Why the app uses an uptime counter: subtracting raw ticks is wrong."""

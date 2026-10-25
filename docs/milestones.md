@@ -33,13 +33,18 @@ limits to a daemon on another machine or in a container; the daemon validates
 each new envelope key field by field. Tested against a throwaway daemon, with
 the collector run alone in an empty folder; not yet on a second real computer.
 
+**Built since (2026-10-25):** device diagnostics. The device sends an
+`X-Presto-Diag` header on every request, the daemon checks it against a
+whitelist and keeps it in memory only, and the admin page's Status tab shows
+each client's last error, failure count, free memory, signal and uptime.
+
 **Open:** Phase 8 (OpenTelemetry;
-researched, decision gate pending), device diagnostics (`X-Presto-Diag`),
-several Presto devices, M8 acceptance (real expired-login recovery, a second
+researched, decision gate pending), several Presto devices, M8 acceptance
+(real expired-login recovery, a second
 account, sign-in controls on the admin page), and M13, the demo release. The
 live list is the backlog in [the remote ingest plan](remote-ingest-plan.md).
 
-The daemon suite has **1409 tests** (3 skipped) as of 2026-10-21. The sections
+The daemon suite has **2032 tests** (8 skipped) as of 2026-10-25. The sections
 below are the historical record; dated corrections mark statements that are
 no longer true.
 

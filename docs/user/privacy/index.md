@@ -71,6 +71,7 @@ path that could spend one.
 | Your readings and a short history | SQLite, in plain text |
 | Your Claude status-line command | Claude Code's own settings file, the provider's file, with the previous value kept encrypted in SQLite |
 | The usage cache's account ID | In memory only, as a hash, and never stored |
+| The clients' names, revisions and diagnostics | In memory only, and never stored |
 | The remote collectors' last report | SQLite, with the host label you chose |
 
 Only the credentials are encrypted. Ordinary settings and readings are
@@ -133,6 +134,24 @@ computer stops reporting immediately.
 
 The route is off by default and speaks plain HTTP, so keep it on a private
 network.
+
+## The device's own diagnostics
+
+Each request from the Presto carries three extra headers: its name, the app
+revision it runs, and `X-Presto-Diag`, a short summary of the device's own
+state.
+
+`X-Presto-Diag` says only what the device already knows about itself: the
+type and errno of the last failed fetch and where it stopped, how many times
+the fetch has failed since the device was switched on, the free heap in KiB,
+the uptime in seconds, the Wi-Fi signal in dBm and the number of Wi-Fi drops.
+It never carries the text of an exception, so no address, token or response
+body can travel in it, and it is at most 120 characters long.
+
+The daemon checks every pair against a fixed list and keeps only what it
+knows. **It is kept in memory only**: it is never written to the database,
+never sent anywhere, and is forgotten when the daemon restarts. The Status tab
+shows it, so you can see why a device is unhappy without a serial cable.
 
 ## A note on the shared token
 

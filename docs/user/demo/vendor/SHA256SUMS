@@ -1,0 +1,6 @@
+# @micropython/micropython-webassembly-pyscript 1.29.0-6
+# Obtained with: npm pack @micropython/micropython-webassembly-pyscript@1.29.0-6
+# micropython.mjs is copied as micropython.js so every static server serves it
+# as a JavaScript module (a plain server can send .mjs as text/plain).
+26cc7a99064a16518ab9a695e848efb248bfce504aee56ae73b2af35f3dcbf8b  micropython.js
+d5913c9327072e71d3e7a2e9384ea326f7d784bcc2f50a01b602c52bd2bdcafd  micropython.wasm

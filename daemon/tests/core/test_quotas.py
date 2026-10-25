@@ -66,15 +66,19 @@ class QuotaContractTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             quota_window("a", "Weekly", 1, "2026-10-12T00:00:00", NOW)
 
-    def test_registered_cloud_sources_load_and_demo_exclusivity_is_preserved(self):
+    def test_registered_cloud_sources_load_without_a_demo_row(self):
         import tempfile
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "cloud.toml"
-            path.write_text('[sources.fake]\nenabled=false\n[sources.opencode_go]\nenabled=true\n', encoding="utf-8")
-            self.assertTrue(load_config(path)["sources"]["opencode_go"]["enabled"])
             path.write_text('[sources.opencode_go]\nenabled=true\n', encoding="utf-8")
-            with self.assertRaises(ConfigError):
-                load_config(path)
+            self.assertTrue(load_config(path)["sources"]["opencode_go"]["enabled"])
+            # A section for the removed demo source is dropped, not rejected.
+            path.write_text('[sources.fake]\nenabled=false\n[sources.opencode_go]\n'
+                            'enabled=true\n', encoding="utf-8")
+            with self.assertLogs("presto_ai_dash.config", level="WARNING"):
+                config = load_config(path)
+            self.assertTrue(config["sources"]["opencode_go"]["enabled"])
+            self.assertNotIn("fake", config["sources"])
 
 
 class CloudSourceTests(unittest.TestCase):
@@ -164,7 +168,6 @@ class CloudSourceTests(unittest.TestCase):
 
 class QuotaStorageTests(ManagementBase):
     def test_every_enabled_account_has_its_own_card_and_edits_keep_identity(self):
-        self.disable_fake()
         rows = [self.manager.save({"type": type_id, "name": name, "enabled": True})
                 for type_id, name in (("opencode_go", "Go personal"), ("opencode_go", "Go other"),
                                       ("ollama_cloud", "Cloud"), ("ollama", "Desktop"))]
@@ -186,8 +189,14 @@ class QuotaStorageTests(ManagementBase):
             self.assertEqual(payload["cards"][1]["primary"], "5h: 0%")
             self.assertEqual(payload["cards"][2]["primary"], "5h: 20%")
             self.assertEqual(payload["cards"][3]["primary"], "2 requests")
-            self.assertTrue(any("Monthly passed" in line for line in payload["cards"][1]["detail"]),
-                            payload["cards"][1]["detail"])
+            # Every window of the account has its reset line. The resets in
+            # this fixture are two days after the clock the payload is built
+            # with, so none has passed: a passed reset is covered by
+            # test_detail_card_flags_a_passed_reset.
+            self.assertEqual(payload["cards"][1]["detail"][:3],
+                             ["5h reset: 10-13 14:00Z",
+                              "Weekly reset: 10-13 14:00Z",
+                              "Monthly reset: 10-13 14:00Z"])
             self.manager.save({"revision": rows[0]["revision"], "enabled": False}, rows[0]["id"])
             self.manager.save({"revision": rows[1]["revision"], "name": "Renamed Go",
                                "api_key": "replacement"}, rows[1]["id"])
@@ -203,7 +212,6 @@ class QuotaStorageTests(ManagementBase):
         self.assertEqual(payload["cards"][1]["primary"], "Usage unavailable")
 
     def test_separate_accounts_keys_restart_and_public_api_projection(self):
-        self.disable_fake()
         rows = [self.manager.save({"type": "opencode_go", "name": name, "enabled": True,
                                    "api_key": key}) for name, key in (("Personal", "key-one"), ("Other", "key-two"))]
         for index, row in enumerate(rows):
@@ -269,7 +277,7 @@ class QuotaDeviceTests(unittest.TestCase):
                 display = Display()
                 draw_sources(display, Palette(display), rows, 0, 3, scroll=offset,
                              layout=layout)
-                test_home.HomeLayoutTests().assert_layout(display)
+                test_home.assert_layout(self, display)
                 texts = [text for text, *_ in display.rows]
                 # Labelled values per window, and the binding window's reset.
                 self.assertIn("12%", texts)
@@ -366,7 +374,7 @@ class QuotaDeviceTests(unittest.TestCase):
         rows = source_rows({"updated_at": NOW.isoformat(), "card_order": "accounts", "sources": sources})
         display = Display()
         draw_sources(display, Palette(display), rows, 0, 3)
-        test_home.HomeLayoutTests().assert_layout(display)
+        test_home.assert_layout(self, display)
         texts = [text for text, *_ in display.rows]
         self.assertFalse(any("last known" in text for text in texts))  # both resets passed
         self.assertIn("Wk resets 4d19h", texts)          # labelled future reset

@@ -1,0 +1,131 @@
+/* The clickable demo. Loaded on every page, so every rule starts with
+   .presto-demo and does nothing where the demo is not. */
+
+.presto-demo {
+  --presto-led: rgba(0, 0, 0, 0);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin: 1.5rem 0;
+}
+
+.presto-demo .presto-bezel {
+  position: relative;
+  box-sizing: border-box;
+  /* 480 px of screen plus the frame, never wider than the column. */
+  width: min(100%, 532px);
+  padding: 26px;
+  background: #1b1d21;
+  border-radius: 26px;
+  box-shadow: 0 0 34px 4px var(--presto-led);
+  transition: box-shadow 0.3s;
+}
+
+.presto-demo .presto-screen {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background: #101216;
+}
+
+.presto-demo canvas,
+.presto-demo img.presto-poster {
+  display: block;
+  width: 100%;
+  height: 100%;
+  image-rendering: pixelated;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.presto-demo canvas {
+  /* A swipe on the screen must not scroll the page. */
+  touch-action: none;
+  cursor: pointer;
+}
+
+.presto-demo canvas:focus-visible {
+  outline: 3px solid #8ab4ff;
+  outline-offset: 3px;
+}
+
+.presto-demo [hidden] {
+  display: none !important;
+}
+
+.presto-demo .presto-start {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 0.7rem 1.6rem;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: #3f51b5;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.presto-demo .presto-start:hover,
+.presto-demo .presto-start:focus-visible {
+  background: #5568d8;
+}
+
+.presto-demo .presto-start:disabled {
+  cursor: progress;
+  opacity: 0.85;
+}
+
+.presto-demo .presto-error {
+  margin: 0.8rem 0 0;
+  padding: 0.6rem 0.9rem;
+  max-width: 532px;
+  color: #ffd7d7;
+  background: #5b1a1a;
+  border-radius: 6px;
+}
+
+.presto-demo .presto-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1rem;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.presto-demo .presto-controls button,
+.presto-demo .presto-controls select {
+  font: inherit;
+  padding: 0.3rem 0.8rem;
+  color: var(--md-default-fg-color, #222);
+  background: var(--md-default-bg-color, #fff);
+  border: 1px solid var(--md-default-fg-color--lighter, #999);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.presto-demo .presto-controls label {
+  cursor: pointer;
+}
+
+.presto-demo .presto-note {
+  margin: 0.8rem 0 0;
+  font-size: 0.8rem;
+  text-align: center;
+  color: var(--md-default-fg-color--light, #555);
+}
+
+/* The theme's floating "back to top" button would sit on the screen and take
+   clicks meant for it. Only the demo page loses it. */
+body:has(.presto-demo) .md-top {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .presto-demo .presto-bezel {
+    transition: none;
+  }
+}

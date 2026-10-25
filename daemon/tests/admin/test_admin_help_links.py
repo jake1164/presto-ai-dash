@@ -123,7 +123,7 @@ class HelpMapTests(unittest.TestCase):
     def test_the_source_type_guides_are_all_in_the_map(self):
         known = {key for key, _page, _anchor in self.help_map()}
         for source_type in ("claude", "codex", "opencode-go", "ollama-cloud",
-                             "ollama", "litellm", "fake"):
+                             "ollama", "litellm"):
             self.assertIn("source-" + source_type, known)
 
     def test_there_is_exactly_one_documentation_url(self):

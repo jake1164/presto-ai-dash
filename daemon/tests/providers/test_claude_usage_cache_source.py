@@ -417,7 +417,6 @@ class AdminPageTests(ManagementBase):
 
     def setUp(self):
         super().setUp()
-        self.disable_fake()
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)

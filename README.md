@@ -14,6 +14,9 @@ A tiny AI usage dashboard for Pimoroni Presto with support for local and cloud A
 
 Documentation: <https://jake1164.github.io/presto-ai-dash/>
 
+Try it in your browser, no Presto needed:
+[see it running](https://jake1164.github.io/presto-ai-dash/demo/).
+
 Presto AI Dash puts your AI subscription quotas and the health of your local
 AI services on a 240x240 touchscreen on your desk. A small Python daemon on
 your LAN reads the numbers, read-only, and the Presto polls it and draws them.
@@ -51,7 +54,8 @@ your LAN reads the numbers, read-only, and the Presto polls it and draws them.
 | Ollama | Server health, version, installed and loaded models | Anywhere that can reach the Ollama server |
 | LiteLLM | Health, readiness, and today's requests, tokens, spend and errors | Anywhere that can reach the gateway |
 
-A `fake` source cycles through every status for demos and hardware checks.
+**Demo mode** replaces the readings with a scripted set of sample accounts, for
+demos and hardware checks, and writes nothing.
 API keys are stored encrypted in the daemon's SQLite database; the Presto
 never holds a provider key. Details per source:
 [Guides](https://jake1164.github.io/presto-ai-dash/guides/claude/).

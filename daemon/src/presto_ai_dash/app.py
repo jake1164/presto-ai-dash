@@ -10,11 +10,12 @@ import threading
 import time
 
 from . import __version__, private_files
+from . import demo as demo_data
 from .api import ApiServer
 from .admin import AdminServer
 from .clients import ClientRegistry
 from .config import (ConfigError, admin_bind_error, configure_logging,
-                     ingest_enabled, load_config, resolve_shared_token,
+                     demo_enabled, ingest_enabled, load_config, resolve_shared_token,
                      resolve_admin_token)
 from .management import SourceConfiguration, ManagedCollector
 from .models import now_utc
@@ -80,6 +81,14 @@ class Daemon:
         """The route's live switch, so an admin toggle applies without a restart."""
         return ingest_enabled(self.config, self.storage.ingest_enabled_setting())
 
+    def demo_allowed(self):
+        """Whether the API serves sample data right now, re-read per request."""
+        return demo_enabled(self.config, self.storage.demo_enabled_setting())
+
+    def demo_second(self):
+        """Where the demo loop is now: seconds since start, modulo the loop."""
+        return (time.time() - self.started_at) % demo_data.LOOP_SECONDS
+
     def _check_private_files(self):
         """Warn when other accounts could replace the database or its key.
 
@@ -140,7 +149,11 @@ class Daemon:
                                  # The lazy card detail: one card's tiles and
                                  # lines, fetched when the card is opened.
                                  card_provider=(self.source_configuration.card_detail
-                                                if managed else None))
+                                                if managed else None),
+                                 # Demo mode: sample data instead of the real
+                                 # accounts, for the device and the API.
+                                 demo_enabled=self.demo_allowed,
+                                 demo_second=self.demo_second)
             if self.config["admin"]["enabled"]:
                 token = resolve_admin_token(self.config, self.shared_token)
                 self.admin = AdminServer(self.config["admin"]["port"],

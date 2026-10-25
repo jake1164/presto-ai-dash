@@ -35,6 +35,9 @@ services:
       DASH_KEY_FILE: "/data/dash.db.key"
       # The remote reports (push) switch, off unless the user turns it on.
       DASH_INGEST_ENABLED: "${DASH_INGEST_ENABLED:-0}"
+      # Demo mode: sample data on the device and the API, off unless asked for.
+      # It overrides the real sources while it is on; nothing is written.
+      # DASH_DEMO: "1"
       # The encryption master key. Leave empty to use the key file in the
       # volume; set it to move the database to another machine.
       DASH_ENCRYPTION_KEY: "${DASH_ENCRYPTION_KEY:-}"

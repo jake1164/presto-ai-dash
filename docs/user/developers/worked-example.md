@@ -30,7 +30,7 @@ A template that nobody runs rots. The one in this repository is executed by
 `daemon/tests/providers/test_source_template.py`, which:
 
 - imports it **by path**, so discovery never sees it,
-- runs its `collect()` against a **fake response**, so no network is
+- runs its `collect()` against a **canned response**, so no network is
   involved,
 - asserts that its ID is **not** in `source_catalog()`,
 - checks that a missing window is *unavailable* and not zero,
@@ -211,6 +211,10 @@ shows.
 6. Add the source to the admin page by restarting the daemon. The connector
    appears in **Add source** with its own fields.
 7. Add an account, and look at the device.
+8. **Add demo data.** Add a demo account of the new type to
+   `daemon/src/presto_ai_dash/demo.py`, with realistic windows that move
+   through the scenes. A test (`daemon/tests/core/test_demo.py`) fails until
+   you do. See [Demo data](how-a-source-works.md#demo-data) for why and how.
 
 ## The checklist
 
@@ -224,6 +228,7 @@ shows.
 - [ ] The tests cover the happy path, a missing field, a bad shape, an
       unreachable service and a rejected key.
 - [ ] The payload stays inside the size budget.
+- [ ] `demo.py` has a demo account of the new type.
 
 ## See also
 

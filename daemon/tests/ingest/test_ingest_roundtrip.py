@@ -36,7 +36,6 @@ def status_input(percent=12.0, weekly=34.5):
 class RoundTripTests(AdminServerBase):
     def setUp(self):
         super().setUp()
-        self.disable_fake()
         self.row = self.manager.save({"type": "claude", "name": "Claude personal",
                                       "enabled": True,
                                       "config": {"settings_path": str(Path(self.temp.name) / "settings.json")}})

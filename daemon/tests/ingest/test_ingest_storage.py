@@ -81,7 +81,6 @@ class MigrationTests(unittest.TestCase):
 class TokenTests(ManagementBase):
     def setUp(self):
         super().setUp()
-        self.disable_fake()
         self.row = self.manager.save({"type": "claude", "name": "Claude personal",
                                       "enabled": True,
                                       "config": {"settings_path": str(Path(self.temp.name) / "settings.json")}})
@@ -133,10 +132,11 @@ class TokenTests(ManagementBase):
                 self.assertIsNone(self.storage.instance_for_ingest_token(token))
 
     def test_non_push_or_disabled_instance_refuses_a_token(self):
-        fake = next(row for row in self.manager.list_sources()["sources"]
-                    if row["type"] == "fake")  # already disabled, must also refuse
+        # Ollama is seeded from dash.toml and never pushes a reading.
+        ollama = next(row for row in self.manager.list_sources()["sources"]
+                      if row["type"] == "ollama")
         with self.assertRaises(ValueError):
-            self.storage.create_ingest_token(fake["id"])
+            self.storage.create_ingest_token(ollama["id"])
         self.assertEqual(self.raw_hashes(), [])
         self.manager.save({"type": "litellm", "name": "Gateway", "enabled": True,
                            "config": {"base_url": "http://localhost:4000"}})

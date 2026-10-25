@@ -1,6 +1,6 @@
 """Presto AI Dash daemon.
 
-A small, dependency-free Python daemon that collects fake demo snapshots,
+A small, dependency-free Python daemon that collects allowance snapshots,
 stores them in SQLite, and serves an authenticated status payload over HTTP.
 Real Ollama and LiteLLM sources are future milestones.
 

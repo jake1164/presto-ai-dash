@@ -346,7 +346,6 @@ class ManagerServesTheDeviceViewTests(unittest.TestCase):
         base = test_management.ManagementBase("setUp")
         base.setUp()
         self.addCleanup(base.tearDown)
-        base.disable_fake()
         row = base.manager.save({"type": "claude", "name": "Claude", "enabled": True,
                                  "config": {"settings_path": os.path.join(base.temp.name, "s.json")}})
         base.storage.save_snapshot(SourceSnapshot(row["id"], "ok", NOW,

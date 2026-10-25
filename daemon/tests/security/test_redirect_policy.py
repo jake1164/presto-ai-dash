@@ -178,7 +178,6 @@ class RedirectBehaviourTests(Servers):
 class EditedUrlTests(ManagementBase):
     def setUp(self):
         super().setUp()
-        self.disable_fake()
         self.row = self.manager.save({"type": "litellm", "name": "Gateway", "api_key": KEY,
                                       "config": {"base_url": "http://gw.lan:4000"}})
 

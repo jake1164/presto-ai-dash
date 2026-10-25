@@ -65,8 +65,10 @@ The whitelist scan parses the device's own source with `ast` and looks for
 the keys it reads. If you add a key to the device, add it to the
 `DEVICE_*_KEYS` constants in `dashboard.py`, or this test fails.
 
-The size budget is 5000 bytes for the whole payload and 1000 bytes per
-account. It is a hard limit: the test fails the build when it is exceeded.
+The size budget is 5000 bytes for one poll response and 1000 bytes per
+account within it (card detail has its own 8 KiB limit per request). It is a
+hard limit: the test fails the build when it is exceeded, and
+`tests/core/test_demo.py` holds every message the demo sends to the same limits.
 
 ## The Presto tests
 
@@ -75,7 +77,7 @@ hardware. `tests/device/test_presto_structure.py` enforces the layering: only
 `main.py` and `ui.py` may import `presto`, `machine`, `picographics` or
 `picovector`.
 
-The drawing tests use a fake display and check that text fits and does not
+The drawing tests use a stand-in display and check that text fits and does not
 overlap, in the firmware's own bitmap fonts.
 
 ## The documentation site
@@ -109,6 +111,27 @@ the admin page points at an anchor that exists in the built site:
 .venv/Scripts/python tools/check_doc_anchors.py
 ```
 
+## The demo checks
+
+The documentation site's demo has two generated parts, and neither is
+committed: build them first.
+
+```bash
+.venv/Scripts/python tools/build_demo_site.py
+node tools/check_demo_wasm.mjs
+```
+
+The first writes `docs/user/demo/app/`. The second loads the vendored
+MicroPython WebAssembly runtime in Node, checks that every app module imports,
+that Home and every card at every scene draw exactly the pixels CPython drew,
+and that a swipe and the **Stale** switch work. It fails, and does not skip, if
+the runtime cannot load. `tests/tooling/test_demo_page.py` runs it against a
+good build and against deliberately broken ones when Node is installed, and
+`tests/core/test_demo.py` fails when a registered source type has no demo
+account (see [Demo data](how-a-source-works.md#demo-data)). In CI the Ubuntu
+Python 3.13 job builds and checks the demo, and the docs workflow builds it
+before `mkdocs build --strict`.
+
 ## The browser checks
 
 `tools/check_admin_help_browser.py` opens the admin page in a real browser,
@@ -123,10 +146,18 @@ python -m venv .venv-browser
 .venv-browser/Scripts/python -m pip install playwright
 .venv-browser/Scripts/python -m playwright install chromium
 .venv-browser/Scripts/python tools/check_admin_help_browser.py
+.venv-browser/Scripts/python tools/check_demo_browser.py
 ```
 
 The throwaway daemon itself still runs with the repository's `.venv`; only
 the checker needs Playwright. Delete `.venv-browser` when you are done.
+
+The demo checker verifies that two admin tabs follow the demo switch, that
+an old background response cannot undo a new setting, and that the browser
+demo loads, navigates, updates Home after a bell tap and recovers from a lost
+connection. It also runs the real Presto preview against sample data. Its
+screenshots are saved under `.preview/demo-browser/`; no live configuration
+or provider is used.
 
 ## Before you call the work done
 

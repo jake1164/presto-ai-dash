@@ -76,13 +76,9 @@ pop_to_top = true
 mute_hours = 4
 
 # --- Sources ---------------------------------------------------------------
-# Fake data is enabled by default. Disable it before enabling a live source so
-# synthetic metrics can never be mistaken for real usage.
-
-[sources.fake]
-enabled = true
-# Seconds each demo scenario is held before advancing.
-scenario_interval = 20
+# Sample data is not a source. To see the demo, turn on demo mode with
+# DASH_DEMO=1 in the environment or the toggle on the admin page's Settings
+# tab; it overrides these sources while it is on and writes nothing.
 
 [sources.ollama]
 enabled = false

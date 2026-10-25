@@ -12,7 +12,9 @@ opening a browser tab:
 ## What it looks like
 
 The Home screen lists every service in your saved order. Swipe to a card for
-one service in detail, or tap a row to jump straight to its card.
+one service in detail, or tap a row to jump straight to its card. You can try
+it without a Presto: [see it running](../demo/index.md) in your browser, on
+sample data.
 
 ![The Presto showing the Home list: OpenCode Go, Codex and Claude with their quota percentages and bars, then Ollama Cloud, Ollama and LiteLLM](../images/device-home.jpg){ width="420" }
 

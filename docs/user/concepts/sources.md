@@ -24,7 +24,6 @@ readings stay until the retention sweep removes them.
 
 | Type | Reads | Needs a key |
 | --- | --- | --- |
-| `fake` | Nothing: synthetic data for demos and hardware checks | No |
 | `ollama` | A local Ollama server: version, loaded model, available models | No |
 | `litellm` | A LiteLLM gateway: requests, tokens, spend, errors, top model | Usually |
 | `claude` | Claude Code: quota windows, local activity, usage cache | No |

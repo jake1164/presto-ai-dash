@@ -71,7 +71,6 @@ class BoolCatalogTests(RegistrationBase):
 
 class BoolAdminRoundTripTests(RegistrationBase, ManagementBase):
     def test_bool_settings_round_trip_through_save_and_list(self):
-        self.disable_fake()
         row = self.manager.save({"type": FlagSource.id, "name": "Flagged", "enabled": True,
                                  "config": {"profile": "x", "flag": True, "seconds": 120}})
         self.assertIs(row["config"]["flag"], True)

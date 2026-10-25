@@ -114,12 +114,20 @@ So the budget is enforced:
 
 | Budget | Value | What it covers |
 | --- | --- | --- |
-| The whole device payload | 5000 bytes | Six accounts, both Claude readers on |
-| Per account | 1000 bytes | The average, so one account cannot eat the whole payload |
+| One poll response | 5000 bytes | The device summary, with six accounts and both Claude readers on |
+| Per account | 1000 bytes | The average per account **within that one response**, so one account cannot eat the whole of it |
+| One card's detail | 8 KiB | Its own limit per request to `GET /api/v1/cards/<id>` |
 
-A test fails the build when the payload exceeds either limit, so it cannot
-quietly grow back. The device accepts up to 64 KiB, but it parses that in a
-few hundred kilobytes of RAM, which is the number that matters.
+These are limits on **one message**, not on a total. The Presto polls every
+15 seconds and fetches a card's detail when the card is opened, so many
+responses arrive over time, and there is no limit on how many. What the device
+cannot do is parse one large response, which is what the budget protects.
+
+A test fails the build when a poll response exceeds either limit, so it cannot
+quietly grow back. The demo is held to the same rule: every message it sends
+(each step of its scenario, and each card's detail) is tested against these
+limits. The device accepts up to 64 KiB, but it parses that in a few hundred
+kilobytes of RAM, which is the number that matters.
 
 When a source needs more detail than fits, the answer is the lazy card
 detail: the summary is polled, and a card's detail lines are fetched only

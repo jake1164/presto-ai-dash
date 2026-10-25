@@ -133,6 +133,8 @@ Any other method than the ones below is answered `501`.
 | GET | `/api/admin/collector` | Download the collector script |
 | GET | `/api/admin/display` | The Home display settings, and whether the environment locks them |
 | PUT | `/api/admin/display` | Save the Home display settings |
+| GET | `/api/admin/demo` | The demo switch, and whether `DASH_DEMO` locks it |
+| PUT | `/api/admin/demo` | Turn demo mode on or off |
 | GET | `/api/admin/alerts` | The alert settings and whether it is quiet now |
 | PUT | `/api/admin/alerts` | Save the alert settings |
 | GET | `/api/admin/sources/{id}/alerts` | One service's alert settings and the resolved values |

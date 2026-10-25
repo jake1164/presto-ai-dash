@@ -35,8 +35,8 @@ or with `mpremote`:
 | `presto/gestures.py` | `/ai_dash_files/gestures.py` |
 | `presto/alerts.py` | `/ai_dash_files/alerts.py` |
 | `presto/popup.py` | `/ai_dash_files/popup.py` |
+| `presto/ticks.py` | `/ai_dash_files/ticks.py` |
 | `presto/ui.py` | `/ai_dash_files/ui.py` |
-| `examples/sample-status.json` | `/ai_dash_files/sample-status.json` |
 
 Only the entry script lives at the root, so the helper modules do not appear
 as extra apps in the carousel. The folder is named `ai_dash_files` on
@@ -56,16 +56,14 @@ and neither belongs in a screenshot.
 Where the device finds your daemon and how it identifies itself:
 
 ```python
-STATIC_DEMO = False
 DAEMON_HOST = "192.168.1.50"
 DAEMON_PORT = 8787
 SHARED_TOKEN = "the same value as daemon.shared_token"
 DEVICE_NAME = "presto"
 ```
 
-`STATIC_DEMO = False` is what makes the app poll the daemon. `True` keeps
-the built-in demo data, which is useful for checking the hardware without a
-daemon.
+The app always polls the daemon. It has no demo data of its own: sample data
+comes from the daemon's [demo mode](../guides/admin-page.md#demo-mode).
 
 `DAEMON_HOST` is the LAN IPv4 address of the machine running the daemon.
 Use an address, not a hostname: name lookup can block on MicroPython and
@@ -134,10 +132,20 @@ keeps trying. See [Daemon offline and Wi-Fi drops](../troubleshooting/daemon-off
 
 ## 6. The demo first
 
-If you want to see the screens before any of this works, set
-`STATIC_DEMO = True` and restart the app. The Home screen then shows fixed
-values labelled **DEMO**, and no network is used at all. That is also the
-quickest way to check the screen, the touch and the LEDs.
+To see the screens without any account, turn on **demo mode** in the daemon's
+admin page (Settings, Demo mode), or start the daemon with `DASH_DEMO=1`. The
+Presto then shows a scripted set of sample accounts, each screen marked with a
+purple **DEMO - SAMPLE DATA** chip, and the daemon makes no provider request
+for it. That is also the quickest way to check the screen, the touch and the
+LEDs. Turn it off to see your real accounts.
+
+You can also try the same screens in a browser, without a Presto:
+[see it running](../demo/index.md).
+
+If no service is set up and demo mode is off, the Presto shows **No services
+set up / Open the admin page**, with an amber bar and LED. That is the first
+screen on a new install: it means the Presto reached the daemon, which has
+nothing to show yet.
 
 ## Polling and failure behaviour
 

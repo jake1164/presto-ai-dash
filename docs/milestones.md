@@ -84,9 +84,15 @@ Corrections (2026-10-21):
 - **M8:** the browser and device-code sign-in, cancellation and logout exist
   as daemon admin API routes, but the admin page has no controls for them;
   sign in with Codex's own login flow.
-- **M9:** graphical-panel coverage was settled on 2026-10-20: the VS Code
-  panel does not run the status line. Panel users get quota from the usage
-  cache reader (Phase 5d) and activity from the local logs reader (Phase 5).
+- **M9 (closed 2026-10-25):** graphical-panel coverage was settled on
+  2026-10-20: the VS Code panel does not run the status line. Panel users get
+  quota from the usage cache reader (Phase 5d) and activity from the local logs
+  reader (Phase 5). On 2026-10-25 the live Presto Claude card was compared with
+  Claude's own usage page: 5h 6% (reset 2:40 PM EDT), weekly 31% (reset
+  Thursday 12:00 AM EDT) and the included credit ($100 of $100, expiring
+  11-05) all matched.
+- **M10 (closed 2026-10-25):** OpenCode Go reporting is implemented and live
+  verified; all three windows matched the Console.
 - **M13:** the setup guide, troubleshooting, limitations and the supported
   paths now exist on the documentation site, and the README and the site
   carry photographs of the real device. The release itself has not started;

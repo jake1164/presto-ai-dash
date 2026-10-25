@@ -36,6 +36,30 @@ stack, which is why the first rule is a network you trust. If you cannot say
 that of your Wi-Fi, use a private network (Tailscale, WireGuard) between the
 Presto's network and the daemon.
 
+Concretely, someone who can capture traffic on that network (another device
+on the same Wi-Fi, a compromised router, a guest on a shared network) gets:
+
+- the shared token, which lets them read your account names and quota
+  percentages and switch one service's alerts on or off, from then on;
+- every status payload as it is fetched.
+
+They do not get a provider key, the admin page or any ability to act on a
+provider account, because none of those cross this port.
+
+**The Presto cannot use TLS, and that will not change soon.** The device
+runs MicroPython with no certificate store, so there is no safe way to check
+a server's certificate on it, and encrypting without checking only hides the
+traffic from a passive listener. The mitigation is the network, not the
+device: a Wi-Fi network you control, a firewall rule, or a VPN. A TLS reverse
+proxy protects collectors and the admin page, but not the Presto's own
+fetches.
+
+**There is one shared token for every Presto.** The daemon cannot tell
+devices apart or revoke one. If a device is lost or you stop trusting a
+network, rotate the shared token and update every device (see
+[If something leaks](#if-something-leaks)). Per-device tokens are a possible
+future change, not a current feature.
+
 Use the firewall to narrow the status port to the Presto and your collectors,
 for example on Windows:
 

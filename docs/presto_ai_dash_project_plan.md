@@ -895,7 +895,9 @@ SQLite telemetry and encrypted recovery of the previous status line. All 285
 tests pass. A real export during normal terminal use reports 5h 0% and Weekly
 34%; authenticated daemon and Presto Home/card checks pass with six accounts
 and seven cards. Terminal reporting is live verified. Graphical-panel coverage
-and a separate comparison against Claude's usage page remain unverified.
+is provided by the usage cache and activity readers. **Closed 2026-10-25:** the
+live Presto card matched Claude's usage page (5h 6%, weekly 31%, both resets,
+and the $100 included credit expiring 11-05).
 
 Goal:
 
@@ -915,6 +917,9 @@ Missing five-hour or weekly readings remain unavailable rather than zero.
 ```
 
 ### Milestone 10: OpenCode Go subscription source
+
+Status: **closed 2026-10-25.** All three windows were confirmed against the
+Console and are shown live on the Presto.
 
 Goal:
 
@@ -1172,17 +1177,15 @@ Use generic icons and original code only. Do not ship provider logos.
 ## 19. Recommended next build sequence
 
 M0–M5 established the static demo, daemon, storage, and local/gateway sources.
-Keep their completed milestone scope unchanged. M7, M10, and the activity part
-of M10a are implemented. M11 is deployed with automated device checks and user
+Keep their completed milestone scope unchanged. M7, M9 and M10 are closed, and
+so is M10a's activity part. M11 is deployed with automated device checks and user
 visual/touch confirmation complete. M12 is implemented: the daemon maps a
 quota percentage onto the status vocabulary, the device tracks every service
 on its own, and the alert settings live in the admin page. The remaining
 sequence is:
 
 ```text
-M8. OpenAI/Codex subscription source
-M9. Claude subscription source
-M10a. Ollama Cloud monthly allowance/balance, if a supported path is verified
+M8. OpenAI/Codex subscription source (live sign-in and expired-login acceptance)
 M13. Documentation and demo release
 ```
 

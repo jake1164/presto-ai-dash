@@ -13,7 +13,7 @@
 </div>
 
 <p align="center">
-  <img src="docs/user/images/device-home.jpg" width="420" alt="Presto AI Dash running on a physical Pimoroni Presto, showing Claude, Codex, OpenCode Go, Ollama Cloud, Ollama, and LiteLLM">
+  <img src="docs/user/images/presto-ai-dash-hero.png" width="960" alt="Presto AI Dash on a physical Pimoroni Presto, with subscription quotas, reset countdowns, local AI health, and six supported AI services">
 </p>
 
 Try it in your browser, no Presto needed: [see it running](https://jake1164.github.io/presto-ai-dash/demo/).

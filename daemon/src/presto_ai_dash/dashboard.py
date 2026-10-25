@@ -328,11 +328,24 @@ def _account_card(row, snapshot, now=None):
                          ([report["error"]] if report.get("error") else []))[:6])
         activity = report.get("activity")
         if activity:
-            primary = "%s requests" % activity["request_count"]
-            secondary = "$%.6f / %s tokens" % (activity["usage_usd"],
-                          activity["input_tokens"] + activity["output_tokens"])
+            if not any(w.get("used_percent") is not None for w in windows):
+                primary = "%s requests" % activity["request_count"]
+                amounts = []
+                if activity.get("usage_usd") is not None:
+                    amounts.append("$%.2f" % activity["usage_usd"])
+                if activity.get("input_tokens") is not None and activity.get("output_tokens") is not None:
+                    amounts.append("%s tokens" % quotas.compact_tokens(
+                        activity["input_tokens"] + activity["output_tokens"]))
+                secondary = " / ".join(amounts)
             details += ["Activity: " + activity["state"],
                         "Period: " + activity["from"][:10] + " - " + activity["until"][:10]]
+        balance = report.get("cloud_balance")
+        if balance:
+            prefix = "Last known " if balance.get("state") == "stale" else ""
+            if "included_remaining_usd" in balance:
+                details.insert(0, prefix + "Included left: $%.2f" % balance["included_remaining_usd"])
+            if "purchased_remaining_usd" in balance:
+                details.insert(1, prefix + "Purchased: $%.2f" % balance["purchased_remaining_usd"])
         extra = _reset_credit_lines(report, now)
         errors = [report["error"]] if report.get("error") else []
         # The window lines are never dropped; the new lines go first.
@@ -519,7 +532,7 @@ DEVICE_QUOTA_KEYS = ("windows", "activity", "hint", "reset_credits", "last_updat
 DEVICE_UPDATE_KEYS = ("age_seconds", "in_use")
 DEVICE_WINDOW_KEYS = ("label", "used_percent", "state", "period_minutes",
                       "resets_at", "observed_at")
-DEVICE_ACTIVITY_KEYS = ("request_count", "usage_usd", "from", "until", "state")
+DEVICE_ACTIVITY_KEYS = ("request_count", "usage_usd", "from", "until", "state", "range")
 DEVICE_RESET_KEYS = ("available", "expires_at")
 DEVICE_METRICS_KEYS = ("requests_today", "tokens_today", "loaded_model", "spend_today",
                        "errors_today", "last_measured_tokens_per_sec", "available_models")

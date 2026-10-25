@@ -45,7 +45,7 @@ INK_FAINT = (105, 105, 112)
 BACKGROUND = (16, 18, 22)
 PANEL = (28, 31, 38)
 DAILY = (65, 225, 255)
-WEEKLY = (135, 62, 210)
+WEEKLY = (178, 125, 255)
 AMBER = (255, 169, 56)
 MONTHLY = AMBER
 LIMIT = (255, 64, 64)
@@ -404,10 +404,11 @@ def _draw_quota_row(display, palette, row, y, row_width, stale):
     _marker(display, palette, row, 14, y, MARKER, stale)
     note, note_rgb = _freshness(row, stale)
     update, update_rgb = _update_note(row, stale)
-    display.set_font("bitmap8")
-    # Firmware wraps at the exact width, so leave slack after the note.
+    display.set_font("bitmap6")
+    # Small secondary notes leave the account name readable at 240px.
     note_w = display.measure_text(note, 1) + 2 if note else 0
     update_w = display.measure_text(update, 1) + 8 if update else 0
+    display.set_font("bitmap8")
     name_x = 14 + MARKER + 4
     space = max(0, row_width - MARKER - 4 - note_w - update_w - 8)
     badge = row.get("reset_badge")
@@ -438,10 +439,13 @@ def _draw_quota_row(display, palette, row, y, row_width, stale):
         _text(display, palette, badge_text, cursor, y,
               AMBER if badge.get("amber") else INK_DIM, scale=1)
     if note:
+        display.set_font("bitmap6")
         _text(display, palette, note, right - note_w, y, note_rgb, scale=1)
     if update:
+        display.set_font("bitmap6")
         _text(display, palette, update, right - note_w - update_w, y, update_rgb, scale=1)
 
+    display.set_font("bitmap8")
     windows = home_windows(row)
     cells = []
     for window in windows:
@@ -1026,7 +1030,7 @@ def _draw_dots(display, palette, index, total, accent_rgb, width, height):
 
 
 def draw_message(display, palette, title, message, accent_rgb=None,
-                 detail=None):
+                 detail=None, demo=False):
     """A full-screen message: offline, connecting, or an error."""
     from alerts import rgb_for_accent
 
@@ -1050,9 +1054,15 @@ def draw_message(display, palette, title, message, accent_rgb=None,
     if detail:
         y = 140
         for line in detail:
+            room = None
+            if demo and y < DEMO_CHIP_Y + DEMO_CHIP_H and y + 6 > DEMO_CHIP_Y:
+                chip_x = demo_chip_rect(display)[0]
+                room = max(0, chip_x - MARGIN - 10)
             _text(display, palette, line, MARGIN + 6, y, INK_DIM, scale=1,
-                  max_chars=DETAIL_MAX)
+                  max_chars=DETAIL_MAX, max_width=room)
             y += DETAIL_LINE_H
+    if demo:
+        _draw_demo_chip(display, palette)
 
 
 def draw_boot(display, palette, message="Starting..."):

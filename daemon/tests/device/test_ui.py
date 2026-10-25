@@ -10,7 +10,7 @@ from cards import Card, parse_cards
 from home import source_rows
 from payloads import sample_payload
 from ui import (DEMO_CHIP_BG, DEMO_CHIP_TEXT, EMPTY_HINT, EMPTY_HINT_MORE,
-                EMPTY_TITLE, Palette, _text, demo_chip_rect, draw_card,
+                EMPTY_TITLE, Palette, _text, demo_chip_rect, draw_card, draw_message,
                 draw_sources, INK)
 
 PREVIEW_DIR = os.path.join(presto_path.REPO_ROOT, "tools", "presto_preview")
@@ -293,6 +293,24 @@ class DemoChipTests(unittest.TestCase):
                 draw_sources(display, Palette(display), rows, 0, 7, demo=demo)
                 texts = [text for text, *_ in display.rows]
                 self.assertEqual(DEMO_CHIP_TEXT in texts, expected)
+
+    def test_full_screen_errors_keep_the_sample_label_without_covering_diagnostics(self):
+        for demo in (False, True):
+            with self.subTest(demo=demo):
+                display = Display()
+                draw_message(display, Palette(display), "Daemon offline", "Simulated loss",
+                             detail=["Retrying...", "Failure count: 3", "Wi-Fi up",
+                                     "Free memory: 100K", "RESET returns to carousel"], demo=demo)
+                self.assertEqual(DEMO_CHIP_TEXT in [row[0] for row in display.rows], demo)
+                if demo:
+                    x, y, width, height = demo_chip_rect(display)
+                    for text, tx, ty, _wrap, scale, font in display.rows:
+                        if text == DEMO_CHIP_TEXT:
+                            continue
+                        display.set_font(font)
+                        overlaps = (x < tx + display.measure_text(text, scale) and tx < x + width and
+                                    y < ty + (8 if font == "bitmap8" else 6) * scale and ty < y + height)
+                        self.assertFalse(overlaps, text)
 
     def test_the_chip_is_a_filled_box_not_a_dim_note(self):
         display = Display()

@@ -2,6 +2,11 @@
 
 ## Current status (2026-10-21)
 
+Update (2026-10-24): Ollama Cloud now reads the documented `/api/balance`
+endpoint for monthly included credit quotas and reset dates, purchased credits,
+and legacy session/weekly limits. Rolling seven-day activity remains separate.
+The older activity-only descriptions below record the original implementation.
+
 **Built:**
 
 - **M0 to M12**: the repository, the static and connected Presto app, the

@@ -43,7 +43,7 @@ flowchart TB
   </tr>
   <tr>
     <td><a href="https://jake1164.github.io/presto-ai-dash/guides/opencode-go/"><strong>OpenCode Go ↗</strong></a><br>Subscription limits &amp; resets</td>
-    <td><a href="https://jake1164.github.io/presto-ai-dash/guides/ollama-cloud/"><strong>Ollama Cloud ↗</strong></a><br>Cloud requests, tokens &amp; spend</td>
+    <td><a href="https://jake1164.github.io/presto-ai-dash/guides/ollama-cloud/"><strong>Ollama Cloud ↗</strong></a><br>Credit balance, quota &amp; rolling activity</td>
   </tr>
   <tr>
     <td><a href="https://jake1164.github.io/presto-ai-dash/guides/ollama/"><strong>Ollama ↗</strong></a><br>Local models &amp; server health</td>

@@ -623,12 +623,16 @@ def source_rows(payload):
             text = ""
             if isinstance(activity, dict):
                 requests, cost = activity.get("request_count"), activity.get("usage_usd")
-                text = ("%s req / $%s" % (requests, ("%.6f" % cost).rstrip("0").rstrip("."))
-                        if quota_value(requests) is not None and quota_value(cost) is not None
-                        else "Activity unavailable")
+                amount = (("%.5f" % cost).rstrip("0").rstrip(".")
+                          if _number(cost) and 0 < cost < 0.01 else "%.2f" % cost if _number(cost) else "")
+                text = "%s req" % requests if quota_value(requests) is not None else "Activity unavailable"
+                if text != "Activity unavailable" and quota_value(cost) is not None:
+                    text += " / $" + amount
                 start, until = iso_seconds(activity.get("from")), iso_seconds(activity.get("until"))
                 if text[0] != "A" and start is not None and until is not None and until > start:
-                    text += " in %dd" % ((until - start + 43200) // 86400)
+                    period = activity.get("range")
+                    text += (" / " + period if period in ("24h", "7d", "30d") else
+                             " in %dd" % ((until - start + 43200) // 86400))
                 if activity.get("state") == "stale":
                     text = "Stale: " + text
             hint = quota.get("hint")

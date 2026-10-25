@@ -55,6 +55,11 @@ main > .panel { min-width: 0; }
 .quota progress { width: 100%; height: 12px; accent-color: #7ce6da; }
 .quota.stale { border-color: #b1c2d7; }
 .quota.stale progress { opacity: .4; }
+.reading-facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 12px 0; }
+.reading-fact { display: flex; flex-direction: column; gap: 5px; padding: 12px 14px;
+  background: #0c1422; border: 1px solid #2a3b53; border-radius: 8px; min-width: 0; }
+.reading-fact strong { font-size: 1.3rem; font-variant-numeric: tabular-nums; }
+.source .reading-title { margin-top: 18px; font-weight: 650; color: #e3edf8; }
 
 /* Tabs: the ARIA tab pattern, with the arrow keys moving between them. */
 .tablist { display: flex; gap: 8px; margin: 20px 0 16px; flex-wrap: wrap; }

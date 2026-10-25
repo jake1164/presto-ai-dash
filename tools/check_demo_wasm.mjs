@@ -76,6 +76,7 @@ const sha = (bytes) => createHash("sha256").update(bytes).digest("hex");
 const got = {};
 globalThis.stepJson = (index) => JSON.stringify(demo.steps[index]);
 globalThis.takeTouch = () => (touches.length ? touches.shift() : "");
+globalThis.queueTestTouch = (event) => touches.push(String(event));
 globalThis.pushFrame = (proxy) => frames.push(sha(toBytes(proxy)));
 globalThis.setLed = (r, g, b) => { led = [r, g, b]; };
 globalThis.checkFrame = (scene, card, proxy) => {
@@ -141,6 +142,19 @@ try {
   await drive(20);
   check(read("driver.driver.app._current_card().id") === "dash", "a swipe right did not return to Home");
 
+  touches.push("down,100,20", "up,100,20");
+  await drive(12);
+  check(read("driver.driver.app._current_card().id") === "demo-opencode", "a Home row tap did not open its account");
+  swipe(50, 190);
+  await drive(20);
+  check(read("driver.driver.app._current_card().id") === "dash", "could not return Home after a row tap");
+
+  touches.push("down,120,180");
+  for (let i = 1; i <= 6; i++) touches.push("move,120," + Math.round(180 - 100 * i / 6));
+  touches.push("up,120,80");
+  await drive(20);
+  check(read("driver.driver.app.home_scroll.offset") > 0, "a vertical drag did not scroll Home");
+
   run("driver.set_failure(True)");
   await drive(3);
   check(read("driver.driver.app.connection_error") !== null, "the Stale switch did not make the poll fail");
@@ -153,10 +167,74 @@ try {
   check(read("driver.driver.app.cards[0].status") === "critical", "critical scene did not reach Home");
   run("driver.run_now(driver.driver.client.post_alert('demo-claude', False))\ndriver.driver.poll_soon()");
   await drive(3);
+  check(read("driver.driver.app.cards[0].status") === "critical", "muting Claude hid Cloud's separate alert");
+  run("driver.run_now(driver.driver.client.post_alert('demo-ollama-cloud', False))\ndriver.driver.poll_soon()");
+  await drive(3);
   check(read("driver.driver.app.cards[0].status") === "ok", "the demo bell did not update Home");
   check(read("driver.driver.app.overall_accent") === "green", "the demo bell did not update the LED");
   check(read("next(card.status for card in driver.driver.app.cards if card.id == 'demo-claude')") === "critical",
     "the demo bell hid the service's real status");
+
+  // Drive the real hold and disconnect timers with a monotonic test clock.
+  // Each new app captures this clock in Uptime, so no real 30-second wait or
+  // replacement app logic is needed.
+  run(`
+demo_ticks = driver.time.ticks_ms
+demo_clock = [demo_ticks()]
+driver.time.ticks_ms = lambda: demo_clock[0]
+try:
+    driver.start(${demo.loop_seconds}, ${demo.step_seconds}, ${demo.steps.length})
+    driver.tick(0)
+    demo_app = driver.driver.app
+    driver.js.queueTestTouch('down,120,130')
+    driver.tick(20)
+    demo_clock[0] += demo_app.long_press_ms + 20
+    driver.tick(demo_app.long_press_ms + 20)
+    demo_muted = demo_app.alerts.muted
+    driver.js.queueTestTouch('up,120,130')
+    demo_clock[0] += 20
+    driver.tick(20)
+    demo_clock[0] += 200
+    driver.js.queueTestTouch('down,120,130')
+    driver.tick(20)
+    demo_clock[0] += demo_app.long_press_ms + 20
+    driver.tick(demo_app.long_press_ms + 20)
+    demo_unmuted = not demo_app.alerts.muted
+    driver.js.queueTestTouch('up,120,130')
+    demo_clock[0] += 20
+    driver.tick(20)
+    driver.set_failure(True)
+    driver.tick(0)
+    demo_retained = demo_app.connection_error is not None and demo_app._connection_screen() is None
+    demo_clock[0] += 27000
+    driver.tick(27000)
+    demo_still_stale = demo_app._connection_screen() is None
+    demo_clock[0] += 4000
+    driver.tick(4000)
+    demo_offline = demo_app._connection_screen() is not None
+    demo_offline_red = driver.driver.display.pixels[0] > driver.driver.display.pixels[1]
+    import ui
+    demo_chip_x, demo_chip_y, _, _ = ui.demo_chip_rect(driver.driver.display)
+    demo_chip_at = (demo_chip_y * driver.driver.display.width + demo_chip_x) * 3
+    demo_chip_rgb = driver.driver.display.pixels[demo_chip_at:demo_chip_at + 3]
+    demo_offline_chip = demo_chip_rgb[0] > demo_chip_rgb[1] and demo_chip_rgb[2] > demo_chip_rgb[1]
+    driver.set_failure(False)
+    driver.jump(${demo.scenes[demo.scenes.length - 1].start})
+    driver.tick(0)
+    demo_recovered = (demo_app.connection_error is None and demo_app._connection_screen() is None
+                      and demo_app.cards[0].status == 'ok' and demo_app.demo)
+finally:
+    driver.time.ticks_ms = demo_ticks
+`);
+  for (const [name, message] of [
+    ["demo_muted", "a hold did not mute"], ["demo_unmuted", "a second hold did not unmute"],
+    ["demo_retained", "daemon loss discarded the last good screen"],
+    ["demo_still_stale", "daemon loss showed offline before 30 seconds"],
+    ["demo_offline", "daemon loss did not show offline after 30 seconds"],
+    ["demo_offline_red", "the offline screen was not red"],
+    ["demo_offline_chip", "the offline screen lost its sample-data label"],
+    ["demo_recovered", "the screen did not recover after a prolonged daemon loss"],
+  ]) check(read(name) === true, message);
 
   // Exercise the driver's poll scheduler across a full loop without sleeping.
   run(`

@@ -194,6 +194,36 @@ def _no_tiles(report, metrics, now):
     return []
 
 
+def _cloud_tiles(report, metrics, now):
+    """Monthly included credits stay separate from purchased funds and activity."""
+    tiles = []
+    balance = report.get("cloud_balance")
+    if isinstance(balance, dict):
+        stale = balance.get("state") == "stale"
+        tone = "dim" if stale else "normal"
+        for key, label in (("included_remaining_usd", "left"),
+                           ("purchased_remaining_usd", "bought")):
+            value = _number(balance.get(key))
+            if value is not None:
+                tiles.append(tile(("old buy" if label == "bought" else "old " + label) if stale else label,
+                                  "$%s" % _money(value), tone))
+        for window in report.get("windows", []):
+            if window.get("id") == "monthly_credits" and _number(window.get("limit_amount")) is not None:
+                tiles.append(tile("included", "$%s" % _money(window["limit_amount"]), tone))
+    activity = _activity_tiles(report, metrics, now)
+    period = report.get("activity", {}).get("range")
+    if period:
+        labels = {"requests": "req " + period, "tokens": "tok " + period, "spend": "$ " + period}
+        for item in activity:
+            if item:
+                item["label"] = labels[item["label"]]
+    if report.get("activity", {}).get("state") == "stale":
+        for item in activity:
+            if item:
+                item["tone"] = "dim"
+    return tiles + activity
+
+
 def _generic_tiles(report, metrics, now):
     """Anything else: the activity it carries. Windows are quota rows."""
     return _activity_tiles(report, metrics, now)
@@ -204,7 +234,7 @@ BUILDERS = {
     "codex": _codex_tiles,
     "litellm": _litellm_tiles,
     "ollama": _ollama_tiles,
-    "ollama_cloud": _activity_tiles,
+    "ollama_cloud": _cloud_tiles,
     "opencode_go": _no_tiles,
     "opencode": _no_tiles,
 }

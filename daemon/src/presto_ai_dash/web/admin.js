@@ -634,7 +634,7 @@
     element("source-help").textContent = type?.id === "ollama" ?
       "Monitors local Ollama health and loaded models. The local API needs no key; this does not monitor Ollama Cloud subscription quotas." :
       type?.id === "opencode_go" ? "Read-only subscription meters for your OpenCode Go account. This does not make model requests or sum tokens into quotas." :
-      type?.id === "ollama_cloud" ? "Reads dated cloud activity. Monthly allowance and remaining credits are not returned by the current API; local Ollama is a separate source." :
+      type?.id === "ollama_cloud" ? "Reads monthly included credits, purchased balance and reset dates (or legacy limits), plus separate rolling 7-day activity. Local Ollama is a separate source." :
       type?.id === "codex" ? "Reads Codex subscription quotas using your ChatGPT login in Codex. Leave both paths blank for automatic discovery and the default profile. Separate accounts need separate Codex profile directories. OAuth stays with Codex; no pay-per-use API key is needed. Browser and device-code sign-in, cancellation, and logout are available through the Codex login controls." :
       type?.id === "claude" ? "Claude Code exports 5h/weekly subscription quotas after normal terminal responses. Save this source, then set up its exporter below. Readings go straight to the database; existing status-line output is preserved. No API key is needed. Idle readings become stale; the VS Code panel does not run the status line, but the optional usage cache reader reads the numbers Claude Code caches on disk for its /usage dialog." : "";
     // The setup guide stays inside the editor, below the source description.
@@ -1232,18 +1232,44 @@
         }
         readings.append(meter);
       }
+      const balance = source.quota.cloud_balance;
+      if (balance) {
+        const facts = el("div", "reading-facts");
+        for (const [key, label] of [["included_remaining_usd", "Included credits left"],
+                                   ["purchased_remaining_usd", "Purchased credits left"]]) {
+          if (typeof balance[key] !== "number") continue;
+          const fact = el("div", "reading-fact");
+          fact.append(el("span", "note", (balance.state === "stale" ? "Last known · " : "") + label),
+            el("strong", "", "$" + balance[key].toFixed(2))); facts.append(fact);
+        }
+        if (facts.children.length) readings.append(facts);
+      }
       if (source.quota.error) {
         const error = document.createElement("p"); error.textContent = source.quota.error; readings.append(error);
       }
       if (source.quota.activity) {
         const activity = source.quota.activity;
-        const summary = document.createElement("p");
-        summary.textContent = (activity.state === "stale" ? "Stale activity: " : "Reported activity: ") + activity.request_count + " requests · $" +
-          activity.usage_usd.toFixed(6) + " · " + (activity.input_tokens + activity.output_tokens) + " tokens";
-        readings.append(summary);
+        const heading = el("p", "reading-title", (activity.state === "stale" ? "Last known activity" : "Activity") +
+          (activity.range ? " · rolling " + activity.range : " · reported period"));
+        readings.append(heading);
+        const facts = el("div", "reading-facts");
+        const money = (amount) => new Intl.NumberFormat(undefined,
+          {style: "currency", currency: "USD", maximumFractionDigits: amount > 0 && amount < .01 ? 5 : 2}).format(amount);
+        const measurements = [["Requests", activity.request_count.toLocaleString()]];
+        if (typeof activity.usage_usd === "number") measurements.push(["Activity spend", money(activity.usage_usd)]);
+        if (typeof activity.input_tokens === "number" && typeof activity.output_tokens === "number") {
+          measurements.push(["Tokens", new Intl.NumberFormat(undefined, {notation: "compact", maximumFractionDigits: 2})
+            .format(activity.input_tokens + activity.output_tokens)]);
+        }
+        for (const [label, value] of measurements) {
+          const fact = el("div", "reading-fact");
+          fact.append(el("span", "note", label), el("strong", "", value)); facts.append(fact);
+        }
+        readings.append(facts);
         const range = document.createElement("p"); range.className = "note";
-        range.textContent = "Period: " + new Date(activity.from).toLocaleString() + " – " +
-          new Date(activity.until).toLocaleString(); readings.append(range);
+        range.textContent = new Date(activity.from).toLocaleDateString() + " – " +
+          new Date(activity.until).toLocaleString() + " · separate from billing month"; readings.append(range);
+        if (activity.error) readings.append(el("p", "note", activity.error));
       }
       if (source.quota.note) {
         const note = document.createElement("p"); note.className = "note";

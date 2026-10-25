@@ -18,9 +18,9 @@ from .codex_login import CodexLoginManager
 from .collectors import (collector_config_text, collector_info, presto_collector,
                           served_version, update_state)
 from .config import (ALERT_KEYS, alert_base_settings, alert_settings,
-                     ingest_enabled, overflow_rows)
+                     demo_enabled, ingest_enabled, overflow_rows)
 from .credentials import load_cipher
-from .dashboard import build_card_details, build_instance_payload, device_view
+from .dashboard import build_card_details, build_instance_payload, device_view, lazy_cards
 from .effective import effective_settings, uptime_label, uptime_seconds
 from .http_client import origin_of
 from .problems import ProblemBuffer
@@ -264,6 +264,25 @@ class SourceConfiguration:
                 "ingest is set by DASH_INGEST_ENABLED; edit the environment to change it")
         self.storage.save_ingest_enabled(data["enabled"])
         return self.ingest_state()
+
+    def demo_state(self):
+        """The demo switch; the environment locks the control.
+
+        While it is on, the daemon serves sample data to the device and to
+        the status API instead of the real accounts. It writes nothing.
+        """
+        return {"enabled": demo_enabled(self.config, self.storage.demo_enabled_setting()),
+                "locked_by_environment": os.environ.get("DASH_DEMO") is not None}
+
+    def set_demo_enabled(self, data):
+        if not isinstance(data, dict) or set(data) != {"enabled"} or \
+                type(data["enabled"]) is not bool:
+            raise ValueError("demo needs an enabled boolean")
+        if self.demo_state()["locked_by_environment"]:
+            raise ConfigurationConflict(
+                "demo mode is set by DASH_DEMO; edit the environment to change it")
+        self.storage.save_demo_enabled(data["enabled"])
+        return self.demo_state()
 
     def display_state(self):
         """The Home display settings; the environment locks the control."""
@@ -619,9 +638,7 @@ class SourceConfiguration:
         if lazy:
             # The card's lines and tiles are fetched when the card is opened,
             # so the poll stays small.
-            for card in payload.get("cards", []):
-                if isinstance(card, dict):
-                    card.pop("detail", None)
+            lazy_cards(payload)
         # The Home display settings travel with the payload, so a change
         # applies on the next poll without restarting the daemon.
         payload["display"] = {"overflow_rows": self.display_state()["overflow_rows"]}

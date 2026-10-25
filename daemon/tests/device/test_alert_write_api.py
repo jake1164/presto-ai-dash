@@ -25,7 +25,6 @@ from admin.test_management import ManagementBase
 class AlertWriteBase(ManagementBase):
     def setUp(self):
         super().setUp()
-        self.disable_fake()
         self.row = self.manager.save({"type": "litellm", "name": "Gateway",
                                       "enabled": True,
                                       "config": {"base_url": "http://localhost:4000"}})

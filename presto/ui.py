@@ -115,6 +115,27 @@ ALERT_MARK_CUT = (
     (2, 4, 2, 2),
 )
 
+# The demo chip: sample data must be obvious, so it is a filled box with
+# bright text, not a dim note. Purple, because green, blue, yellow and red
+# already mean a status. It takes the right end of the footer line: above
+# the page dots, below the last list row, and left of nothing, beside the
+# STALE line (which then keeps to the space on its left).
+DEMO_CHIP_TEXT = "DEMO - SAMPLE DATA"
+DEMO_CHIP_BG = (150, 60, 220)
+DEMO_CHIP_Y = 208
+DEMO_CHIP_H = 10
+DEMO_CHIP_PAD = 3
+DEMO_CHIP_FONT = "bitmap6"
+
+# The empty Home: no service is set up, so there is nothing to show. Amber,
+# not green: an empty screen is not a healthy one. The text names the action
+# and never a URL: the device does not know the daemon's address for a
+# browser.
+EMPTY_TITLE = "No services set up"
+EMPTY_HINT = "Open the admin page"
+EMPTY_HINT_MORE = "on the daemon host"
+EMPTY_ACCENT = "yellow"
+
 
 def bar_layout(count):
     """The bar heights of a row and the gap between them.
@@ -237,6 +258,37 @@ def _draw_mute_chip(display, palette, text, width=240):
     return (x, y, box_width, box_height)
 
 
+def demo_chip_rect(display, width=240):
+    """Where the demo chip is drawn: (x, y, w, h).
+
+    The right end of the footer line. It is above the page dots (which start
+    at height - 15), below the last list row (which ends at SOURCE_TOP +
+    SOURCE_HEIGHT), and clear of the mute chip (which starts at y 218).
+    """
+    display.set_font(DEMO_CHIP_FONT)
+    box_width = display.measure_text(DEMO_CHIP_TEXT, 1) + 2 * DEMO_CHIP_PAD + 1
+    return (max(0, width - MARGIN - box_width), DEMO_CHIP_Y, box_width,
+            DEMO_CHIP_H)
+
+
+def _draw_demo_chip(display, palette, width=240, height=240):
+    """Say, clearly, that these numbers are sample data, not an account."""
+    x, y, box_width, box_height = demo_chip_rect(display, width)
+    display.set_pen(palette.pen(DEMO_CHIP_BG))
+    display.rectangle(x, y, box_width, box_height)
+    display.set_font(DEMO_CHIP_FONT)
+    _text(display, palette, DEMO_CHIP_TEXT, x + DEMO_CHIP_PAD, y + 2, INK,
+          scale=1, max_width=box_width - 2 * DEMO_CHIP_PAD + 1)
+    return (x, y, box_width, box_height)
+
+
+def _footer_width(display, width, demo, x=MARGIN + 6):
+    """The space a footer line keeps free so the demo chip has its own room."""
+    if not demo:
+        return None
+    return max(0, demo_chip_rect(display, width)[0] - 8 - x)
+
+
 def _draw_bell(display, palette, x, y, rgb, slashed=False, crossed=False):
     """A bell made of rectangles, with a slash or a cross when asked."""
     display.set_pen(palette.pen(rgb))
@@ -269,79 +321,6 @@ def _draw_alert_mark(display, palette, x, y):
     display.set_pen(palette.pen(BACKGROUND))
     for dx, dy, w, h in ALERT_MARK_CUT:
         display.rectangle(x + dx, y + dy, w, h)
-
-
-def draw_home(display, palette, quotas, index, total, muted=False,
-              width=240, height=240, scroll=0, mute_text=None):
-    """Scrollable demo quotas with a pinned title, legend, and footer."""
-    from alerts import rgb_for_accent
-    from home import (LIST_TOP, LIST_HEIGHT, ROW_HEIGHT, bar_fill, quota_label,
-                      scroll_limit)
-
-    display.set_pen(palette.pen(BACKGROUND))
-    display.clear()
-    accent = rgb_for_accent("green", 0.45 if muted else 1.0)
-    display.set_pen(palette.pen(accent))
-    display.rectangle(0, 0, 5, height)
-    display.set_font("bitmap8")
-    _text(display, palette, "Home", 14, TITLE_Y, INK, scale=2)
-    display.set_font("bitmap6")
-    _text(display, palette, "DEMO", width - 42, 12, INK_DIM, scale=1)
-
-    # Daily above weekly: shared scale, separate lanes so neither is hidden.
-    display.set_pen(palette.pen(DAILY))
-    display.rectangle(14, 33, 16, 6)
-    _text(display, palette, "Daily", 36, 32, DAILY, scale=1, max_width=70)
-    display.set_pen(palette.pen(WEEKLY))
-    display.rectangle(120, 33, 16, 6)
-    _text(display, palette, "Weekly", 142, 32, WEEKLY, scale=1)
-
-    bar_width = width - 14 - MARGIN
-    limit = scroll_limit(len(quotas) * ROW_HEIGHT, LIST_HEIGHT)
-    scroll = max(0, min(limit, int(scroll)))
-    display.set_clip(14, LIST_TOP, bar_width, LIST_HEIGHT)
-    for index_in_list, quota in enumerate(quotas):
-        y = LIST_TOP + index_in_list * ROW_HEIGHT - scroll
-        if y + ROW_HEIGHT <= LIST_TOP or y >= LIST_TOP + LIST_HEIGHT:
-            continue
-        display.set_font("bitmap8")
-        _text(display, palette, quota["name"], 14, y, INK, scale=2,
-              max_width=bar_width)
-        display.set_pen(palette.pen(TRACK))
-        display.rectangle(14, y + 20, bar_width, 6)
-        display.rectangle(14, y + 28, bar_width, 6)
-        weekly_width = bar_fill(quota.get("weekly"), bar_width)
-        daily_width = bar_fill(quota.get("daily"), bar_width)
-        if daily_width:
-            display.set_pen(palette.pen(DAILY))
-            display.rectangle(14, y + 20, daily_width, 6)
-        if weekly_width:
-            display.set_pen(palette.pen(WEEKLY))
-            display.rectangle(14, y + 28, weekly_width, 6)
-        display.set_font("bitmap6")
-        _text(display, palette, "D " + quota_label(quota.get("daily")),
-              14, y + 36, DAILY, scale=1, max_width=98)
-        _text(display, palette, "W " + quota_label(quota.get("weekly")),
-              120, y + 36, WEEKLY, scale=1)
-
-    display.remove_clip()
-    if limit:
-        # A thumb shows that more rows exist and which end of the list is near.
-        rail_x = width - 5
-        thumb_height = max(12, LIST_HEIGHT * LIST_HEIGHT // (len(quotas) * ROW_HEIGHT))
-        thumb_y = LIST_TOP + (LIST_HEIGHT - thumb_height) * scroll // limit
-        display.set_pen(palette.pen(PANEL))
-        display.rectangle(rail_x, LIST_TOP, 2, LIST_HEIGHT)
-        display.set_pen(palette.pen(INK_DIM))
-        display.rectangle(rail_x, thumb_y, 2, thumb_height)
-
-    display.set_font("bitmap6")
-    footer = "Swipe up/down - %d demos" % len(quotas) if limit else "% of each period's limit"
-    _text(display, palette, footer, 14, 208,
-          INK_DIM, scale=1)
-    _draw_dots(display, palette, index, total, accent, width, height)
-    if muted:
-        _draw_mute_chip(display, palette, mute_text or "MUTED", width)
 
 
 def _window_hue(window):
@@ -621,14 +600,17 @@ def _draw_strip(display, palette, layout, scroll, stale):
 
 def draw_sources(display, palette, rows, index, total, status="offline",
                  muted=False, width=240, height=240, scroll=0, stale=False,
-                 layout=None, mute_text=None):
+                 layout=None, mute_text=None, demo=False):
     """Live Home: the accounts in the saved order, quota rows and local ones."""
     from alerts import rgb_for_accent
     from cards import accent_for
     from home import SOURCE_TOP
     display.set_pen(palette.pen(BACKGROUND))
     display.clear()
-    accent = rgb_for_accent(accent_for(status), 0.45 if muted else 1.0)
+    # An empty list is not a healthy one: amber asks for a look, where the
+    # status colour would call an unconfigured daemon "ok".
+    accent_name = accent_for(status) if rows else EMPTY_ACCENT
+    accent = rgb_for_accent(accent_name, 0.45 if muted else 1.0)
     display.set_pen(palette.pen(accent))
     display.rectangle(0, 0, 5, height)
 
@@ -641,8 +623,14 @@ def draw_sources(display, palette, rows, index, total, status="offline",
     row_width = width - 14 - MARGIN
     display.set_clip(14, SOURCE_TOP, row_width, region)
     if not rows:
+        display.set_font("bitmap8")
+        _text(display, palette, EMPTY_TITLE, 14, SOURCE_TOP + 10, INK,
+              scale=1, max_width=row_width)
         display.set_font("bitmap6")
-        _text(display, palette, "No sources enabled", 14, SOURCE_TOP, INK_DIM, scale=1)
+        _text(display, palette, EMPTY_HINT, 14, SOURCE_TOP + 28, INK_DIM,
+              scale=1, max_width=row_width)
+        _text(display, palette, EMPTY_HINT_MORE, 14, SOURCE_TOP + 40, INK_DIM,
+              scale=1, max_width=row_width)
     y = SOURCE_TOP - scroll
     list_bottom = SOURCE_TOP + region
     for row, row_height, compact in layout.rows:
@@ -671,9 +659,10 @@ def draw_sources(display, palette, rows, index, total, status="offline",
     _draw_strip(display, palette, layout, scroll, stale)
     display.set_font("bitmap6")
     if stale:
-        _text(display, palette, "STALE - retrying", 14, 210, INK_DIM, scale=1)
-    elif rows and all(row["type"] == "fake" for row in rows):
-        _text(display, palette, "FAKE DATA", 14, 210, INK_DIM, scale=1)
+        _text(display, palette, "STALE - retrying", 14, 210, INK_DIM, scale=1,
+              max_width=_footer_width(display, width, demo, 14))
+    if demo:
+        _draw_demo_chip(display, palette, width, height)
     _draw_dots(display, palette, index, total, accent, width, height)
     if muted:
         _draw_mute_chip(display, palette, mute_text or "MUTED", width)
@@ -833,7 +822,7 @@ def _draw_tiles(display, palette, tiles, x, y, width):
 def draw_card(display, palette, card, index, total, muted=False,
               width=240, height=240, stale=False, alerts=None, message=None,
               quota=None, marks=None, detail=None, tiles=None, loading=False,
-              failed=False, detail_open=False, mute_text=None):
+              failed=False, detail_open=False, mute_text=None, demo=False):
     """Draw one card.
 
     ``index``/``total`` drive the page dots at the bottom. ``muted`` dims the
@@ -973,14 +962,18 @@ def draw_card(display, palette, card, index, total, muted=False,
               MARGIN + 6, y, INK_FAINT, scale=1, max_chars=DETAIL_MAX)
 
     # Page dots
+    footer_width = _footer_width(display, width, demo)
     if message:
         # A short line above the dots: what went wrong, or what to do.
         display.set_font("bitmap6")
         _text(display, palette, message, MARGIN + 6, 208, INK, scale=1,
-              max_chars=DETAIL_MAX)
+              max_chars=DETAIL_MAX, max_width=footer_width)
     elif stale:
         display.set_font("bitmap6")
-        _text(display, palette, "STALE - retrying", MARGIN + 6, 208, INK_DIM, scale=1)
+        _text(display, palette, "STALE - retrying", MARGIN + 6, 208, INK_DIM,
+              scale=1, max_width=footer_width)
+    if demo:
+        _draw_demo_chip(display, palette, width, height)
     _draw_dots(display, palette, index, total, accent_rgb, width, height)
 
     # Mute indicator: the chip says how long the mute has left.

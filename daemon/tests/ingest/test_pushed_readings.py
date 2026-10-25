@@ -72,7 +72,6 @@ def usage_cache(now=None, **changes):
 class PushBase(ManagementBase):
     def setUp(self):
         super().setUp()
-        self.disable_fake()
         self.claude = self.manager.save({"type": "claude", "name": "Claude", "enabled": True,
                                          "config": {"settings_path": str(Path(self.temp.name) / "s.json")}})
         self.codex = self.manager.save({"type": "codex", "name": "Codex", "enabled": True,

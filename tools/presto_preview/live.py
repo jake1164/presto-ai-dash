@@ -1,7 +1,7 @@
 """Run the Presto app live in a browser window.
 
     python tools/presto_preview/live.py            # polls the daemon in presto/config.py
-    python tools/presto_preview/live.py --demo     # STATIC_DEMO Home, no network
+    python tools/presto_preview/live.py --demo     # the scripted demo, no daemon
     python tools/presto_preview/live.py --open     # also open the default browser
     open http://127.0.0.1:8790/
 
@@ -29,7 +29,8 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 import render  # noqa: E402
-from framebuffer import Framebuffer, encode_png  # noqa: E402
+from framebuffer import Framebuffer  # noqa: E402
+from png import encode_png  # noqa: E402
 from presto_bundle import sync_status  # noqa: E402
 
 WATCHED = (render.PRESTO_DIR, HERE)
@@ -97,8 +98,10 @@ class LivePresto(object):
 class Runner(object):
     """Owns one App thread; restarts it on demand with freshly imported code."""
 
-    def __init__(self, demo=False):
+    def __init__(self, demo=False, scene=None):
         self.demo = demo
+        from demo_client import DEFAULT_SCENE
+        self.scene = scene or DEFAULT_SCENE
         self.network_fail = False
         self.cond = threading.Condition()
         self.frame = 0
@@ -122,10 +125,18 @@ class Runner(object):
     def snapshot(self, after, timeout=20):
         with self.cond:
             self.cond.wait_for(lambda: self.frame != after, timeout)
+            from demo_client import SCENES
             return {"frame": self.frame, "led": self.led, "error": self.error,
                     "demo": self.demo, "network_fail": self.network_fail,
+                    "scene": self.scene, "scenes": list(SCENES),
                     "code_revision": self.code_revision,
                     "device_sync": sync_status(self.code_revision)}
+
+    def set_scene(self, name):
+        """Jump the demo loop to a scene. Restarts, so the new offset applies."""
+        self.scene = name
+        if self.demo:
+            self.restart()
 
     def stop(self):
         if self._thread:
@@ -153,7 +164,12 @@ class Runner(object):
             draw_boot(display, Palette(display), "Starting...")
             presto.update()
             app = main.App(presto)
-            app.static_demo = self.demo
+            if self.demo:
+                # The demo never contacts the daemon: its client answers from
+                # the daemon's own demo module, in this process, starting at
+                # the chosen scene.
+                from demo_client import DemoClient, scene_offset
+                app.client = DemoClient(offset=scene_offset(self.scene))
             fetch = app.client.fetch_async
 
             async def fetch_async():
@@ -285,6 +301,11 @@ def make_handler(runner):
                 if "demo" in body and bool(body["demo"]) != runner.demo:
                     runner.demo = bool(body["demo"])
                     runner.restart()
+                if "scene" in body:
+                    from demo_client import SCENES
+                    name = str(body["scene"])
+                    if name in SCENES:
+                        runner.set_scene(name)
                 if body.get("restart"):
                     runner.restart()
                 return self._json({"ok": True})
@@ -334,8 +355,10 @@ button { font: inherit; background: #21262d; color: #c9d1d9; border: 1px solid #
 </style></head><body>
 <div id="bezel"><img id="screen" alt="Presto screen" draggable="false" src="/frame.png"><pre id="error"></pre></div>
 <div class="controls">
-  <label id="demo-label" title="Runs the app the way the device does when STATIC_DEMO is on: it never contacts the daemon. Home shows built-in sample quotas (OpenAI, Claude, Ollama Cloud, OpenCode.ai) marked DEMO, and the cards come from the built-in sample data. Use it to work on the layout without real accounts or a running daemon. Untick to go back to live data."><input type="checkbox" id="demo"> Static demo</label>
-  <label id="netfail-label" title="Makes every daemon request fail, as if the daemon were off or unreachable. The app keeps its last good data marked 'STALE - retrying', then after 30 seconds switches to the red 'Daemon offline' screen, exactly as the device does. Untick to watch it recover. Your real daemon is not affected. Not available in static demo, which makes no requests."><input type="checkbox" id="netfail"> Simulate network failure</label>
+  <label id="demo-label" title="Runs the app on the scripted demo instead of the daemon: it never contacts anything. The same sample accounts the daemon's demo mode and the published demo page show, with the device's own screens. Untick to go back to live data."><input type="checkbox" id="demo"> Demo</label>
+  <label id="scene-label" title="Jumps the demo to one of its scenes. The loop keeps playing from there, so you can watch a scene progress instead of waiting for it.">Scene
+    <select id="scene"></select></label>
+  <label id="netfail-label" title="Makes every fetch fail, as if the daemon were off or unreachable. The app keeps its last good data marked 'STALE - retrying', then after 30 seconds switches to the red 'Daemon offline' screen, exactly as the device does. Untick to watch it recover. Your real daemon is not affected."><input type="checkbox" id="netfail"> Simulate network failure</label>
   <button id="restart" type="button" title="Restarts the app from boot, back on Home, with the current presto/*.py code. Saving a presto file already does this automatically, so use it to reset the app's state, such as scroll position, mute, or a stuck screen.">Restart app</button>
 </div>
 <div class="hint">Drag to swipe or scroll &middot; click to tap &middot; hold 0.7s to mute.
@@ -401,6 +424,7 @@ button { font: inherit; background: #21262d; color: #c9d1d9; border: 1px solid #
   });
 
   document.getElementById("demo").addEventListener("change", (e) => post("/control", {demo: e.target.checked}));
+  document.getElementById("scene").addEventListener("change", (e) => post("/control", {scene: e.target.value}));
   document.getElementById("netfail").addEventListener("change", (e) => post("/control", {network_fail: e.target.checked}));
   document.getElementById("restart").addEventListener("click", () => post("/control", {restart: true}));
 
@@ -421,9 +445,18 @@ button { font: inherit; background: #21262d; color: #c9d1d9; border: 1px solid #
         errorBox.textContent = state.error || "";
         if (!offlineUrl) cacheOffline();
         document.getElementById("demo").checked = state.demo;
-        document.getElementById("netfail").disabled = state.demo;
+        const scene = document.getElementById("scene");
+        if (state.scenes && scene.options.length !== state.scenes.length) {
+          scene.replaceChildren(...state.scenes.map((name) => {
+            const option = document.createElement("option");
+            option.value = name; option.textContent = name; return option;
+          }));
+        }
+        scene.value = state.scene;
+        scene.disabled = !state.demo;
         document.getElementById("netfail").checked = state.network_fail;
-        status.textContent = (state.demo ? "static demo" : "live daemon") + " · frame " + frame +
+        status.textContent = (state.demo ? "demo (sample data) · " + state.scene
+          : "live daemon") + " · frame " + frame +
           (state.network_fail ? " · network failing" : "");
         const sync = state.device_sync || {status: "not_checked"};
         const revision = (state.code_revision || "unknown").slice(0, 12);
@@ -483,7 +516,8 @@ def open_tabs(first, preview_url, wait=30):
 
 def main_cli(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--demo", action="store_true", help="STATIC_DEMO Home; no network")
+    parser.add_argument("--demo", action="store_true",
+                        help="start with Demo on: the scripted sample data, no daemon")
     parser.add_argument("--port", type=int, default=8790)
     parser.add_argument("--open", action="store_true", help="open the page in the default browser")
     parser.add_argument("--open-first", action="append", default=[], metavar="URL",

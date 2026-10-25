@@ -17,13 +17,13 @@ swipe/tap navigation, LEDs, optional sound, and local HTTP polling over Wi-Fi.
 The desktop/server daemon is the brain: source collection, provider secrets,
 normalization, SQLite history, and `/api/v1/status`.
 
-M1 runs static data entirely on the device. M2 added the daemon API and fake
-source; M3 added internal SQLite history, UTC ordering, alert observations,
+M1 runs static data entirely on the device. M2 added the daemon API and a
+demo source; M3 added internal SQLite history, UTC ordering, alert observations,
 and 72-hour retention. M4/M5 add Ollama health and LiteLLM routed usage.
 The connected Presto app polls with cooperative asyncio tasks. On-device Wi-Fi,
-authenticated fake-data polling, and recovery are verified in `milestones.md`.
-Trend calculations remain later work. Static preview mode remains available
-through `STATIC_DEMO`.
+authenticated polling, and recovery are verified in `milestones.md`.
+Trend calculations remain later work. The device's built-in static demo is gone:
+sample data is served by the daemon's demo mode instead.
 
 The simulator is a host adapter around the same `presto/` App and renderer.
 `tools/presto_bundle.py` is the shared source/deployment inventory; no separate
@@ -195,7 +195,8 @@ polling health cannot reconstruct request history. An optional future
 
 ## Scope / Non-goals
 
-Implemented source types are `fake`, `ollama`, and `litellm`; the real
+Implemented source types are `ollama`, `litellm`, `opencode_go`, `ollama_cloud`,
+`codex`, and `claude`; the real
 local/gateway integrations were delivered in M4/M5. The active M6–M11 plan
 adds subscription quota monitoring for OpenAI/Codex, Claude, and OpenCode Go,
 subject to verified reporting paths. Multiple configured accounts share a quota

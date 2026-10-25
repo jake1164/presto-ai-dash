@@ -8,7 +8,7 @@
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![MicroPython](https://img.shields.io/badge/Device-MicroPython-2b8a73)
 
-[**Documentation**](https://jake1164.github.io/presto-ai-dash/) · [**Get Started**](https://jake1164.github.io/presto-ai-dash/getting-started/install-the-daemon/) · [**Request a Source**](https://github.com/jake1164/presto-ai-dash/issues/new/choose) · [**♥ Support**](#support-development)
+[**Live Demo**](https://jake1164.github.io/presto-ai-dash/demo/) · [**Documentation**](https://jake1164.github.io/presto-ai-dash/) · [**Get Started**](https://jake1164.github.io/presto-ai-dash/getting-started/install-the-daemon/) · [**Request a Source**](https://github.com/jake1164/presto-ai-dash/issues/new/choose) · [**♥ Support**](#support-development)
 
 </div>
 
@@ -16,9 +16,13 @@
   <img src="docs/user/images/device-home.jpg" width="420" alt="Presto AI Dash running on a physical Pimoroni Presto, showing Claude, Codex, OpenCode Go, Ollama Cloud, Ollama, and LiteLLM">
 </p>
 
+Try it in your browser, no Presto needed: [see it running](https://jake1164.github.io/presto-ai-dash/demo/).
+
 ## Your AI usage at a glance
 
 Presto AI Dash turns a **Pimoroni Presto touchscreen** into a dedicated monitor for AI subscription quotas, reset countdowns, and local AI services. Swipe between service cards, see warnings at a glance, and know when a reading is stale or unavailable.
+
+Provider collection is **read-only**: the app never sends prompts, spends credits, or changes plans or limits. API keys are encrypted in the daemon's database; the Presto never holds a provider key.
 
 > [!IMPORTANT]
 > **A separate computer or server is required.** This is **not a standalone app that runs entirely on the Presto**. You must run the **Python daemon as a background process or Docker container** on a computer/server on your network. It collects the data and keeps provider credentials; the Presto connects over Wi-Fi to display readings and control its own alerts.
@@ -58,8 +62,10 @@ Presto AI Dash is designed to grow. Request a new provider, subscription, or loc
 ## Get started
 
 1. [Install the daemon](https://jake1164.github.io/presto-ai-dash/getting-started/install-the-daemon/) or [run it with Docker](https://jake1164.github.io/presto-ai-dash/getting-started/install-with-docker/) **on your computer or server**.
-2. [Add your first source](https://jake1164.github.io/presto-ai-dash/getting-started/add-the-first-source/), or use simulated data to explore the dashboard.
+2. [Add your first source](https://jake1164.github.io/presto-ai-dash/getting-started/add-the-first-source/), or enable **Demo mode** on the admin page's **Settings** tab. It shows six sample accounts, marks them with a DEMO chip, and writes nothing.
 3. [Set up the Presto](https://jake1164.github.io/presto-ai-dash/getting-started/set-up-the-presto/) to connect over Wi-Fi.
+
+For Claude and Codex with a Docker daemon, run a [remote collector](https://jake1164.github.io/presto-ai-dash/guides/remote-collectors/) on the computer where you use them.
 
 For configuration, troubleshooting, security, and detailed limitations, see the [documentation](https://jake1164.github.io/presto-ai-dash/) and [privacy notes](https://jake1164.github.io/presto-ai-dash/privacy/).
 
@@ -77,5 +83,7 @@ If Presto AI Dash is useful, a **GitHub star** helps others discover it. Sponsor
 **Pimoroni and maker projects:** [Presto Snake](https://github.com/jake1164/presto-snake) · [Awesome Pimoroni Presto](https://github.com/jake1164/awesome-Pimoroni-Presto) · [Waveshare Weather Clock](https://github.com/jake1164/Pico-RGB-Matrix-Weather-Clock) · [Tempest Weather Clock](https://github.com/jake1164/tempest-led-weather-clock)
 
 **Self-hosted software:** [Family Librarian](https://github.com/jake1164/family-librarian) · [M3Undle](https://github.com/Sydney-Elvis/M3Undle)
+
+Developers: [contribution guide](CONTRIBUTING.md) · [running the tests](https://jake1164.github.io/presto-ai-dash/developers/running-the-tests/) · [internal notes](docs/README.md).
 
 MIT licensed. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).

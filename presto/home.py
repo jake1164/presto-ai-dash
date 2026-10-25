@@ -1,4 +1,4 @@
-"""Live source/quota rows, static preview data, and bounded Home scrolling.
+"""Live source/quota rows and bounded Home scrolling.
 
 Home lists the accounts in the saved order. When the list is taller than the
 list area, the rows that are not fully visible are named in a strip at the
@@ -11,7 +11,6 @@ from gestures import DRAG_SLOP_PX
 
 LIST_TOP = 56
 LIST_HEIGHT = 150
-ROW_HEIGHT = 50
 
 # Live Home: the accounts in the order they are saved. A quota account is two
 # lines; a local service among quota rows is one compact line.
@@ -63,13 +62,6 @@ STRIP_GAP = 4
 STRIP_SEPARATOR = 8
 STRIP_SLACK = 2
 STRIP_MIN_CHARS = 4
-
-DEMO_QUOTAS = (
-    {"name": "OpenAI", "daily": 62, "weekly": 38},
-    {"name": "Claude", "daily": 84, "weekly": 68},
-    {"name": "Ollama Cloud", "daily": 93, "weekly": 79},
-    {"name": "OpenCode.ai", "daily": 27, "weekly": 54},
-)
 
 
 def scroll_limit(total_height, height=LIST_HEIGHT):

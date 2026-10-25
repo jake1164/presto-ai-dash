@@ -35,7 +35,6 @@ def envelope(percent=23.5, host="laptop", windows=True):
 class IngestApiBase(ManagementBase):
     def setUp(self):
         super().setUp()
-        self.disable_fake()
         self.row = self.manager.save({"type": "claude", "name": "Claude personal",
                                       "enabled": True,
                                       "config": {"settings_path": str(Path(self.temp.name) / "settings.json")}})

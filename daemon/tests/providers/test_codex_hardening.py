@@ -103,7 +103,6 @@ class ExecutableSettingTests(unittest.TestCase):
 
 class ExecutableSavedThroughTheAdminTests(ManagementBase):
     def test_the_manager_refuses_the_setting_and_stores_nothing(self):
-        self.disable_fake()
         before = self.storage.source_instances()
         with self.assertRaisesRegex(ValueError, "named codex"):
             self.manager.save({"type": "codex", "name": "Codex",
@@ -111,7 +110,6 @@ class ExecutableSavedThroughTheAdminTests(ManagementBase):
         self.assertEqual(self.storage.source_instances(), before)
 
     def test_an_edit_that_swaps_in_another_program_is_refused(self):
-        self.disable_fake()
         row = self.manager.save({"type": "codex", "name": "Codex", "config": {}})
         with self.assertRaisesRegex(ValueError, "network share"):
             self.manager.save({"revision": row["revision"],

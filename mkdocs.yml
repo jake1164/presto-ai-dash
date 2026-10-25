@@ -76,8 +76,15 @@ markdown_extensions:
 plugins:
   - search
 
+extra_css:
+  - demo/demo.css
+
+extra_javascript:
+  - demo/demo.js
+
 nav:
   - Home: index.md
+  - See It Running: demo/index.md
   - Getting Started:
       - What Presto AI Dash Does: getting-started/what-it-does.md
       - Install the Daemon: getting-started/install-the-daemon.md

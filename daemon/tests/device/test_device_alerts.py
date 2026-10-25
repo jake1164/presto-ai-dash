@@ -13,8 +13,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import presto_path
-from alerts import rgb_for_accent
-from net import embedded_payload
+from alerts import led_brightness, led_pattern, rgb_for_accent
+from payloads import sample_payload
 from device.test_ui import Display
 
 
@@ -24,7 +24,7 @@ class DeviceAlertTests(unittest.IsolatedAsyncioTestCase):
             "device_alert_app_for_test",
             os.path.join(presto_path.PRESTO_DIR, "main.py"))
         self.module = importlib.util.module_from_spec(spec)
-        with patch.dict(sys.modules, {"config": SimpleNamespace(STATIC_DEMO=False)}):
+        with patch.dict(sys.modules, {"config": SimpleNamespace()}):
             spec.loader.exec_module(self.module)
         self.leds = []
         self.device = SimpleNamespace(
@@ -54,8 +54,8 @@ class DeviceAlertTests(unittest.IsolatedAsyncioTestCase):
 
     def payload(self, statuses=None, alerts=None, count=3):
         """A payload with one source per status, in the given order."""
-        statuses = statuses or ["ok", "ok", "ok"]
-        payload = embedded_payload()
+        statuses = ["ok", "ok", "ok"] if statuses is None else statuses
+        payload = sample_payload()
         payload["card_order"] = "accounts"
         payload["sources"] = [
             {"id": "s%d" % index, "type": "codex", "name": "Service %d" % index,
@@ -93,6 +93,18 @@ class DeviceAlertTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_first_reading_is_silent(self):
         await self.poll(self.payload(["critical", "ok", "ok"]))
         self.assertEqual(self.tones, [])
+
+    async def test_an_empty_payload_is_amber_and_starts_nothing(self):
+        """No service set up is not an alarm: amber, silent, and no pop."""
+        await self.poll(self.loud([]))
+        self.assertEqual(self.tones, [])
+        self.assertIsNone(self.app.popup.poll(1.0, self.app.home_layout, 0))
+        expected = led_pattern(
+            "yellow",
+            brightness=led_brightness(self.app.led_brightness, self.app.quiet),
+            muted=self.app.alerts.muted,
+            dim_when_muted=self.app.led_dim_when_muted)
+        self.assertEqual(self.led(), expected)
 
     async def test_a_service_that_gets_worse_chirps_once(self):
         await self.poll(self.loud(["ok", "ok", "ok"]))

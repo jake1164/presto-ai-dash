@@ -119,7 +119,6 @@ class NestedJsonTests(BodyServer):
 class ServerBase(ManagementBase):
     def setUp(self):
         super().setUp()
-        self.disable_fake()
         self.row = self.manager.save({"type": "claude", "name": "Claude", "enabled": True,
                                       "config": {"settings_path": str(Path(self.temp.name) / "settings.json")}})
         self.api = ApiServer("127.0.0.1", 0, self.storage, "device-token-0123456789",

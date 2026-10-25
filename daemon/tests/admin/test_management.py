@@ -47,10 +47,6 @@ class ManagementBase(unittest.TestCase):
         self.addCleanup(self.storage.close)
         self.manager = SourceConfiguration(self.storage, self.config)
 
-    def disable_fake(self):
-        row = next(row for row in self.manager.list_sources()["sources"] if row["type"] == "fake")
-        return self.manager.save({"enabled": False, "revision": row["revision"]}, row["id"])
-
     def add_litellm(self, name="Book app gateway", key="test-provider-key", enabled=False):
         return self.manager.save({"type": "litellm", "name": name, "enabled": enabled,
                                   "api_key": key, "config": {"base_url": "http://localhost:4000"}})
@@ -58,7 +54,6 @@ class ManagementBase(unittest.TestCase):
 
 class EncryptedConfigurationTests(ManagementBase):
     def test_account_order_survives_restart_edits_and_new_accounts(self):
-        self.disable_fake()
         first = self.add_litellm("First", enabled=True)
         second = self.add_litellm("Second", enabled=True)
         original = [row["id"] for row in self.manager.list_sources()["sources"]]
@@ -176,7 +171,7 @@ class EncryptedConfigurationTests(ManagementBase):
             self.storage._conn.execute("DELETE FROM configuration_meta")
         with self.assertRaisesRegex(ValueError, "verifier is missing"):
             SourceConfiguration(self.storage, self.config)
-        self.assertEqual(len(self.storage.source_instances()), 5)
+        self.assertEqual(len(self.storage.source_instances()), 4)
 
     def test_key_file_round_trip_and_no_silent_replacement(self):
         with clean_env():
@@ -199,7 +194,6 @@ class EncryptedConfigurationTests(ManagementBase):
         payload = self.manager.status_payload()
         self.assertEqual(payload["sources"], [])
         self.assertEqual([card["id"] for card in payload["cards"]], ["dash"])
-        self.assertNotIn("fake source", json.dumps(payload))
 
     def test_environment_key_is_imported_once_and_never_published(self):
         storage = Storage(":memory:")
@@ -260,16 +254,12 @@ class EncryptedConfigurationTests(ManagementBase):
             with self.subTest(data=data), self.assertRaises(ValueError):
                 self.manager.save(data)
 
-    def test_multiple_instances_and_fake_exclusivity(self):
-        with self.assertRaisesRegex(ValueError, "disable demo"):
-            self.add_litellm(enabled=True)
-        self.disable_fake()
+    def test_multiple_instances_each_get_their_own_card(self):
         first = self.add_litellm("One", enabled=True)
         second = self.add_litellm("Two", enabled=True)
         self.assertNotEqual(first["id"], second["id"])
         self.storage.save_snapshot(SourceSnapshot(first["id"], "ok", metrics={"requests_today": 4}))
         self.storage.save_snapshot(SourceSnapshot(second["id"], "warning", metrics={"requests_today": 8}))
-        self.storage.save_snapshot(SourceSnapshot("fake", "critical", metrics={"tokens_today": 999}))
         payload = self.manager.status_payload()
         self.assertEqual(payload["overall_status"], "warning")
         self.assertEqual(len(payload["sources"]), 2)
@@ -278,7 +268,6 @@ class EncryptedConfigurationTests(ManagementBase):
                          ["4 requests today", "8 requests today"])
 
     def test_runtime_reloads_keys_and_rejects_stale_observations(self):
-        self.disable_fake()
         public = self.add_litellm(enabled=True)
         runtime = ManagedCollector(self.manager, self.config, threading.Event())
         with patch.object(LiteLLMSource, "collect",
@@ -425,7 +414,6 @@ class AdminHttpTests(AdminServerBase):
         self.assertEqual(self.request(token=None, headers={"Cookie": other_cookie})[0], 200)
 
     def test_cloud_accounts_are_managed_by_cookie_and_keep_keys_in_database(self):
-        self.disable_fake()
         cookie, session, _ = self.login()
         headers = {"Cookie": cookie, "Origin": self.base_url,
                    "X-CSRF-Token": session["csrf_token"]}
@@ -552,8 +540,6 @@ class ManagedDaemonTests(ManagementBase):
             daemon = Daemon(self.config).setup().start()
             try:
                 manager = daemon.source_configuration
-                fake = next(row for row in manager.list_sources()["sources"] if row["type"] == "fake")
-                manager.save({"enabled": False, "revision": fake["revision"]}, fake["id"])
                 ollama = next(row for row in manager.list_sources()["sources"] if row["type"] == "ollama")
                 manager.save({"enabled": True, "revision": ollama["revision"]}, ollama["id"])
                 deadline = time.monotonic() + 3

@@ -207,7 +207,7 @@ device and forget the whitelist, that test fails.
 
 It also proves that the device draws exactly the same screens from the slim
 payload as from the full one, and that the payload stays inside the size
-budget: 5000 bytes in total, 1000 bytes per account.
+budget: 5000 bytes per poll response, 1000 bytes per account within it.
 
 So a quota source needs **no device change at all**. The daemon builds the
 card, the Home row and the bars from the same contract every quota source
@@ -225,6 +225,34 @@ push_window_ids = ("five_hour", "seven_day")
 The ingest validator then only accepts those window IDs for that source.
 See [Writing a collector](writing-a-collector.md).
 
+## Demo data
+
+Every source needs demo data. This is a rule, not a suggestion: a test fails
+until you add it.
+
+The demo is how a reader sees your source before they own an account for it,
+and it is what keeps the clickable demo on the documentation site, the
+preview's Demo checkbox and the daemon's demo mode showing the same thing. A
+source with no demo account would simply be missing from all three.
+
+1. Open `daemon/src/presto_ai_dash/demo.py`.
+2. Add an account of your type to `ACCOUNTS`: an id that starts with `demo-`,
+   your connector's `id`, and the name shown on the screen.
+3. Add a builder next to `_claude` and `_opencode` that returns a
+   `SourceSnapshot` for a loop second, and add the account to `demo_pairs`.
+   Give it realistic windows with the provider's own labels, and have the
+   numbers move through the scenes (`calm`, `climbing`, `warning`,
+   `near_limit`, `critical`, `rate_limited`, `offline`, `recovery`), so the
+   states that matter for your source are drawn.
+4. Run the suite. `daemon/tests/core/test_demo.py` fails if a registered source
+   type has no demo account, and it also checks that every message the demo
+   sends stays inside the size budget (see
+   [the status payload](../reference/status-payload.md)).
+
+The demo never contacts a provider and never takes an action on an account: it
+builds readings from numbers in the file. A demo account is not an account
+row, and it cannot collide with a real one.
+
 ## The checklist
 
 1. The class is in `sources/`, is decorated with `@register`, and has a
@@ -240,6 +268,7 @@ See [Writing a collector](writing-a-collector.md).
    unreachable service and a rejected key.
 10. The account appears in the admin page, the card draws correctly, and the
     payload stays inside the budget.
+11. `demo.py` has a demo account of the new type, and the suite is green.
 
 ## See also
 

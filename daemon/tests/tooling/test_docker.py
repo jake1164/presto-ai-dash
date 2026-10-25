@@ -159,9 +159,15 @@ class ComposeTests(unittest.TestCase):
                      "DASH_LOG_LEVEL", "DASH_SHARED_TOKEN", "DASH_ADMIN_TOKEN",
                      "DASH_ADMIN_HOST", "DASH_ADMIN_ALLOWED_HOSTS",
                      "DASH_INGEST_ENABLED", "DASH_ENCRYPTION_KEY",
-                     "DASH_OVERFLOW_ROWS"):
+                     "DASH_OVERFLOW_ROWS", "DASH_DEMO"):
             with self.subTest(name=name):
                 self.assertIn(name + ":", self.text)
+
+    def test_demo_mode_is_documented_and_off_by_default(self):
+        """The variable is listed, but commented out: a container starts live."""
+        lines = [line.strip() for line in self.text.splitlines()]
+        self.assertIn('# DASH_DEMO: "1"', lines)
+        self.assertFalse(any(line.startswith("DASH_DEMO:") for line in lines))
 
     def test_no_token_is_written_in_the_file(self):
         # Only placeholders: the values come from the environment.

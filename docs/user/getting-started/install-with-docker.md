@@ -344,6 +344,7 @@ hold any of them:
 | `DASH_KEY_FILE` | The key file. `/data/dash.db.key`. |
 | `DASH_ENCRYPTION_KEY` | The encryption master key, instead of the key file. |
 | `DASH_INGEST_ENABLED` | The remote reports switch. `0` by default. |
+| `DASH_DEMO` | Demo mode: sample data instead of the real accounts. Off unless set to `1`. |
 | `DASH_LOG_LEVEL` | `INFO` by default. |
 | `DASH_OVERFLOW_ROWS` | The Home overflow strip. `1` by default. |
 | `TZ` | The time zone of the process. |

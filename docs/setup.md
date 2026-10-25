@@ -118,7 +118,8 @@ curl -H "Authorization: Bearer your-token-here" \
      http://<daemon-host>:8787/api/v1/status
 ```
 
-You should get JSON with three cards, all driven by the `fake` source.
+You should get JSON with one Home card and an empty source list: nothing is
+configured yet, and the daemon invents no reading.
 Without the bearer token, or with a wrong token, this endpoint returns 401.
 Validate config without starting the daemon with `presto-ai-dash --check --config dash.toml`.
 Stop the daemon with Ctrl+C.
@@ -138,6 +139,7 @@ database while the daemon is stopped to reset demo history.
 | `DASH_PORT` | `daemon.port` |
 | `DASH_DATABASE` | `daemon.database` |
 | `DASH_INGEST_ENABLED` | `daemon.ingest_enabled`, the stored remote-reports toggle |
+| `DASH_DEMO` | `demo.enabled`, the stored demo-mode toggle |
 
 Prefer these for anything secret so it never lands in a file.
 
@@ -145,6 +147,11 @@ Prefer these for anything secret so it never lands in a file.
 (case-insensitive) and overrides both the stored toggle and the TOML value;
 it locks the admin page's remote-reports switch read-only. An invalid value
 fails closed: the daemon logs the error and keeps the route off.
+
+`DASH_DEMO` takes the same words and wins over the stored toggle and
+`[demo] enabled`, and it locks the admin page's demo switch. While demo mode is
+on, the device and the status API show sample data instead of the real
+accounts. An invalid value fails closed: demo mode stays off.
 
 ## 2. Flash and configure the Presto
 
@@ -206,8 +213,10 @@ see the launcher, download the latest `with-filesystem` `.uf2` from the
 hold **BOOT** while tapping **RESET**, and drag the `.uf2` onto the `RP2350`
 drive.
 
-The first hardware checkpoint uses the existing static fake-data demo. It
-needs no Wi-Fi credentials or running daemon.
+The first hardware checkpoint needs Wi-Fi credentials and a running daemon: the
+app has no built-in sample mode. With no service configured, Home says
+**No services set up / Open the admin page**, with an amber bar and LED, which
+is the confirmation that the device reaches the daemon.
 
 Keep the device's existing `main.py` carousel launcher. Create `/ai_dash_files` on
 the device and copy files using [Thonny](https://thonny.org/) (interpreter:
@@ -224,7 +233,6 @@ the device and copy files using [Thonny](https://thonny.org/) (interpreter:
 | `presto/gestures.py` | `/ai_dash_files/gestures.py` |
 | `presto/alerts.py` | `/ai_dash_files/alerts.py` |
 | `presto/ui.py` | `/ai_dash_files/ui.py` |
-| `examples/sample-status.json` | `/ai_dash_files/sample-status.json` |
 
 Only the entry script lives at the root, so helper modules do not appear as
 extra carousel apps. The entry script explicitly starts the app when imported
@@ -232,29 +240,27 @@ by the firmware launcher.
 Use the distinct folder name shown above: MicroPython would import a folder
 named `/ai_dash` instead of running the root `/ai_dash.py` entry.
 
-Press **RESET**, find **AI Dash** in the firmware carousel, and tap it. Home
-shows OpenAI, Claude, Ollama Cloud, and OpenCode.ai quota bars with a **DEMO** label: these
-are illustrative values, not real account usage. Each provider has one combined
-meter with two stacked lanes: cyan **daily** on top and purple **weekly** below,
-separated by a small gap. Both percentages remain visible, each against its
-own period's limit. Colours identify periods rather than severity. Missing
-quotas show `--`; over-limit percentages remain numeric while the fill caps
-at 100%. There is no period toggle.
+Press **RESET**, find **AI Dash** in the firmware carousel, and tap it. With no
+service configured, Home says **No services set up / Open the admin page** and
+the accent bar and LED are amber. Add an account on the admin page and the
+account rows replace it on the next poll.
 
-Three rows fit at once. Drag up/down on the list to reveal the fourth demo;
-the title and legend stay fixed and the scrollbar shows position. Daily and
-weekly values for OpenCode.ai are illustrative, not a real usage integration.
+Each account row shows its name and its allowance windows, one bar per window,
+with the reset time of the window that binds first. Status colours follow the
+warning and critical thresholds. Missing values show `--`; over-limit
+percentages remain numeric while the fill caps at 100%.
 
-Swipe left/right to reach the existing Ollama and LiteLLM static cards.
-Home remembers its scroll position when returning from another card.
-Long-press should toggle the MUTED indicator. Press **RESET**
-to return to the firmware carousel.
+The list is taller than the screen once several accounts are configured. Drag
+up/down to scroll it; a strip below the list names the rows that do not fit.
+Swipe left/right to reach the account cards. Home remembers its scroll position
+when returning from another card. Long-press toggles the MUTED indicator.
+Press **RESET** to return to the firmware carousel.
 
 ### Connect the Presto to the daemon
 
-The app supports both modes. Set `STATIC_DEMO = False` in
-`/ai_dash_files/config.py` for authenticated daemon polling. `True` keeps the
-static cloud quota design preview.
+The app polls the daemon; there is no offline demo mode on the device. Sample
+data comes from the daemon's demo mode, which the admin page's Settings tab
+switches on and off.
 
 1. Start the daemon using the VS Code profile or terminal command above.
    Give `daemon.shared_token` a persistent value in private `dash.toml`.
@@ -287,10 +293,9 @@ another computer. The firmware connection API is documented in
 
 Live Home lists enabled source instances and measured request/token counts or
 loaded-model information. Multiple gateways remain separate; unknown usage
-shows **Usage unavailable**. Fake daemon data is labelled **FAKE**, while real
-instances are labelled **LIVE**. The illustrative daily/weekly cloud bars are
-available in static mode only. Swipe left/right for Ollama and LiteLLM; Home
-scrolls when enough instances are configured.
+shows **Usage unavailable**. While the daemon's demo mode is on, the screen
+shows its sample accounts with a **DEMO - SAMPLE DATA** chip. Swipe left/right
+for the account cards; Home scrolls when enough instances are configured.
 
 Polling runs every `POLL_INTERVAL` seconds (default 15). Wi-Fi and HTTP waits
 yield to the touch/render loop. Failed requests retry every `RETRY_INTERVAL`
@@ -317,11 +322,11 @@ For browser-based configuration, start with `--admin` and open
 Sources and encrypted keys are then managed in SQLite. See
 [configuration.md](configuration.md) for account editing and key recovery.
 
-The example config runs the fake source by default. To use Ollama or LiteLLM,
-set `sources.fake.enabled = false`, then set the desired source's `enabled`
-to `true` and configure its `base_url`. The config rejects mixing fake and live
-sources. LiteLLM can read its key from `LITELLM_API_KEY`; Ollama's optional
-`samples_file` only reads observations supplied by an external collector.
+The example config enables no source. To use Ollama or LiteLLM, set the
+desired source's `enabled` to `true` and configure its `base_url`, or add a
+subscription account in the admin page. LiteLLM can read its key from
+`LITELLM_API_KEY`; Ollama's optional `samples_file` only reads observations
+supplied by an external collector.
 Neither source sends prompts. See `docs/sources.md` for measured fields and
 limits.
 

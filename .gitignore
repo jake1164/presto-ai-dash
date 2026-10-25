@@ -46,5 +46,8 @@ Thumbs.db
 .preview/
 .playwright-mcp/
 
+# The clickable demo's generated assets (tools/build_demo_site.py)
+docs/user/demo/app/
+
 # Agent scratch notes and reviews, never published
 .ai_docs/

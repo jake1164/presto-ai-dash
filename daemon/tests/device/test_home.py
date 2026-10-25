@@ -10,19 +10,22 @@ from unittest.mock import patch
 
 import presto_path
 from datetime import datetime, timedelta, timezone
-from home import (quota_row_height, DEMO_QUOTAS, HomeScroll, LOCAL_ROW, ROW_HEIGHT, SOURCE_HEIGHT, SOURCE_ROW,
+from home import (quota_row_height, HomeScroll, LOCAL_ROW, SOURCE_HEIGHT, SOURCE_ROW,
                   SOURCE_TOP, STRIP_LINE_HEIGHT, alert_settings, binding_window,
                   home_total_height, quota_label, quota_width, scroll_limit, source_rows)
-from net import embedded_payload
+from payloads import sample_payload
 from presto_ai_dash.models import SourceSnapshot
 from presto_ai_dash.quotas import quota_report, quota_window
 from admin.test_management import ManagementBase
 from device.test_ui import Display
-from ui import (AMBER, TRACK, DAILY, WEEKLY, INK_DIM, Palette, build_home_layout, draw_home,
+from ui import (AMBER, TRACK, DEMO_CHIP_TEXT, INK_DIM, Palette, build_home_layout,
                 draw_sources)
 
 
 HOME_NOW = datetime(2026, 10, 18, 12, tzinfo=timezone.utc)
+# A convenient row height for the scrolling arithmetic; Home's real rows are
+# sized by their bars (see quota_row_height).
+ROW = 50
 
 
 def iso_past(**delta):
@@ -30,13 +33,30 @@ def iso_past(**delta):
     return (HOME_NOW - timedelta(**delta)).isoformat()
 
 
-class QuotaTests(unittest.TestCase):
-    def test_demo_daily_and_weekly_values(self):
-        self.assertEqual([row["name"] for row in DEMO_QUOTAS],
-                         ["OpenAI", "Claude", "Ollama Cloud", "OpenCode.ai"])
-        self.assertEqual([row["daily"] for row in DEMO_QUOTAS], [62, 84, 93, 27])
-        self.assertEqual([row["weekly"] for row in DEMO_QUOTAS], [38, 68, 79, 54])
+def assert_layout(case, display):
+    """Every row fits its width and no two rows of text overlap."""
+    boxes = []
+    for row, clip in zip(display.rows, display.row_clips):
+        text, x, y, wrap, scale, font = row
+        display.set_font(font)
+        width = display.measure_text(text, scale)
+        height = (8 if font == "bitmap8" else 6) * scale
+        case.assertLessEqual(width, wrap, text)
+        case.assertLessEqual(x + width, display.width - 8, text)
+        if clip:
+            bottom = min(y + height, clip[1] + clip[3])
+            y = max(y, clip[1])
+            height = bottom - y
+            if height <= 0:
+                continue
+        case.assertLess(y + height, 240, text)
+        for previous, px, py, pw, ph in boxes:
+            intersects = x < px + pw and px < x + width and y < py + ph and py < y + height
+            case.assertFalse(intersects, (text, previous))
+        boxes.append((text, x, y, width, height))
 
+
+class QuotaTests(unittest.TestCase):
     def test_missing_or_invalid_usage_is_not_zero(self):
         for value in (None, "62", True, -1, float("nan"), float("inf")):
             with self.subTest(value=value):
@@ -54,76 +74,6 @@ class QuotaTests(unittest.TestCase):
             self.assertEqual(quota_width(percent, 218), round(218 * percent / 100))
 
 
-class HomeLayoutTests(unittest.TestCase):
-    def assert_layout(self, display):
-        boxes = []
-        for row, clip in zip(display.rows, display.row_clips):
-            text, x, y, wrap, scale, font = row
-            display.set_font(font)
-            width = display.measure_text(text, scale)
-            height = (8 if font == "bitmap8" else 6) * scale
-            self.assertLessEqual(width, wrap, text)
-            self.assertLessEqual(x + width, display.width - 8, text)
-            if clip:
-                bottom = min(y + height, clip[1] + clip[3])
-                y = max(y, clip[1])
-                height = bottom - y
-                if height <= 0:
-                    continue
-            self.assertLess(y + height, 240, text)
-            for previous, px, py, pw, ph in boxes:
-                intersects = x < px + pw and px < x + width and y < py + ph and py < y + height
-                self.assertFalse(intersects, (text, previous))
-            boxes.append((text, x, y, width, height))
-
-    def test_both_periods_fit_without_text_overlap(self):
-        for offset, visible in ((0, DEMO_QUOTAS[:3]), (50, DEMO_QUOTAS[1:])):
-            display = Display()
-            draw_home(display, Palette(display), DEMO_QUOTAS, 0, 3, scroll=offset)
-            self.assert_layout(display)
-            texts = [row[0] for row in display.rows]
-            self.assertIn("Home", texts)
-            self.assertIn("DEMO", texts)
-            for quota in visible:
-                self.assertIn(quota["name"], texts)
-                self.assertIn("D " + quota_label(quota["daily"]), texts)
-                self.assertIn("W " + quota_label(quota["weekly"]), texts)
-            self.assertIsNone(display.clip)
-
-    def test_mid_drag_is_clipped_below_pinned_header(self):
-        display = Display()
-        draw_home(display, Palette(display), DEMO_QUOTAS, 0, 3, scroll=25)
-        self.assert_layout(display)
-        self.assertIn((14, 56, 218, 150), display.row_clips)
-        self.assertIsNone(display.row_clips[0])
-        self.assertIsNone(display.row_clips[-1])
-
-    def test_stacked_lanes_keep_both_periods_visible(self):
-        for daily, weekly in ((62, 38), (38, 62), (62, 62), (None, 62), (62, None)):
-            with self.subTest(daily=daily, weekly=weekly):
-                display = Display()
-                draw_home(display, Palette(display),
-                          [{"name": "Test", "daily": daily, "weekly": weekly}], 0, 3)
-                bars = [(pen, rect) for pen, rect in display.rectangles if rect[1] >= 56 and rect[0] == 14]
-                self.assertEqual(bars[:2], [(TRACK, (14, 76, 218, 6)),
-                                            (TRACK, (14, 84, 218, 6))])
-                fills = bars[2:]
-                expected = []
-                if daily is not None:
-                    expected.append((DAILY, (14, 76, quota_width(daily, 218), 6)))
-                if weekly is not None:
-                    expected.append((WEEKLY, (14, 84, quota_width(weekly, 218), 6)))
-                self.assertEqual(fills, expected)
-
-    def test_unknown_usage_and_muted_footer_fit(self):
-        rows = [dict(quota) for quota in DEMO_QUOTAS]
-        rows[2]["daily"] = None
-        display = Display()
-        draw_home(display, Palette(display), rows, 0, 3, muted=True)
-        self.assert_layout(display)
-        self.assertIn("D --", [row[0] for row in display.rows])
-        self.assertIn("MUTED", [row[0] for row in display.rows])
-
 
 class AppHomeTests(unittest.TestCase):
     def setUp(self):
@@ -139,7 +89,7 @@ class AppHomeTests(unittest.TestCase):
         self.app = self.module.App(self.device)
         with patch.object(self.module, "_now_ms", return_value=0), \
                 patch.object(self.module, "_ticks_diff", side_effect=lambda a, b: a - b):
-            self.app._set_payload(embedded_payload())
+            self.app._set_payload(sample_payload())
 
     def touch(self, state, x, y, moment):
         self.device.touch.state = state
@@ -149,35 +99,34 @@ class AppHomeTests(unittest.TestCase):
                 patch.object(self.module, "_ticks_diff", side_effect=lambda a, b: a - b):
             self.app._handle_gestures(self.app._poll_touch())
 
-    def test_home_is_first_and_renders_demo(self):
+    def test_home_is_first_and_lists_the_accounts(self):
         self.app._render()
         self.assertEqual(self.app.index, 0)
-        self.assertIn("Home", [row[0] for row in self.device.display.rows])
-        self.assertIn("DEMO", [row[0] for row in self.device.display.rows])
+        texts = [row[0] for row in self.device.display.rows]
+        self.assertIn("OpenCode Go", texts)
+        self.assertIn("Claude", texts)
 
-    def test_home_tap_keeps_both_periods_visible(self):
-        self.touch(True, 170, 40, 0)
+    def test_a_tap_that_hits_no_row_leaves_home_alone(self):
+        # y=2 is above the list, so the tap is neither a row nor a page dot.
+        self.touch(True, 170, 2, 0)
         self.touch(False, 0, 0, 80)
         self.app._render()
-        texts = [row[0] for row in self.device.display.rows]
-        self.assertIn("D 62%", texts)
-        self.assertIn("W 38%", texts)
         self.assertEqual(self.app.index, 0)
         self.assertFalse(self.app.detail_open)
 
-    def test_swipe_left_goes_to_existing_ollama_card(self):
+    def test_swipe_left_goes_to_the_next_card(self):
         self.touch(True, 200, 120, 0)
         self.touch(True, 50, 120, 80)
         self.touch(False, 0, 0, 120)
-        self.assertEqual(self.app._current_card().id, "ollama")
+        self.assertEqual(self.app._current_card().id, "go")
 
-    def test_swipe_right_wraps_to_existing_litellm_card(self):
+    def test_swipe_right_wraps_to_the_last_card(self):
         self.touch(True, 50, 120, 0)
         self.touch(True, 200, 120, 80)
         self.touch(False, 0, 0, 120)
-        self.assertEqual(self.app._current_card().id, "litellm")
+        self.assertEqual(self.app._current_card().id, "li")
 
-    def test_vertical_drag_follows_finger_and_reveals_fourth_demo(self):
+    def test_vertical_drag_follows_finger_and_reveals_a_later_row(self):
         self.app._render()
         self.assertFalse(self.app._needs_redraw)
         self.touch(True, 120, 170, 0)
@@ -187,24 +136,57 @@ class AppHomeTests(unittest.TestCase):
         self.assertEqual(self.app.home_scroll.offset, 25)
         self.touch(True, 120, 90, 200)
         self.touch(False, 0, 0, 300)
-        self.assertEqual(self.app.home_scroll.offset, 50)
+        # The list is taller than its area: the drag stops at its end.
+        self.assertEqual(self.app.home_scroll.offset, self.app.home_scroll.limit)
+        self.assertGreater(self.app.home_scroll.limit, 25)
         self.assertEqual(self.app.index, 0)
         self.assertFalse(self.app.detail_open)
         self.assertFalse(self.app.alerts.muted)
         self.app._render()
-        self.assertIn("OpenCode.ai", [row[0] for row in self.device.display.rows])
+        self.assertIn("Ollama Cloud", [row[0] for row in self.device.display.rows])
         self.touch(True, 120, 100, 600)
         self.touch(True, 120, 200, 700)
         self.touch(False, 0, 0, 800)
         self.assertEqual(self.app.home_scroll.offset, 0)
 
     def test_horizontal_swipe_preserves_list_position(self):
-        self.app.home_scroll.offset = 50
+        self.app.home_scroll.offset = 25
         self.touch(True, 200, 120, 0)
         self.touch(True, 50, 120, 80)
         self.touch(False, 0, 0, 120)
-        self.assertEqual(self.app._current_card().id, "ollama")
-        self.assertEqual(self.app.home_scroll.offset, 50)
+        self.assertEqual(self.app._current_card().id, "go")
+        self.assertEqual(self.app.home_scroll.offset, 25)
+
+    def test_a_payload_without_the_demo_key_never_draws_the_chip(self):
+        self.assertFalse(self.app.demo)
+        with patch.object(self.module, "_now_ms", return_value=0), \
+                patch.object(self.module, "_ticks_diff", side_effect=lambda a, b: a - b):
+            self.app._render()
+        self.assertNotIn(DEMO_CHIP_TEXT, [row[0] for row in self.device.display.rows])
+
+    def test_only_a_real_boolean_turns_the_chip_on(self):
+        for value, expected in (("yes", False), (1, False), (True, True)):
+            with self.subTest(value=value):
+                payload = sample_payload()
+                payload["demo"] = value
+                with patch.object(self.module, "_now_ms", return_value=0), \
+                        patch.object(self.module, "_ticks_diff", side_effect=lambda a, b: a - b):
+                    self.app._set_payload(payload)
+                    self.app._render()
+                self.assertEqual(self.app.demo, expected)
+                self.assertEqual(DEMO_CHIP_TEXT in [row[0] for row in self.device.display.rows],
+                                 expected)
+
+    def test_the_chip_is_on_the_cards_too(self):
+        payload = sample_payload()
+        payload["demo"] = True
+        with patch.object(self.module, "_now_ms", return_value=0), \
+                patch.object(self.module, "_ticks_diff", side_effect=lambda a, b: a - b):
+            self.app._set_payload(payload)
+            self.app._next_card()
+            self.app._render()
+        self.assertNotEqual(self.app._current_card().id, "dash")
+        self.assertIn(DEMO_CHIP_TEXT, [row[0] for row in self.device.display.rows])
 
 
 class HomeHintTests(unittest.TestCase):
@@ -251,7 +233,7 @@ class HomeHintTests(unittest.TestCase):
     def drawn(self, row):
         display = Display()
         draw_sources(display, Palette(display), [row], 0, 3, status="warning")
-        HomeLayoutTests().assert_layout(display)
+        assert_layout(self, display)
         texts = [text for text, *_ in display.rows]
         self.assertTrue(all(ord(char) < 128 for text in texts for char in text), texts)
         return texts
@@ -369,7 +351,7 @@ class HomeResetBadgeTests(unittest.TestCase):
     def drawn(self, row):
         display = Display()
         draw_sources(display, Palette(display), [row], 0, 3, status="ok")
-        HomeLayoutTests().assert_layout(display)
+        assert_layout(self, display)
         return display
 
     def badge_row(self, display):
@@ -484,7 +466,7 @@ class HomeOrderTests(unittest.TestCase):
         rows = source_rows(self.payload(order, card_order))
         display = Display()
         draw_sources(display, Palette(display), rows, 0, 3, scroll=scroll)
-        HomeLayoutTests().assert_layout(display)
+        assert_layout(self, display)
         return rows, display
 
     def name_positions(self, display, names):
@@ -609,7 +591,6 @@ class HomeOrderEndToEndTests(ManagementBase):
 
     def accounts(self):
         """Three quota accounts and two local services, saved in this order."""
-        self.disable_fake()
         rows = []
         for index, (name, kind) in enumerate((("Ollama", "local"), ("Codex", "quota"),
                                               ("LiteLLM", "local"), ("Claude", "quota"),
@@ -644,7 +625,7 @@ class HomeOrderEndToEndTests(ManagementBase):
         self.assertEqual([row["name"] for row in home_rows], card_names)
         display = Display()
         draw_sources(display, Palette(display), home_rows, 0, len(payload["cards"]))
-        HomeLayoutTests().assert_layout(display)
+        assert_layout(self, display)
         found = [(text, y) for text, x, y, wrap, scale, font in display.rows
                  if text in card_names]
         self.assertEqual([text for text, _ in found], card_names)
@@ -654,17 +635,17 @@ class HomeOrderEndToEndTests(ManagementBase):
 
 class HomeScrollTests(unittest.TestCase):
     def test_list_size_controls_scroll_bounds(self):
-        self.assertEqual([scroll_limit(n * ROW_HEIGHT) for n in (0, 2, 3, 4, 8)],
+        self.assertEqual([scroll_limit(n * ROW) for n in (0, 2, 3, 4, 8)],
                          [0, 0, 0, 50, 250])
 
     def test_short_list_cannot_scroll(self):
-        scroll = HomeScroll(2 * ROW_HEIGHT)
+        scroll = HomeScroll(2 * ROW)
         scroll.update(True, 100, 180)
         scroll.update(True, 100, 80)
         self.assertEqual(scroll.offset, 0)
 
     def test_drag_clamps_at_both_ends(self):
-        scroll = HomeScroll(4 * ROW_HEIGHT)
+        scroll = HomeScroll(4 * ROW)
         scroll.update(True, 100, 180)
         scroll.update(True, 100, -100)
         self.assertEqual(scroll.offset, 50)
@@ -675,13 +656,13 @@ class HomeScrollTests(unittest.TestCase):
 
     def test_header_drag_and_disabled_card_do_not_scroll(self):
         for y, enabled in ((20, True), (120, False)):
-            scroll = HomeScroll(4 * ROW_HEIGHT)
+            scroll = HomeScroll(4 * ROW)
             scroll.update(True, 100, y, enabled)
             scroll.update(True, 100, y - 100, enabled)
             self.assertEqual(scroll.offset, 0)
 
     def test_horizontal_axis_stays_locked_despite_later_vertical_movement(self):
-        scroll = HomeScroll(4 * ROW_HEIGHT)
+        scroll = HomeScroll(4 * ROW)
         scroll.update(True, 100, 180)
         scroll.update(True, 120, 180)
         scroll.update(True, 120, 80)

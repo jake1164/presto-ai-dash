@@ -179,6 +179,9 @@ seven days or in the future, and uses it as the window's `observed_at`.
    allow-lists in `ingest.py`, and the tests for every rejection rule.
 6. For a pull source, wire the reader into the source's `collect()` and
    turn it into a report with a provenance label.
+7. **Add demo data.** A collector feeds a source, and every source type needs a
+   demo account in `daemon/src/presto_ai_dash/demo.py`; a test fails
+   without one. See [Demo data](how-a-source-works.md#demo-data).
 
 ## See also
 

@@ -81,7 +81,7 @@ call will hang your shell):
 
 ```bash
 .venv/Scripts/python tools/presto_preview/live.py          # live daemon (.venv/bin/python off Windows)
-.venv/Scripts/python tools/presto_preview/live.py --demo   # static demo, no daemon needed
+.venv/Scripts/python tools/presto_preview/live.py --demo   # the scripted demo, no daemon needed
 ```
 
 The user may already have it running from VS Code ("Daemon + admin page + Presto preview").
@@ -98,10 +98,16 @@ display itself, not the page). Page title is "Presto Live". Drive the app:
 - `browser_evaluate`: `await presto.gesture("left")`. Names: `left`/`right`
   (previous/next card), `up`/`down` (scroll the Home list), `tap`, `long` (mute).
 - Or real mouse events on `#screen`: drag to swipe or scroll, click to tap.
-- Read state: `await presto.state()` gives `{frame, led, error, demo, network_fail}`.
-- The checkbox `#netfail` simulates daemon loss. After about 10 s the screen shows
-  "STALE - retrying", and after 30 s the red offline screen (the real timers).
-  Untick it to confirm recovery. `#demo` toggles the static demo.
+- Read state: `await presto.state()` gives `{frame, led, error, demo, network_fail, scene, scenes}`.
+- The checkbox `#demo` runs the app on the scripted demo instead of the daemon:
+  six sample accounts built by the daemon's own `demo` module, marked with the
+  device's DEMO chip, cycling through every status. It contacts nothing and
+  writes nothing. The `#scene` menu jumps the loop to a named scene
+  (`calm`, `climbing`, `warning`, `near_limit`, `critical`, `rate_limited`,
+  `offline`, `recovery`).
+- The checkbox `#netfail` simulates daemon loss, in live mode and in demo mode.
+  After about 10 s the screen shows "STALE - retrying", and after 30 s the red
+  offline screen (the real timers). Untick it to confirm recovery.
 - If `state.error` is non-null, your code raised. The traceback is also drawn
   over the screen. Fix it; the app restarts on the next save.
 

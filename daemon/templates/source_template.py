@@ -13,6 +13,12 @@ The four things to change when you copy it:
 3. ``parse`` - how the provider's response becomes a quota report.
 4. ``fetch`` - the read-only request that gets the response.
 
+After the source works, add its demo data: an account of your type in
+``daemon/src/presto_ai_dash/demo.py``, with realistic windows that move through
+the scenes. A test (``daemon/tests/core/test_demo.py``) fails until a registered
+source type has one, because the demo is how users see a source before they own
+an account.
+
 Two rules that are not negotiable:
 
 * **Read only.** A source may read documented usage and limit data. It may

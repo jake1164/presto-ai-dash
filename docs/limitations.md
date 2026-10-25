@@ -6,9 +6,9 @@
 
 # Limitations
 
-The daemon supports fake data, Ollama health, and LiteLLM routed usage. The
-Presto app supports authenticated daemon polling and a separate static preview
-mode. On-device Wi-Fi, authenticated polling, and recovery are verified in
+The daemon supports subscription and local-service readings, Ollama health, and
+LiteLLM routed usage. Demo mode can replace them with sample data on request.
+The Presto app polls the daemon with the shared token. On-device Wi-Fi, authenticated polling, and recovery are verified in
 `milestones.md`. Trends are deferred. Live Home shows real subscription quota
 bars (Codex, Claude, OpenCode Go) and Ollama Cloud activity; only the static
 preview mode uses fixed values, labelled DEMO. Known gaps: Codex dashboard
@@ -65,7 +65,7 @@ There is no verified LiteLLM endpoint that reports "you are approaching a rate
 limit". Rather than guess, v0 does not report it.
 
 The `rate_limited` and `near_limit` statuses still exist in the status model and
-in the `fake` source, so the UI, LED and sound paths are fully exercised. A
+in the demo scenario, so the UI, LED and sound paths are fully exercised. A
 future source can emit them properly.
 
 ## LiteLLM "recent errors" is a count, not a list

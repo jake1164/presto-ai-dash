@@ -93,6 +93,14 @@ main > .panel { min-width: 0; }
    group inside an open account card. */
 .banner { background: #2a2130; border: 1px solid #8a6a3a; border-left: 4px solid #fbbf24;
   color: #fcd34d; border-radius: 8px; padding: 10px 14px; margin: 0 0 14px; font-weight: 600; }
+/* The first-run offer of sample data, shown on Services while the list is empty. */
+.callout { background: #16202b; border: 1px solid #2a3b53; border-left: 4px solid #41e1ff;
+  border-radius: 8px; padding: 12px 14px; margin: 0 0 14px; }
+.callout p { margin: 0 0 10px; }
+.callout button { font: inherit; }
+#demo-banner-off { font: inherit; margin-left: 10px; background: #3a2f22; color: #fcd34d;
+  border: 1px solid #8a6a3a; border-radius: 6px; padding: 3px 10px; cursor: pointer; }
+#demo-banner-off:disabled { opacity: .55; cursor: not-allowed; }
 .service-alerts { margin-top: 20px; padding-top: 14px; border-top: 1px solid #2a3b53; }
 .service-alerts h4 { margin-top: 0; }
 .service-alerts input[type=number] { max-width: 220px; }

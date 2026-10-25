@@ -35,7 +35,6 @@ def bearer_token_response(opener, url, token, body, method="POST"):
 class AdminIngestTests(AdminServerBase):
     def setUp(self):
         super().setUp()
-        self.disable_fake()
         self.row = self.manager.save({"type": "claude", "name": "Claude personal",
                                       "enabled": True,
                                       "config": {"settings_path": str(Path(self.temp.name) / "settings.json")}})
@@ -177,8 +176,6 @@ class AdminIngestTests(AdminServerBase):
         _, _, listing = self.request("/api/admin/sources")
         entry = next(row for row in listing["sources"] if row["id"] == litellm["id"])
         self.assertNotIn("ingest", entry)
-        fake = next(row for row in listing["sources"] if row["type"] == "fake")
-        self.assertNotIn("ingest", fake)
 
     def test_unknown_source_id_is_a_404(self):
         path = "/api/admin/sources/no-such-id/ingest-token"

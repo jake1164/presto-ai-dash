@@ -96,7 +96,7 @@ OLLAMA_LOADED_SCENES = ("calm", "climbing", "warning", "near_limit")
 # across 95 and to 100. It recovers at the end of the loop.
 CLAUDE_FIVE_HOUR = {
     "calm": (12, 14), "climbing": (14, 55), "warning": (55, 72),
-    "near_limit": (72, 94), "critical": (95, 99), "rate_limited": (100, 100),
+    "near_limit": (80, 94), "critical": (95, 99), "rate_limited": (100, 100),
     "offline": (100, 100), "recovery": (18, 12),
 }
 CLAUDE_WEEKLY = {
@@ -129,6 +129,16 @@ CODEX_WEEKLY = {
     "calm": (1, 2), "climbing": (2, 3), "warning": (3, 3),
     "near_limit": (3, 4), "critical": (4, 4), "rate_limited": (4, 5),
     "offline": (5, 5), "recovery": (2, 1),
+}
+
+# Cloud has a real monthly credit meter and separate purchased funds. Claude
+# drives the threshold ladder. In "critical" Cloud exhausts its included
+# allowance but has purchased funds. Its month refills in "rate_limited",
+# while Claude really is blocked: the accounts reset independently.
+OLLAMA_MONTHLY = {
+    "calm": (14, 16), "climbing": (16, 32), "warning": (32, 40),
+    "near_limit": (40, 52), "critical": (100, 100), "rate_limited": (0, 6),
+    "offline": (6, 6), "recovery": (14, 12),
 }
 
 
@@ -195,7 +205,10 @@ def _codex(second, now):
         quotas.quota_window("codex:primary", "Weekly", _level(CODEX_WEEKLY, second),
                             now + timedelta(days=6), observed, 10080)], 180)
     report["windows"].append(quotas.quota_window(
-        "codex:secondary", "Secondary", None, None, observed, None,
+        # A known bucket with no reading stays visible as "--"; the unknown
+        # optional bucket in other scenes stays out of Home, as it does live.
+        "codex:secondary", "5h" if stale else "Secondary", None, None, observed,
+        300 if stale else None,
         state="unavailable"))
     report["reset_credits"] = {"available": 3, "expires_at": [
         (now + timedelta(days=2)).isoformat(),
@@ -238,18 +251,38 @@ def _claude(second, now):
 
 
 def _ollama_cloud(second, now, offline):
-    report = quotas.quota_report("ollama", "Ollama Cloud", [
-        quotas.quota_window("monthly_credits", "Monthly credits", None, None,
-                            now, None, state="unavailable")], 180)
-    report["activity"] = {
-        "from": (now - timedelta(days=8)).isoformat(),
-        "until": now.isoformat(), "observed_at": now.isoformat(),
-        "request_count": 2 + second // 6,
-        "usage_usd": round(0.00002 * (1 + second // 3), 6),
-        "input_tokens": 52 + second * 3, "cached_input_tokens": 0,
-        "output_tokens": 32 + second * 2, "state": "available"}
-    report["note"] = "The reporting API supplies activity totals, not monthly allowance."
+    # A failed poll retains the last successful reading, just like the client.
+    reading_second = scene_second("offline") - STEP_SECONDS if offline else second
+    reading_time = now - timedelta(seconds=second - reading_second)
+    observed = reading_time
+    percent = _level(OLLAMA_MONTHLY, reading_second)
+    allowance = 60
+    used = round(allowance * percent / 100, 2)
+    refilled = _scene_span(reading_second)[0] in ("rate_limited", "recovery")
+    start = reading_time - timedelta(days=0 if refilled else 16)
+    reset = reading_time + timedelta(days=30 if refilled else 14)
     error = "Sample provider did not reply" if offline else None
+    report = quotas.quota_report("ollama", "Ollama Cloud", [
+        quotas.quota_window("monthly_credits", "Monthly credits", percent, reset,
+                            observed, used_amount=used, limit_amount=allowance,
+                            currency="USD")], 180)
+    report["windows"][0]["exhaustion_blocks"] = False
+    report["cloud_balance"] = {
+        "included_remaining_usd": round(allowance - used, 2),
+        "purchased_remaining_usd": 12.5, "observed_at": observed.isoformat(),
+        "period_from": start.isoformat(), "period_until": reset.isoformat()}
+    report["activity"] = {
+        "range": "7d",
+        "from": (reading_time.replace(hour=0, minute=0, second=0, microsecond=0)
+                 - timedelta(days=7)).isoformat(),
+        "until": reading_time.isoformat(), "observed_at": observed.isoformat(),
+        "request_count": 297 + reading_second // 3,
+        "usage_usd": round(2 + reading_second * 0.025, 2),
+        "input_tokens": 22000000 + reading_second * 12000,
+        "cached_input_tokens": 1000000 + reading_second * 6000,
+        "output_tokens": 231608 + reading_second * 200, "error": error}
+    report["note"] = "Rolling 7-day activity is separate from monthly included credits."
+    report["error"] = error
     return SourceSnapshot("demo-ollama-cloud", "offline" if offline else "ok",
                           now, {"quota": report}, error=error)
 

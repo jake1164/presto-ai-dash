@@ -1030,7 +1030,7 @@ def _draw_dots(display, palette, index, total, accent_rgb, width, height):
 
 
 def draw_message(display, palette, title, message, accent_rgb=None,
-                 detail=None):
+                 detail=None, demo=False):
     """A full-screen message: offline, connecting, or an error."""
     from alerts import rgb_for_accent
 
@@ -1054,9 +1054,15 @@ def draw_message(display, palette, title, message, accent_rgb=None,
     if detail:
         y = 140
         for line in detail:
+            room = None
+            if demo and y < DEMO_CHIP_Y + DEMO_CHIP_H and y + 6 > DEMO_CHIP_Y:
+                chip_x = demo_chip_rect(display)[0]
+                room = max(0, chip_x - MARGIN - 10)
             _text(display, palette, line, MARGIN + 6, y, INK_DIM, scale=1,
-                  max_chars=DETAIL_MAX)
+                  max_chars=DETAIL_MAX, max_width=room)
             y += DETAIL_LINE_H
+    if demo:
+        _draw_demo_chip(display, palette)
 
 
 def draw_boot(display, palette, message="Starting..."):

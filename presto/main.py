@@ -779,7 +779,7 @@ class App(object):
         if screen:
             draw_message(self.display, self.palette, screen[0], screen[1],
                          detail=["Retrying..."] + self._diag_lines() +
-                         ["RESET returns to carousel"])
+                         ["RESET returns to carousel"], demo=self.demo)
         elif card.id == "dash" and self.live_rows is not None:
             draw_sources(self.display, self.palette, self.live_rows,
                          self.index, len(self.cards), status=card.status,
@@ -829,7 +829,7 @@ class App(object):
         print("AI Dash: screen error: %s" % name)
         try:
             draw_message(self.display, self.palette, "Display error", name,
-                         detail=["Retrying...", "RESET returns to carousel"])
+                         detail=["Retrying...", "RESET returns to carousel"], demo=self.demo)
             self.presto.update()
         except Exception:
             pass
@@ -841,6 +841,7 @@ class App(object):
             "Daemon offline", message,
             accent_rgb=rgb_for_accent("red"),
             detail=["Retrying...", "Check daemon and Wi-Fi"],
+            demo=self.demo,
         )
         self.presto.update()
 

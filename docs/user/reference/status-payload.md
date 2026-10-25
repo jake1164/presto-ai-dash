@@ -8,7 +8,7 @@ the host-side preview and anything else you point at it.
 ```json
 {
   "app": "presto-ai-dash",
-  "version": "0.1.0",
+  "version": "0.49.0",
   "overall_status": "ok",
   "updated_at": "2026-10-20T12:00:00+00:00",
   "card_order": "accounts",

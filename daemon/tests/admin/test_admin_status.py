@@ -15,6 +15,7 @@ import unittest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from presto_ai_dash.models import SourceSnapshot
+from presto_ai_dash import __version__
 from presto_ai_dash.storage import Storage
 from admin.test_management import AdminServerBase
 
@@ -50,7 +51,7 @@ class StatusEndpointTests(AdminServerBase):
         status, _, body = self.request("/api/admin/status")
         self.assertEqual(status, 200)
         daemon = body["daemon"]
-        self.assertEqual(daemon["version"], "0.1.0")
+        self.assertEqual(daemon["version"], __version__)
         self.assertEqual(daemon["schema_version"], Storage.SCHEMA_VERSION)
         self.assertGreaterEqual(daemon["uptime_seconds"], 0)
         self.assertIn("uptime", daemon)

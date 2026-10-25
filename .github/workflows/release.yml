@@ -1,0 +1,86 @@
+name: Release
+
+# Runs when a version tag is pushed: v0.49.0 is a release; v0.50.0-rc1 is a
+# pre-release. The tag must match the version in daemon/pyproject.toml.
+#
+# One job builds everything in order, so nothing is published unless the
+# tests, the tag check and the wheel check all pass:
+#   1. the tag matches the package version
+#   2. the test suite
+#   3. the wheel (carrying the Presto app) and the source archive, checked
+#   4. the container image, pushed to ghcr.io (a "latest" tag moves only for a
+#      full release)
+#   5. a GitHub Release with the files and their SHA-256 sums
+#
+# It uses only the GitHub CLI and Docker that the runner already has, so no
+# third-party action sits between the repository and the published files. The
+# two actions it does use are pinned to a commit, as in the other workflows.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
+
+permissions:
+  contents: write   # create the GitHub Release
+  packages: write   # push the image to ghcr.io
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.13"
+
+      - name: Install the build tools and the daemon's dependency
+        run: python -m pip install build "cryptography>=46" "mpremote>=1.24,<2"
+
+      - name: Check the tag against the package version
+        run: python tools/build_release.py --tag "$TAG" --stage-only
+
+      - name: Run the tests
+        working-directory: daemon
+        run: python -m unittest discover -s tests -q
+
+      - name: Build and check the wheel and the source archive
+        run: |
+          python tools/build_release.py
+          cd dist && sha256sum * > SHA256SUMS && cat SHA256SUMS
+
+      - name: Build and push the container image
+        env:
+          REGISTRY_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
+          VERSION="${TAG#v}"
+          echo "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker build -t "$IMAGE:$VERSION" .
+          docker push "$IMAGE:$VERSION"
+          # "latest" is the stable tag users pull. A pre-release never moves it.
+          if [[ "$VERSION" != *-* ]]; then
+            docker tag "$IMAGE:$VERSION" "$IMAGE:latest"
+            docker push "$IMAGE:latest"
+          fi
+
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FLAGS="--generate-notes"
+          if [[ "$TAG" == *-* ]]; then FLAGS="$FLAGS --prerelease"; fi
+          gh release create "$TAG" dist/* --title "$TAG" $FLAGS

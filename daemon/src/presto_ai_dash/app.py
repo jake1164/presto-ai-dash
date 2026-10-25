@@ -244,6 +244,11 @@ class Daemon:
 
 
 def main(argv=None):
+    arguments = sys.argv[1:] if argv is None else list(argv)
+    if arguments and arguments[0] in ("install-presto", "check-presto"):
+        # USB commands for the device; they never start the daemon.
+        from . import device_install
+        return device_install.main(arguments[0], arguments[1:])
     parser = argparse.ArgumentParser(prog="presto-ai-dash")
     parser.add_argument("--config", "-c", help="TOML config path (otherwise defaults)")
     parser.add_argument("--version", action="version", version="presto-ai-dash " + __version__)

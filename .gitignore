@@ -9,6 +9,9 @@ venv/
 # Documentation site and browser-check environments (mkdocs; Playwright).
 .venv-*/
 
+# The Presto app copied into the package at release time (tools/build_release.py)
+daemon/src/presto_ai_dash/presto_app/
+
 # Daemon runtime state
 *.db
 *.sqlite

@@ -352,6 +352,11 @@ The research and the gate (2026-10-21; backlog item 4):
    other buckets via fixtures; a contract test that regenerates Codex's
    schema and checks every field read still exists.
 
+**Controls added 2026-10-25** (the paragraph below records the gap): each Codex
+account's Setup section now has Sign in with browser, Sign in with device code,
+Cancel sign-in and Sign out of Codex buttons, and the help text points to them.
+Not yet tried against a real Codex login.
+
 Also found on 2026-10-21: the admin API has the Codex sign-in, cancel and
 sign-out routes (`/api/admin/sources/<id>/codex-login`,
 `/api/admin/codex-logins/<id>`, `.../cancel`), but the admin page has no

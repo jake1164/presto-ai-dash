@@ -34,7 +34,7 @@ cp .env.example .env
 #    then edit .env and paste the tokens after DASH_ADMIN_TOKEN= and
 #    DASH_SHARED_TOKEN=
 
-# 3. Build and start.
+# 3. Pull the published image and start.
 docker compose up -d
 
 # 4. Open the admin page on this machine and unlock it.
@@ -151,8 +151,20 @@ backup: the same rule applies, the key and the data belong together.
 ## Upgrades
 
 ```bash
-docker compose pull        # only if you build from a registry
-docker compose up -d --build
+docker compose pull
+docker compose up -d
+```
+
+The image is `ghcr.io/jake1164/presto-ai-dash`. Its `latest` tag moves to every
+full release (pre-releases such as `v0.50.0-rc1` never move it), so the two
+commands above are the whole upgrade. Each release also keeps an exact tag, for
+example `0.49.0`. To stay on one version, set `DASH_IMAGE` in `.env`, for example
+`DASH_IMAGE=ghcr.io/jake1164/presto-ai-dash:0.49.0`.
+
+To build the image from a checkout instead of pulling it:
+
+```bash
+docker compose -f compose.yaml -f compose.build.yaml up -d --build
 ```
 
 The data volume is not touched by an upgrade: the database and the key file

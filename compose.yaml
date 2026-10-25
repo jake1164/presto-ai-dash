@@ -13,8 +13,11 @@
 
 services:
   dash:
-    build: .
-    image: presto-ai-dash:local
+    # The published image. "latest" moves to every full release, so
+    # "docker compose pull && docker compose up -d" upgrades. To pin a version,
+    # set DASH_IMAGE=ghcr.io/jake1164/presto-ai-dash:0.49.0 in .env. To build
+    # from this checkout instead, use compose.build.yaml (see the docs).
+    image: ${DASH_IMAGE:-ghcr.io/jake1164/presto-ai-dash:latest}
     container_name: presto-ai-dash
     restart: unless-stopped
     environment:

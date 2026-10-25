@@ -13,7 +13,11 @@ license = { text = "MIT" }
 dependencies = ["cryptography>=46.0.0"]
 
 [tool.setuptools.package-data]
-presto_ai_dash = ["web/*.html", "web/*.js", "web/*.css"]
+# presto_app/ is the Presto device app, copied in at release time by
+# tools/build_release.py (it is not in git).
+presto_ai_dash = ["web/*.html", "web/*.js", "web/*.css",
+                  "presto_app/*.py", "presto_app/ai_dash_files/*.py",
+                  "presto_app/ai_dash_files/*.txt"]
 
 [project.optional-dependencies]
 dev = []

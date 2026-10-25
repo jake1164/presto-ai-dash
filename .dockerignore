@@ -56,3 +56,4 @@ daemon/templates
 docs
 tools
 examples
+daemon/src/presto_ai_dash/presto_app

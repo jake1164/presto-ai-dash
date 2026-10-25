@@ -100,7 +100,27 @@ python -m mpremote connect list
 
 Never put a provider API key on the device. It has no use for one.
 
-## 4. Sync the app from the repository
+## 4. Install the app
+
+### From a release (no checkout needed)
+
+A release wheel carries the Presto app, so the device always gets the version
+that matches your daemon. Install the wheel with its USB tools, then install the
+app with the port you found in step 2:
+
+```bash
+pipx install "presto-ai-dash-daemon[device]"      # or the wheel from the GitHub Release
+presto-ai-dash install-presto --port COM3
+presto-ai-dash check-presto --port COM3          # compares only, writes nothing
+```
+
+On macOS or Linux the port looks like `/dev/ttyACM0`. After an upgrade of the
+daemon, run `install-presto` again. It does the same verified, rolled-back copy
+as the repository tool below, and leaves the firmware and your private settings
+alone. A daemon built from the source tree (not from a release wheel) does not
+include the app: use the repository tool.
+
+### From the repository
 
 The sync tool uploads the current app files, verifies every file by its
 SHA-256, replaces the installed files with a rollback if a write fails, and

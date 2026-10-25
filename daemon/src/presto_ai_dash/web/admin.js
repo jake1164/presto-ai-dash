@@ -635,7 +635,7 @@
       "Monitors local Ollama health and loaded models. The local API needs no key; this does not monitor Ollama Cloud subscription quotas." :
       type?.id === "opencode_go" ? "Read-only subscription meters for your OpenCode Go account. This does not make model requests or sum tokens into quotas." :
       type?.id === "ollama_cloud" ? "Reads monthly included credits, purchased balance and reset dates (or legacy limits), plus separate rolling 7-day activity. Local Ollama is a separate source." :
-      type?.id === "codex" ? "Reads Codex subscription quotas using your ChatGPT login in Codex. Leave both paths blank for automatic discovery and the default profile. Separate accounts need separate Codex profile directories. OAuth stays with Codex; no pay-per-use API key is needed. Browser and device-code sign-in, cancellation, and logout are available through the Codex login controls." :
+      type?.id === "codex" ? "Reads Codex subscription quotas using your ChatGPT login in Codex. Leave both paths blank for automatic discovery and the default profile. Separate accounts need separate Codex profile directories. OAuth stays with Codex; no pay-per-use API key is needed. Browser and device-code sign-in, cancellation, and sign-out are buttons in this account's Setup section (open the account's row)." :
       type?.id === "claude" ? "Claude Code exports 5h/weekly subscription quotas after normal terminal responses. Save this source, then set up its exporter below. Readings go straight to the database; existing status-line output is preserved. No API key is needed. Idle readings become stale; the VS Code panel does not run the status line, but the optional usage cache reader reads the numbers Claude Code caches on disk for its /usage dialog." : "";
     // The setup guide stays inside the editor, below the source description.
     const guide = element("source-type-help");
@@ -1159,6 +1159,107 @@
     renderCardDetail(source, detail);
     return card;
   }
+  // -- Codex sign-in ----------------------------------------------------------
+  // One login per account at a time. The account list redraws every ten seconds,
+  // so the state lives here and is painted into whichever card is on the page.
+
+  const codexLogins = new Map();   // source id -> the daemon's login session
+  const codexTimers = new Map();   // source id -> the status poll
+  const LOGIN_OPEN = "pending";
+
+  function stopCodexPoll(sourceId) {
+    clearInterval(codexTimers.get(sourceId)); codexTimers.delete(sourceId);
+  }
+  function paintCodexLogin(sourceId, card) {
+    // A card still being built is not in the document yet: it is passed in.
+    const box = card || document.querySelector('[data-codex-login="' + sourceId + '"]');
+    if (!box) return;
+    const session = codexLogins.get(sourceId);
+    box.replaceChildren();
+    const open = !!session && session.status === LOGIN_OPEN;
+    for (const button of box.parentElement.querySelectorAll("[data-codex-action]")) {
+      if (button.dataset.codexAction !== "logout") button.disabled = open;
+    }
+    if (!session) return;
+    if (open) {
+      if (session.flow === "browser" && /^https:\/\//.test(session.auth_url || "")) {
+        const link = el("a", "", "Open the Codex sign-in page");
+        link.href = session.auth_url; link.target = "_blank"; link.rel = "noopener noreferrer";
+        box.append(el("p", "note", "Finish signing in in the browser window, then come back here."), link);
+      } else if (session.flow === "device") {
+        const row = el("p", "", "Go to ");
+        if (/^https:\/\//.test(session.verification_url || "")) {
+          const link = el("a", "", session.verification_url);
+          link.href = session.verification_url; link.target = "_blank"; link.rel = "noopener noreferrer";
+          row.append(link);
+        }
+        row.append(" and enter the code ", el("strong", "", session.user_code || "(none)"));
+        box.append(row);
+      }
+      const cancel = el("button", "", "Cancel sign-in"); cancel.type = "button";
+      cancel.addEventListener("click", () => cancelCodexLogin(sourceId, session.id));
+      box.append(cancel);
+      return;
+    }
+    const text = session.status === "success" ? "Signed in. Codex quota appears after the next refresh." :
+      session.status === "cancelled" ? "Sign-in cancelled." :
+      session.status === "timeout" ? "Sign-in timed out. Start again if you still want to sign in." :
+      "Sign-in failed" + (session.error ? ": " + session.error : ".");
+    const outcome = el("p", session.status === "success" ? "note" : "error", text);
+    box.append(outcome);
+  }
+  function pollCodexLogin(sourceId, sessionId) {
+    stopCodexPoll(sourceId);
+    const timer = setInterval(async () => {
+      try {
+        const session = await request("/api/admin/codex-logins/" + sessionId);
+        codexLogins.set(sourceId, session);
+        paintCodexLogin(sourceId);
+        if (session.status !== LOGIN_OPEN) {
+          stopCodexPoll(sourceId);
+          if (session.status === "success") reload(true).catch(() => {});
+        }
+      } catch (error) {
+        stopCodexPoll(sourceId);
+        // The daemon forgot the login (a restart, or it aged out): say so.
+        codexLogins.set(sourceId, {id: sessionId, status: "error", error: error.message});
+        paintCodexLogin(sourceId);
+      }
+    }, 2000);
+    codexTimers.set(sourceId, timer);
+  }
+  async function startCodexLogin(source, flow) {
+    if (busy || codexTimers.has(source.id)) return;
+    busy = true;
+    try {
+      const session = await request("/api/admin/sources/" + source.id + "/codex-login", "POST", {flow});
+      codexLogins.set(source.id, session);
+      paintCodexLogin(source.id);
+      if (session.status === LOGIN_OPEN) pollCodexLogin(source.id, session.id);
+      message("Codex sign-in started.");
+    } catch (error) { message(error.message, true); }
+    finally { busy = false; }
+  }
+  async function cancelCodexLogin(sourceId, sessionId) {
+    try {
+      codexLogins.set(sourceId, await request(
+        "/api/admin/codex-logins/" + sessionId + "/cancel", "POST", {}));
+    } catch (error) { message(error.message, true); }
+    stopCodexPoll(sourceId); paintCodexLogin(sourceId);
+  }
+  async function codexLogout(source) {
+    if (busy) return;
+    if (!window.confirm("Sign " + source.name + " out of Codex? Codex will need a new sign-in.")) return;
+    busy = true;
+    try {
+      await request("/api/admin/sources/" + source.id + "/codex-logout", "POST", {});
+      codexLogins.delete(source.id);
+      message("Signed out of Codex.");
+      await reload();
+    } catch (error) { message(error.message, true); }
+    finally { busy = false; }
+  }
+
   function renderCardDetail(source, detail) {
     // Every provider fills the same template slots, in the same order. Provider
     // branches supply content; they do not decide where sections or links live.
@@ -1193,6 +1294,24 @@
         finally { busy = false; setup.disabled = false; }
       });
       setupActions.append(setup);
+    }
+    if (source.type === "codex") {
+      // Sign-in is a setup step the user starts here; it never runs from polling.
+      const buttons = [
+        ["browser", "Sign in with browser", () => startCodexLogin(source, "browser")],
+        ["device", "Sign in with device code", () => startCodexLogin(source, "device")],
+        ["logout", "Sign out of Codex", () => codexLogout(source)],
+      ];
+      for (const [name, label, handler] of buttons) {
+        const button = el("button", "", label); button.type = "button";
+        button.dataset.codexAction = name;
+        button.addEventListener("click", handler);
+        setupActions.append(button);
+      }
+      const login = el("div", "codex-login"); login.dataset.codexLogin = source.id;
+      login.setAttribute("aria-live", "polite");
+      setupActions.after(login);
+      paintCodexLogin(source.id, login);
     }
     // Remote reports are set up in one place, on the Settings tab: the card only
     // says where this account stands and links there.
@@ -1407,6 +1526,8 @@
     catalog = data.types; sources = data.sources; renderList();
   }
   function lock() {
+    for (const sourceId of [...codexTimers.keys()]) stopCodexPoll(sourceId);
+    codexLogins.clear();
     csrfToken = ""; unlocked = false; sources = []; catalog = []; editing = null;
     ingestState = null; tokenReveal = null; displayState = null;
     demoState = null;

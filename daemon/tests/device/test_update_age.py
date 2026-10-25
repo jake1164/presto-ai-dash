@@ -64,7 +64,7 @@ class UpdateAgeTests(unittest.TestCase):
             with self.subTest(age=age, active=active):
                 display = Display()
                 draw_sources(display, Palette(display), [self.row(age, active)], 0, 2)
-                test_home.HomeLayoutTests().assert_layout(display)
+                test_home.assert_layout(self, display)
                 update = next(i for i, r in enumerate(display.rows) if r[0].startswith("Updated"))
                 reset = next(r for r in display.rows if r[0].startswith("Wk resets"))
                 self.assertEqual(display.text_pens[update], rgb)

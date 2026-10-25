@@ -1,0 +1,90 @@
+name: "Request a new source"
+description: "Ask Presto AI Dash to support another AI provider or local service (no coding required)."
+title: "[Source] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a source! Please check existing requests first.
+        Only the first four questions are required. You do **not** need to know
+        whether the provider has an API. **Never include API keys, tokens,
+        cookies, or private account information** in this public issue.
+  - type: input
+    id: provider
+    attributes:
+      label: "Provider or product"
+      description: "The AI service or local application you want to monitor."
+      placeholder: "e.g., Kimi, Groq, or a self-hosted gateway"
+    validations:
+      required: true
+  - type: input
+    id: website
+    attributes:
+      label: "Official website or project link"
+      description: "The provider's homepage or official project repository."
+      placeholder: "https://..."
+    validations:
+      required: true
+  - type: textarea
+    id: desired_metrics
+    attributes:
+      label: "What should Presto AI Dash display?"
+      description: "Describe what you'd like to see; it's fine if you're unsure what the provider makes available."
+      placeholder: "e.g., remaining weekly quota and reset time; or today's requests, tokens, spend, and service health"
+    validations:
+      required: true
+  - type: dropdown
+    id: access
+    attributes:
+      label: "How do you use this service?"
+      description: "Choose the closest option; this does not determine which metrics are available."
+      options:
+        - "Free, no sign-in"
+        - "Free account"
+        - "Paid subscription"
+        - "Pay-as-you-go/API billing"
+        - "Local or self-hosted"
+        - "Other / not sure"
+    validations:
+      required: true
+  - type: dropdown
+    id: usage_source
+    attributes:
+      label: "Where have you seen usage or status information?"
+      description: "Optional. Not knowing is completely fine."
+      options:
+        - "Not sure"
+        - "Provider dashboard"
+        - "Official API"
+        - "CLI/status output"
+        - "Local file or export"
+        - "Local service endpoint"
+        - "Nowhere yet"
+    validations:
+      required: false
+  - type: input
+    id: api_docs
+    attributes:
+      label: "Reporting API or documentation (if known)"
+      description: "Optional; no need to investigate this before requesting."
+      placeholder: "https://..."
+    validations:
+      required: false
+  - type: textarea
+    id: notes
+    attributes:
+      label: "Anything else that would help?"
+      description: "Optional. Relevant plan tier, platform (Windows/macOS/Linux/Docker), screenshots with private details removed, or limitations."
+    validations:
+      required: false
+  - type: dropdown
+    id: tester
+    attributes:
+      label: "Would you be willing to help test?"
+      description: "Optional. Especially useful for subscription tiers the maintainer may not have."
+      options:
+        - "Yes"
+        - "Maybe"
+        - "No"
+    validations:
+      required: false

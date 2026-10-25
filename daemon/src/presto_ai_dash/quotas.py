@@ -512,7 +512,7 @@ def present_quota(report, now=None):
     now = timestamp(now or now_utc())
     activity = result.get("activity")
     if activity:
-        activity["state"] = "stale" if (activity.get("error") or result.get("error") or
+        activity["state"] = "stale" if (activity.get("error", result.get("error")) or
             (now - timestamp(activity["observed_at"])).total_seconds() > result["stale_after_seconds"]) else "available"
     balance = result.get("cloud_balance")
     if balance:

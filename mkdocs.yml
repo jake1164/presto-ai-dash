@@ -76,8 +76,15 @@ markdown_extensions:
 plugins:
   - search
 
+extra_css:
+  - demo/demo.css
+
+extra_javascript:
+  - demo/demo.js
+
 nav:
   - Home: index.md
+  - See It Running: demo/index.md
   - Getting Started:
       - What Presto AI Dash Does: getting-started/what-it-does.md
       - Install the Daemon: getting-started/install-the-daemon.md
@@ -116,6 +123,7 @@ nav:
       - The Status Payload and Its Size Budget: reference/status-payload.md
   - Privacy: privacy/index.md
   - Developers:
+      - Request or Contribute a Source: developers/contributing-sources.md
       - Architecture Overview: developers/architecture.md
       - Running the Tests: developers/running-the-tests.md
       - The Preview and the Device Sync: developers/preview-and-device.md

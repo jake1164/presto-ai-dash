@@ -57,7 +57,6 @@ class UpdateStateTests(unittest.TestCase):
 class RemoteAccountBase(ManagementBase):
     def setUp(self):
         super().setUp()
-        self.disable_fake()
         self.row = self.manager.save({"type": "claude", "name": "Claude (laptop)",
                                       "enabled": True,
                                       "config": {"settings_path": str(Path(self.temp.name) / "settings.json")}})

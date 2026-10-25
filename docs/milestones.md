@@ -47,6 +47,15 @@ no longer true.
 
 Status of each milestone in `presto_ai_dash_project_plan.md` §16.
 
+> **Correction, 2026-10-24.** The rows and notes below that mention the *fake*
+> source, the device's static demo, `STATIC_DEMO` or `sample-status.json`
+> describe what was built then. None of it exists now. The daemon's `fake`
+> source was deleted (a schema migration removes any stored row), and the device
+> has no demo of its own. Sample data is the daemon's **demo mode**
+> (`DASH_DEMO` or the admin page), which overrides the real sources, marks every
+> screen with a DEMO chip and writes nothing. The same scenario drives the
+> preview's Demo checkbox and the clickable demo on the documentation site.
+
 | # | Milestone | Status | Notes |
 | --- | --- | --- | --- |
 | 0 | Repo skeleton | **done** | Repo shell, MIT licence, README, docs, config format, sample status JSON. |
@@ -432,8 +441,10 @@ pending because no browser surface was connected in the implementation session.
 
 - **Device polling integration:** authorized and implemented in the separate
   checkpoint below. M2's original scope remains unchanged.
-- **M4–M5:** Ollama and LiteLLM sources are implemented. The daemon uses fake
-  data by default; enabling a real source requires explicitly disabling fake.
+- **M4–M5:** Ollama and LiteLLM sources are implemented. The daemon used fake
+  data by default, and enabling a real source required explicitly disabling fake
+  (**no longer true, 2026-10-24**: the fake source is gone, and a new install
+  starts with no service and demo mode off).
   Ollama has no historical request endpoint, so usage remains unavailable
   unless an external collector writes the optional sample file.
 - **Application monitoring (after M5):** a separate future checkpoint for

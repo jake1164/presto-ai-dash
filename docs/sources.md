@@ -2,17 +2,18 @@
 >
 > Corrections (2026-10-21):
 >
-> - Seven source types are registered, not five: `fake`, `ollama`, `litellm`, `opencode_go`, `ollama_cloud`, `codex` and `claude`.
+> - Six source types are registered: `ollama`, `litellm`, `opencode_go`, `ollama_cloud`, `codex` and `claude`. The demo is a daemon mode, not a source.
 > - Claude's terminal export is live verified (M9), not pending.
 > - "Adding a source" now has a full guide and a template that runs (`daemon/templates/source_template.py`, kept honest by `daemon/tests/test_source_template.py`): see How a source works and The worked example on the site.
 
 # Sources
 
-The daemon ships five registered sources: `fake`, `ollama`, `litellm`,
-`opencode_go`, and `ollama_cloud`. A fresh database enables Fake by default;
-it cannot run alongside any live source. Manage saved accounts, settings, and
-encrypted keys in the [local UI](configuration.md). Cloud names on the static
-Home preview remain DEMO; live measurements come from enabled daemon accounts.
+The daemon ships six registered sources: `ollama`, `litellm`, `opencode_go`,
+`ollama_cloud`, `codex` and `claude`. A fresh database enables none of them.
+Manage saved accounts, settings,
+and encrypted keys in the [local UI](configuration.md). Sample data for demos
+is the daemon's demo mode (`DASH_DEMO` or the admin page), which overrides the
+readings without touching these sources.
 
 A source is anything that can answer "what is the state of this thing right
 now". Each source returns a `SourceSnapshot`:
@@ -60,17 +61,24 @@ spellings. It is normalised to `ok` on input.
 | `critical` | Broken, or a limit exceeded | red |
 | `offline` | Unreachable | red |
 
-## fake
+## Demo mode (not a source)
 
 **Purpose:** exercise every UI state without any real integration.
 
-Cycles deterministically through `ok`, `active`, `warning`, `critical`,
-`offline`, `rate_limited`, `near_limit`, holding each for
-`sources.fake.scenario_interval` seconds. There is no randomness, so tests and
-demos are reproducible.
+Demo mode is a switch on the daemon, not a registered source: `daemon/src/presto_ai_dash/demo.py`
+builds its payloads with the same builders a real daemon uses, and the API
+serves them while the switch is on. The scenario loops through every status in
+the vocabulary above, in small steps, and never contacts a provider.
 
-Metrics are synthetic but shaped like the real ones, so the Presto rendering
-path is identical whether the data came from `fake` or from LiteLLM.
+Because it is a mode, it needs no account row, cannot be confused with an
+account, and can never write a provider-side setting.
+
+**Adding a source means adding its demo data.** Every registered source type
+needs a demo account in `demo.py`, and `daemon/tests/core/test_demo.py` fails
+until it has one. The demo is how users see a source before they own an
+account, and it keeps the preview, the daemon's demo mode and the documentation
+site's demo in step. See `docs/user/developers/how-a-source-works.md`. See
+[the admin page](user/guides/admin-page.md) and the demo page on the site.
 
 ## ollama
 
@@ -174,7 +182,7 @@ errors_today         from metrics.failed_requests
   out of scope for v0.
 - **Rate limit warnings.** There is no verified LiteLLM endpoint that reports
   "you are approaching a rate limit". The `rate_limited` and `near_limit`
-  statuses remain first-class in the model and in the `fake` source so the UI,
+  statuses remain first-class in the model and in the demo scenario, so the UI,
   LED and sound paths are all exercised, but LiteLLM does not synthesise them.
   No endpoint was invented to fill the gap.
 

@@ -200,7 +200,6 @@ class AlertAdminTests(AdminServerBase):
 
         # A reading that is fresh now: the daemon ages it against its clock.
         now = datetime.now(timezone.utc)
-        self.disable_fake()
         saved = self.manager.save({"type": "codex", "name": "Account", "enabled": True,
                                    "config": {}})
         window = quota_window("w", "Weekly", 85, now + timedelta(days=3),
@@ -220,7 +219,6 @@ class AlertAdminTests(AdminServerBase):
         from presto_ai_dash.quotas import quota_report, quota_window
 
         now = datetime.now(timezone.utc)
-        self.disable_fake()
         saved = self.manager.save({"type": "codex", "name": "Account", "enabled": True,
                                    "config": {}})
         window = quota_window("w", "Weekly", 85, now + timedelta(days=3),

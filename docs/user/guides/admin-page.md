@@ -117,6 +117,7 @@ services*.
 | --- | --- |
 | Home display | The overflow strip setting |
 | Remote reports | The ingest switch, the collector download and its SHA-256, the remote tokens, the collector trail and version, the plain-HTTP warning |
+| Demo mode | The sample-data switch, and what it does and does not touch |
 | Alerts | The master switch, the thresholds, the sound switch (off until you turn it on), quiet hours, pop to top, the mute length |
 | Effective daemon configuration | Read-only: every value and where it came from |
 | About and help | What the sources are, the order note, where the logs and the diagnostics commands are |
@@ -125,6 +126,44 @@ The effective configuration names the origin of every value:
 `environment`, `dash.toml`, `database`, or `default`. Those values need a
 daemon restart, so they are edited in the configuration file or the
 environment rather than on the page.
+
+## Demo mode
+
+Demo mode puts a scripted set of six sample accounts in front of the real
+ones. While it is on, the Presto shows the sample data with its own
+*DEMO - SAMPLE DATA* chip, and the status API and the card-detail route
+serve the same data. Nothing else changes: the real accounts keep their
+settings and keep being read, and no provider is contacted because of demo
+mode.
+
+The switch is on the Settings tab. It is off by default. When the
+demonstration is over, switch it off and the Presto goes back to the real
+readings on its next poll, with no restart.
+
+The Presto polls every three seconds while demo mode is on so the short
+scenes are all visible. Its configured live polling interval resumes when
+demo mode is turned off.
+
+Two shortcuts save a new reader from hunting for it. While no account exists,
+the **Services** tab offers **Want to see how it works first? Show sample
+data.**, and the button turns demo mode on. While demo mode is on, the banner
+at the top of every tab carries **Turn demo off**; when you do have real
+accounts, the same banner says they are hidden while demo is on, because the
+numbers on the Presto are not theirs.
+
+- **It overrides, it does not replace.** The real sources are not disabled
+  or edited while demo mode is on, and the readings that were collected are
+  kept.
+- **A bell tap is remembered in memory only.** The sample accounts have no
+  stored settings, so a tap changes what this daemon serves until it
+  restarts, and nothing in the database.
+- **A real account cannot be tapped while demo mode is on.** The API answers
+  `404` for its id, so the demo can never change a real service's alerts.
+- **The environment wins.** `DASH_DEMO=1` turns demo mode on and locks the
+  switch here; see [the configuration reference](../reference/configuration.md).
+
+While demo mode is effective, a banner at the top of every tab says so, so a
+reader never mistakes the sample numbers for their own.
 
 ## Adding and editing an account
 

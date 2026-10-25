@@ -317,7 +317,6 @@ class PushBase(AdminServerBase, FolderBase):
 
     def setUp(self):
         AdminServerBase.setUp(self)
-        self.disable_fake()
         self.profile = Path(self.temp.name) / "profile" / ".claude"
         (self.profile / "projects" / "proj").mkdir(parents=True)
         self.folder = Path(self.temp.name) / "folder"

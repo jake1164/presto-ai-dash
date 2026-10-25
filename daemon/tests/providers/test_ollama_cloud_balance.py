@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import patch
 
 from presto_ai_dash.card_tiles import tiles_for
+from presto_ai_dash.alert_policy import threshold_status
 from presto_ai_dash.dashboard import build_instance_payload, device_view
 from presto_ai_dash.http_client import HttpError, HttpUnreachable
 from presto_ai_dash.quotas import present_quota
@@ -56,7 +57,7 @@ class OllamaBalanceTests(unittest.TestCase):
         self.assertFalse(limited)
         report, limited = source.parse_balance(balance(0), NOW)
         self.assertEqual(report["windows"][0]["used_percent"], 100)
-        self.assertTrue(limited)
+        self.assertFalse(limited)  # Purchased funds still cover usage.
         report, limited = source.parse_balance(balance(0, 0), NOW)
         self.assertIsNone(report["windows"][0]["used_percent"])
         self.assertFalse(limited)
@@ -123,11 +124,67 @@ class OllamaBalanceTests(unittest.TestCase):
         self.assertEqual(presented["windows"][0]["state"], "stale")
         self.assertEqual(presented["cloud_balance"]["state"], "stale")
         self.assertEqual(presented["cloud_balance"]["included_remaining_usd"], 50)
+        self.assertEqual(presented["activity"]["state"], "available")
         source._next_probe = 0
         recovered, _ = self.collect(source, [balance(), usage()], 1300)
         self.assertEqual(recovered.status, "ok")
         self.assertIsNone(recovered.metrics["quota"]["error"])
         self.assertEqual(first.metrics["quota"]["cloud_balance"]["included_remaining_usd"], 51.52)
+
+    def test_balance_failure_keeps_fresh_activity_even_before_first_balance(self):
+        snapshot, _ = self.collect(OllamaCloudSource({"api_key": "fixture"}),
+                                   [HttpUnreachable("failed"), usage()])
+        report = present_quota(snapshot.metrics["quota"], NOW)
+        self.assertEqual(report["windows"][0]["state"], "unavailable")
+        self.assertEqual(report["activity"]["state"], "available")
+        self.assertEqual(report["activity"]["request_count"], 297)
+
+    def test_request_only_legacy_activity_survives_collection_and_all_presentations(self):
+        legacy = {"included": {"weekly": {"remaining_percent": 40,
+                                         "resets_at": RESET.isoformat()}}}
+        request_only = usage()
+        request_only["totals"] = {"request_count": 23}
+        source = OllamaCloudSource({"api_key": "fixture"})
+        snapshot, _ = self.collect(source, [legacy, request_only])
+        self.assertEqual(snapshot.status, "ok")
+        report = present_quota(snapshot.metrics["quota"], NOW)
+        self.assertIsNone(report["activity"]["usage_usd"])
+        self.assertIsNone(report["activity"]["input_tokens"])
+        row = {"id": "cloud", "type": "ollama_cloud", "name": "Cloud", "enabled": True}
+        payload = build_instance_payload({"cloud": snapshot}, [row], now=NOW)
+        self.assertEqual(payload["cards"][1]["primary"], "Weekly: 60%")
+        self.assertEqual(source_rows(device_view(payload))[0]["activity"], "23 req / 7d")
+        self.assertEqual(tiles_for("ollama_cloud", payload["sources"][0], NOW),
+                         [{"label": "req 7d", "value": "23", "tone": "normal"}])
+        # Activity-only fallback still renders when the balance endpoint fails.
+        failed, _ = self.collect(OllamaCloudSource({"api_key": "fixture"}),
+                                [HttpUnreachable("failed"), request_only])
+        fallback = build_instance_payload({"cloud": failed}, [row], now=NOW)
+        self.assertEqual(fallback["cards"][1]["primary"], "23 requests")
+        self.assertEqual(fallback["cards"][1]["secondary"], "")
+
+    def test_purchased_credit_prevents_false_rate_limited_status_but_keeps_exhaustion_alert(self):
+        row = {"id": "cloud", "type": "ollama_cloud", "name": "Cloud", "enabled": True}
+        for purchased, expected in ((12.5, "critical"), (0, "rate_limited")):
+            with self.subTest(purchased=purchased):
+                data = balance(0)
+                data["purchased"]["balance_usd"] = purchased
+                source = OllamaCloudSource({"api_key": "fixture"})
+                snapshot, _ = self.collect(source, [data, usage()])
+                report = present_quota(snapshot.metrics["quota"], NOW)
+                self.assertEqual(report["windows"][0]["used_percent"], 100)
+                self.assertEqual(threshold_status(report, now=NOW), expected)
+                payload = build_instance_payload({"cloud": snapshot}, [row], now=NOW)
+                self.assertEqual(payload["sources"][0]["status"], expected)
+                self.assertEqual(payload["overall_status"], expected)
+                self.assertEqual(payload["cards"][1]["status"], expected)
+
+    def test_legacy_exhaustion_keeps_rate_limited_status(self):
+        report, limited = OllamaCloudSource().parse_balance({"included": {
+            "weekly": {"remaining_percent": 0, "resets_at": RESET.isoformat()}},
+            "purchased": {"balance_usd": 12.5}}, NOW)
+        self.assertTrue(limited)
+        self.assertEqual(threshold_status(present_quota(report, NOW), now=NOW), "rate_limited")
 
     def test_retry_after_defers_calls_and_does_not_expose_provider_error_body(self):
         source = OllamaCloudSource({"api_key": "fixture-secret"})

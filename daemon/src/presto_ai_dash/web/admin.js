@@ -8,7 +8,8 @@
   let csrfToken = "", unlocked = false, catalog = [], sources = [], editing = null;
   let busy = false;
   let dragging = null;
-  let ingestState = null, tokenReveal = null, displayState = null;
+  let ingestState = null, tokenReveal = null, displayState = null, demoState = null;
+  let demoReadVersion = 0;
   let alertsState = null;
   // The master switch: alerts on or off for every service. It is kept apart
   // from the form, so a background refresh never rewrites what the reader
@@ -47,6 +48,7 @@
     "settings-panel": {page: "guides/admin-page.md", anchor: "settings"},
     "home-display": {page: "guides/home-display.md", anchor: "the-setting"},
     "remote-reports": {page: "concepts/remote-reports.md", anchor: "turning-it-on"},
+    "demo-mode": {page: "guides/admin-page.md", anchor: "demo-mode"},
     "remote-token": {page: "guides/remote-collectors.md", anchor: "rotating-and-revoking"},
     "alerts": {page: "guides/alerts-and-the-bell.md", anchor: "the-settings-behind-it"},
     "alert-thresholds": {page: "concepts/alerts.md", anchor: "what-raises-an-alert"},
@@ -61,8 +63,6 @@
     "source-ollama-cloud": {page: "guides/ollama-cloud.md", anchor: "set-it-up"},
     "source-ollama": {page: "guides/ollama.md", anchor: "set-it-up"},
     "source-litellm": {page: "guides/litellm.md", anchor: "set-it-up"},
-    "source-fake": {page: "getting-started/add-the-first-source.md",
-                     anchor: "the-first-source-pick-something-local"},
   };
 
   function helpLink(key, label) {
@@ -260,6 +260,51 @@
       displayState = await request("/api/admin/display");
       renderDisplay();
     } catch (_) { /* keep the last known setting */ }
+  }
+  async function loadDemo() {
+    // Demo mode is read on its own too, so the banner follows the switch.
+    const version = ++demoReadVersion;
+    try {
+      const state = await request("/api/admin/demo");
+      if (version !== demoReadVersion) return;
+      demoState = state;
+      renderDemo();
+    } catch (_) { /* keep the last known state */ }
+  }
+  function renderDemo() {
+    const on = !!demoState?.enabled;
+    const locked = !!demoState?.locked_by_environment;
+    element("demo-enabled").checked = on;
+    element("demo-enabled").disabled = locked;
+    element("demo-lock").hidden = !locked;
+    // The banner is a child of the workspace, so it heads every tab.
+    element("demo-banner").hidden = !on;
+    // It says the real accounts are still there but not on screen, which is
+    // the question a reader with services asks when the numbers look odd.
+    element("demo-banner-hidden").hidden = !(on && sources.length > 0);
+    element("demo-banner-off").disabled = locked;
+    element("demo-banner-lock").hidden = !(on && locked);
+    // The first-run offer: while no account is switched on. A fresh install
+    // always carries a disabled placeholder for the sources dash.toml can
+    // configure, so "no rows" would never be true for a new reader.
+    const enabled = sources.filter((source) => source.enabled).length;
+    element("demo-callout").hidden = !(demoState && !on && enabled === 0);
+    element("demo-callout-button").disabled = locked;
+    element("demo-callout-lock").hidden = !locked;
+  }
+  async function setDemoEnabled(enabled) {
+    // One writer for the three controls: the Settings switch, the empty-list
+    // callout and the banner's Turn demo off button.
+    if (busy) { renderDemo(); return; }
+    busy = true;
+    ++demoReadVersion; // an older background read must not undo this write
+    try {
+      demoState = await request("/api/admin/demo", "PUT", {enabled: enabled});
+      message(enabled ?
+        "Demo mode on. The Presto shows sample data until you turn it off." :
+        "Demo mode off. The Presto shows the real accounts on its next poll.");
+    } catch (error) { message(error.message, true); }
+    finally { busy = false; renderDemo(); }
   }
   function renderDisplay() {
     const value = displayState?.overflow_rows;
@@ -591,13 +636,12 @@
       type?.id === "opencode_go" ? "Read-only subscription meters for your OpenCode Go account. This does not make model requests or sum tokens into quotas." :
       type?.id === "ollama_cloud" ? "Reads monthly included credits, purchased balance and reset dates (or legacy limits), plus separate rolling 7-day activity. Local Ollama is a separate source." :
       type?.id === "codex" ? "Reads Codex subscription quotas using your ChatGPT login in Codex. Leave both paths blank for automatic discovery and the default profile. Separate accounts need separate Codex profile directories. OAuth stays with Codex; no pay-per-use API key is needed. Browser and device-code sign-in, cancellation, and logout are available through the Codex login controls." :
-      type?.id === "claude" ? "Claude Code exports 5h/weekly subscription quotas after normal terminal responses. Save this source, then set up its exporter below. Readings go straight to the database; existing status-line output is preserved. No API key is needed. Idle readings become stale; the VS Code panel does not run the status line, but the optional usage cache reader reads the numbers Claude Code caches on disk for its /usage dialog." :
-      type?.id === "fake" ? "Synthetic demo/test data. Disable it before enabling a live source." : "";
+      type?.id === "claude" ? "Claude Code exports 5h/weekly subscription quotas after normal terminal responses. Save this source, then set up its exporter below. Readings go straight to the database; existing status-line output is preserved. No API key is needed. Idle readings become stale; the VS Code panel does not run the status line, but the optional usage cache reader reads the numbers Claude Code caches on disk for its /usage dialog." : "";
     // The setup guide stays inside the editor, below the source description.
     const guide = element("source-type-help");
     guide.replaceChildren();
-    const guideLink = helpLink("source-" + (type?.id || "fake").replace(/_/g, "-"),
-                               (type?.name || "Source") + " setup guide");
+    const guideLink = type ? helpLink("source-" + type.id.replace(/_/g, "-"),
+                                      type.name + " setup guide") : null;
     if (guideLink) guide.append(guideLink);
     if (!type) return;
     for (const field of type.fields) {
@@ -662,8 +706,7 @@
       option.value = source.type; option.textContent = source.type + " (unavailable)";
       element("source-type").append(option);
     }
-    element("source-type").value = source?.type ??
-      catalog.find((type) => type.id !== "fake")?.id ?? catalog[0]?.id ?? "";
+    element("source-type").value = source?.type ?? catalog[0]?.id ?? "";
     element("source-name").value = source?.name ?? selectedType()?.name ?? "";
     element("source-enabled").checked = source?.enabled ?? false;
     element("api-key").value = "";
@@ -1035,6 +1078,8 @@
     if (focusedId && focusedAction) focusAccount(focusedId, focusedAction);
     else if (focusedField) document.getElementById(focusedField)?.focus({preventScroll: true});
     renderRemoteAccounts();
+    // The first-run callout appears and goes with the list's length.
+    renderDemo();
   }
   function buildCard(source, index) {
     const card = document.createElement("article");
@@ -1210,11 +1255,13 @@
         const facts = el("div", "reading-facts");
         const money = (amount) => new Intl.NumberFormat(undefined,
           {style: "currency", currency: "USD", maximumFractionDigits: amount > 0 && amount < .01 ? 5 : 2}).format(amount);
-        for (const [label, value] of [
-          ["Requests", activity.request_count.toLocaleString()],
-          ["Activity spend", money(activity.usage_usd)],
-          ["Tokens", new Intl.NumberFormat(undefined, {notation: "compact", maximumFractionDigits: 2})
-            .format(activity.input_tokens + activity.output_tokens)]]) {
+        const measurements = [["Requests", activity.request_count.toLocaleString()]];
+        if (typeof activity.usage_usd === "number") measurements.push(["Activity spend", money(activity.usage_usd)]);
+        if (typeof activity.input_tokens === "number" && typeof activity.output_tokens === "number") {
+          measurements.push(["Tokens", new Intl.NumberFormat(undefined, {notation: "compact", maximumFractionDigits: 2})
+            .format(activity.input_tokens + activity.output_tokens)]);
+        }
+        for (const [label, value] of measurements) {
           const fact = el("div", "reading-fact");
           fact.append(el("span", "note", label), el("strong", "", value)); facts.append(fact);
         }
@@ -1362,6 +1409,8 @@
   function lock() {
     csrfToken = ""; unlocked = false; sources = []; catalog = []; editing = null;
     ingestState = null; tokenReveal = null; displayState = null;
+    demoState = null;
+    ++demoReadVersion;
     alertsState = null; masterOn = true; lastMasterOn = null;
     serviceAlertStates.clear(); serviceAlertDrafts.clear(); serviceAlertLoading.clear();
     statusState = null; configState = null; expanded.clear();
@@ -1375,11 +1424,12 @@
   async function unlock() {
     await reload();
     await loadIngest();
+    await loadDemo();
     await loadDisplay();
     await loadAlerts();
     element("source-type").replaceChildren(...catalog.map((type) => {
         const option = document.createElement("option"); option.value = type.id;
-        option.textContent = type.id === "fake" ? "Fake (demo/test data)" : type.name; return option;
+        option.textContent = type.name; return option;
       }));
     const planned = document.createElement("optgroup"); planned.label = "Planned — not implemented";
     for (const [id, name] of [["codex", "OpenAI / Codex subscription"], ["claude", "Claude subscription"],
@@ -1472,6 +1522,9 @@
     // The account cards say whether remote reports are on, so they follow the switch.
     finally { busy = false; renderIngest(); renderList(); }
   });
+  element("demo-enabled").addEventListener("change", () => setDemoEnabled(element("demo-enabled").checked));
+  element("demo-callout-button").addEventListener("click", () => setDemoEnabled(true));
+  element("demo-banner-off").addEventListener("click", () => setDemoEnabled(false));
   element("overflow-rows").addEventListener("change", async () => {
     if (busy) { renderDisplay(); return; }
     busy = true;
@@ -1534,7 +1587,11 @@
     if (!unlocked || busy) return;
     reload(true).catch((error) => message(error.message, true));
     loadAlerts(true);
+    loadDemo();
   }, 10000);
+  document.addEventListener("visibilitychange", () => {
+    if (unlocked && !busy && document.visibilityState === "visible") loadDemo();
+  });
   // The status tab refreshes itself while it is open and the browser tab is in
   // the foreground. Nothing is fetched while another tab is showing.
   setInterval(() => {

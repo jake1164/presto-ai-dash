@@ -11,7 +11,7 @@ change you make is visible in the preview within a second.
 
 ```bash
 .venv/Scripts/python tools/presto_preview/live.py          # live daemon
-.venv/Scripts/python tools/presto_preview/live.py --demo   # static demo
+.venv/Scripts/python tools/presto_preview/live.py --demo   # the scripted demo
 ```
 
 `live.py` runs the real `presto/main.py` App against an emulated 240x240
@@ -26,6 +26,15 @@ Drive it with the browser: drag to swipe or scroll, click to tap, hold to
 mute. The arrow keys, Enter and M do the same. "Simulate network failure"
 exercises the real stale, offline and recovery timers.
 
+The **Demo** checkbox runs the app on the scripted demo instead of the daemon:
+the same six sample accounts the daemon's demo mode and the published demo page
+show, built by the daemon's own `demo` module, with the device's demo chip. It
+contacts nothing and writes nothing. The **Scene** menu jumps the loop to a
+named scene (`calm`, `climbing`, `warning`, `near_limit`, `critical`,
+`rate_limited`, `offline`, `recovery`), and the loop keeps playing from there,
+so you can watch a scene progress instead of waiting for it. "Simulate network
+failure" works in demo mode too.
+
 If you have no browser tool, the command-line helper does the same job:
 
 ```bash
@@ -39,15 +48,18 @@ It prints the path of the PNG it wrote.
 ## Rendering every card, without a server
 
 ```bash
-.venv/Scripts/python tools/presto_preview/render.py                        # the sample payload
+.venv/Scripts/python tools/presto_preview/render.py                        # the demo payload
+.venv/Scripts/python tools/presto_preview/render.py --scene rate_limited --out .preview/busy
 .venv/Scripts/python tools/presto_preview/render.py --payload live --out .preview/live
 .venv/Scripts/python tools/presto_preview/render.py --payload fixture.json --stale
 ```
 
 It writes one PNG per card, plus the Home list scrolled to its end, with
-`--stale`, `--offline` and `--muted` variants. Use it to review a whole
-change at once, or for the edge-case payloads you do not have a live account
-for.
+`--stale`, `--offline` and `--muted` variants. `--scene` picks the demo scene
+to render; the default is the first, calm one. A demo card is rendered with its
+tiles and its full set of lines, as if it had been opened. Use it to review a
+whole change at once, or for the edge-case payloads you do not have a live
+account for.
 
 **Never render from the live preview for a public screenshot.** The live
 payload carries your real account names and quotas. Use a fixture.

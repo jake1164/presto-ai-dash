@@ -20,7 +20,7 @@ from alerts import (CUE_DOUBLE_CHIRP, CUE_NONE, AlertTracker, mute_chip_text)
 from cards import Card
 from home import alert_settings
 from ui import (MUTE_CHIP_H, MUTE_CHIP_Y, Palette, _dot_span, draw_card,
-                draw_home, draw_sources, mute_chip_rect)
+                draw_sources, mute_chip_rect)
 
 PREVIEW_DIR = os.path.join(presto_path.REPO_ROOT, "tools", "presto_preview")
 if PREVIEW_DIR not in sys.path:
@@ -349,8 +349,8 @@ class MuteChipGeometryTests(unittest.TestCase):
                   mute_text="MUTED 3H", alerts={"enabled": True})
         self.assertTrue(_has_chip(display))
         display = RecordingFramebuffer()
-        draw_home(display, Palette(display), [], 0, 1, muted=True,
-                  mute_text="MUTED 3H")
+        draw_sources(display, Palette(display), [], 0, 1, muted=True,
+                     mute_text="MUTED 3H")
         self.assertTrue(_has_chip(display))
 
     def test_nothing_is_drawn_when_the_sound_is_not_muted(self):
@@ -376,7 +376,7 @@ class DeviceAppMuteTests(unittest.TestCase):
             "device_mute_app_for_test",
             os.path.join(presto_path.PRESTO_DIR, "main.py"))
         module = importlib.util.module_from_spec(spec)
-        with patch.dict(sys.modules, {"config": SimpleNamespace(STATIC_DEMO=False)}):
+        with patch.dict(sys.modules, {"config": SimpleNamespace()}):
             spec.loader.exec_module(module)
         display = Framebuffer()
         device = SimpleNamespace(display=display, update=lambda: None, NUM_LEDS=7,

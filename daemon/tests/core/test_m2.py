@@ -24,7 +24,7 @@ from presto_ai_dash.config import ConfigError, load_config, resolve_shared_token
 from presto_ai_dash.dashboard import build_status_payload
 from presto_ai_dash.models import SourceSnapshot
 from presto_ai_dash.sources import Source, available_sources, build_sources
-from presto_ai_dash.sources.fake import FakeSource, SCENARIOS, SCENARIO_METRICS
+from presto_ai_dash.sources.ollama import OllamaSource
 from presto_ai_dash.storage import Storage
 
 
@@ -43,8 +43,8 @@ class ConfigTests(unittest.TestCase):
 
     def test_defaults_are_independent(self):
         first = load_config()
-        first["sources"]["fake"]["enabled"] = False
-        self.assertTrue(load_config()["sources"]["fake"]["enabled"])
+        first["sources"]["ollama"]["enabled"] = True
+        self.assertFalse(load_config()["sources"]["ollama"]["enabled"])
         self.assertEqual(load_config()["daemon"]["port"], 8787)
 
     def test_toml_and_env_precedence(self):
@@ -55,15 +55,15 @@ class ConfigTests(unittest.TestCase):
 
     def test_example_loads(self):
         config = load_config(SRC.parents[1] / "examples" / "config.example.toml")
-        self.assertEqual([source.id for source in build_sources(config)], ["fake"])
+        # The example enables no source: a fresh copy probes nothing.
+        self.assertEqual(build_sources(config), [])
 
     def test_invalid_config(self):
         cases = ['daemon = 1', '[daemon]\nport = 0', '[daemon]\nport = 65536',
                  '[daemon]\npoll_interval = 0', '[daemon]\nport = true',
                  '[daemon]\nport = 1.5', '[daemon]\nshared_token = 42',
                  '[daemon]\nshared_token = "bad token"', '[daemon]\ndatabase = ""',
-                 '[logging]\nlevel = "nope"', '[sources.fake]\nenabled = "false"',
-                 '[sources.fake]\nscenario_interval = 0', '[sources]\nfake = false',
+                 '[logging]\nlevel = "nope"',
                  '[sources.ollama]\nbase_url = "localhost:11434"',
                  '[sources.ollama]\nbase_url = "http://[invalid"',
                  '[sources.litellm]\napi_key_env = "bad=name"']
@@ -79,19 +79,23 @@ class ConfigTests(unittest.TestCase):
         with patch.dict(os.environ, {"DASH_PORT": "oops"}), self.assertRaises(ConfigError):
             load_config()
 
-    def test_live_sources_require_fake_to_be_disabled(self):
-        with self.assertRaisesRegex(ConfigError, "disable sources.fake"):
-            self.load('[sources.ollama]\nenabled = true')
-        config = self.load('[sources.fake]\nenabled = false\n'
-                           '[sources.ollama]\nenabled = true\n'
-                           '[sources.litellm]\nenabled = true')
-        self.assertEqual([source.id for source in build_sources(config)],
-                         ["ollama", "litellm"])
+    def test_a_leftover_demo_section_is_ignored_with_a_warning(self):
+        """An install that still has [sources.fake] keeps working."""
+        for text in ('[sources.fake]\nenabled = true\n[sources.ollama]\nenabled = true',
+                     '[sources.fake]\nenabled = "not even a boolean"',
+                     '[sources.fake]\nscenario_interval = 0'):
+            with self.subTest(text=text):
+                with self.assertLogs("presto_ai_dash.config", level="WARNING"):
+                    config = self.load(text)
+                self.assertNotIn("fake", config["sources"])
+        with self.assertLogs("presto_ai_dash.config", level="WARNING"):
+            config = self.load('[sources.fake]\nenabled = true\n'
+                               '[sources.ollama]\nenabled = true')
+        self.assertEqual([source.id for source in build_sources(config)], ["ollama"])
 
     def test_litellm_key_environment_override(self):
         with patch.dict(os.environ, {"LITELLM_API_KEY": "env-key"}):
-            config = self.load('[sources.fake]\nenabled = false\n'
-                               '[sources.litellm]\nenabled = true\n'
+            config = self.load('[sources.litellm]\nenabled = true\n'
                                'api_key = "file-key"')
         self.assertEqual(config["sources"]["litellm"]["api_key"], "env-key")
 
@@ -107,38 +111,12 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(resolve_shared_token(config), "test-token-0123456789")
 
 
-class FakeTests(unittest.TestCase):
-    def test_all_scenarios_and_wrap(self):
-        source = FakeSource({"scenario_interval": 10})
-        for index, scenario in enumerate(SCENARIOS):
-            self.assertEqual(source.scenario_at(index * 10), scenario)
-            self.assertEqual(source.scenario_at(index * 10 + 9.9), scenario)
-        self.assertEqual(source.scenario_at(70), "ok")
-
-    def test_collect_is_deterministic_and_independent(self):
-        source = FakeSource()
-        with patch.object(source, "_elapsed", return_value=0):
-            first = source.collect_safely()
-            first.metrics["tokens_today"] = -1
-            second = source.collect_safely()
-        self.assertEqual(second.metrics, SCENARIO_METRICS["ok"])
-        self.assertEqual(second.source_id, "fake")
-        self.assertEqual(second.updated_at.tzinfo, timezone.utc)
-
-    def test_offline_values_and_warning_alert(self):
-        source = FakeSource()
-        with patch.object(source, "current_scenario", return_value="offline"):
-            snapshot = source.collect()
-        self.assertTrue(all(value is None for value in snapshot.metrics.values()))
-        with patch.object(source, "current_scenario", return_value="warning"):
-            self.assertEqual(source.collect().alerts[0]["severity"], "warning")
-
+class SourceRegistryTests(unittest.TestCase):
     def test_sources_are_registered_and_disabled_sources_do_not_probe(self):
         self.assertEqual(set(available_sources()),
-                         {"fake", "ollama", "litellm", "opencode_go", "ollama_cloud", "codex", "claude"})
-        config = load_config()
-        sources = build_sources(config)
-        self.assertEqual([source.id for source in sources], ["fake"])
+                         {"ollama", "litellm", "opencode_go", "ollama_cloud", "codex", "claude"})
+        # No source section is enabled in the defaults, so nothing is probed.
+        self.assertEqual(build_sources(load_config()), [])
 
     def test_source_failure_becomes_offline(self):
         source = Source()
@@ -158,26 +136,26 @@ class StorageTests(unittest.TestCase):
         self.addCleanup(lambda: self.storage.close())
 
     def test_round_trip_and_reopen(self):
-        snapshot = SourceSnapshot("fake", "warning", metrics={"tokens_today": 123},
+        snapshot = SourceSnapshot("svc", "warning", metrics={"tokens_today": 123},
                                   alerts=[{"severity": "warning", "message": "test"}],
                                   error="test error")
         self.storage.save_snapshot(snapshot)
         self.storage.close()
         self.storage = Storage(self.path)
-        restored = self.storage.latest_snapshots()["fake"]
+        restored = self.storage.latest_snapshots()["svc"]
         self.assertEqual(restored.to_dict(), snapshot.to_dict())
         self.assertIsInstance(restored.updated_at, datetime)
         self.assertEqual(restored.updated_at.tzinfo, timezone.utc)
-        self.assertEqual(build_status_payload({"fake": restored})["overall_status"], "warning")
+        self.assertEqual(build_status_payload({"svc": restored})["overall_status"], "warning")
 
     def test_latest_per_source_and_timestamp_tie(self):
         moment = datetime(2026, 1, 1, tzinfo=timezone.utc)
         for status in ("ok", "warning"):
-            self.storage.save_snapshot(SourceSnapshot("fake", status, moment))
-        self.storage.save_snapshot(SourceSnapshot("fake", "offline", moment - timedelta(days=1)))
+            self.storage.save_snapshot(SourceSnapshot("svc", status, moment))
+        self.storage.save_snapshot(SourceSnapshot("svc", "offline", moment - timedelta(days=1)))
         self.storage.save_snapshot(SourceSnapshot("other", "active", moment))
         latest = self.storage.latest_snapshots()
-        self.assertEqual(latest["fake"].status, "warning")
+        self.assertEqual(latest["svc"].status, "warning")
         self.assertEqual(latest["other"].status, "active")
 
     def test_empty_storage(self):
@@ -188,7 +166,7 @@ class StorageTests(unittest.TestCase):
         def worker():
             try:
                 for _ in range(10):
-                    self.storage.save_snapshot(FakeSource().collect())
+                    self.storage.save_snapshot(SourceSnapshot("svc", "ok"))
                     self.storage.latest_snapshots()
             except Exception as exc:
                 errors.append(exc)
@@ -198,13 +176,16 @@ class StorageTests(unittest.TestCase):
         for thread in threads:
             thread.join()
         self.assertEqual(errors, [])
-        self.assertEqual(self.storage.latest_snapshots()["fake"].status, "ok")
+        self.assertEqual(self.storage.latest_snapshots()["svc"].status, "ok")
 
 
 class DashboardTests(unittest.TestCase):
-    def test_response_shape_and_fake_data(self):
-        snapshot = FakeSource().collect()
-        payload = build_status_payload({"fake": snapshot})
+    def test_response_shape_of_the_local_sources(self):
+        """The unmanaged path still renders its three-card summary."""
+        snapshot = SourceSnapshot("litellm", "ok", metrics={
+            "requests_today": 42, "tokens_today": 128000, "spend_today": 0.5,
+            "top_model": "gpt-4o", "errors_today": 0})
+        payload = build_status_payload({"litellm": snapshot})
         self.assertEqual(set(payload), {"app", "version", "updated_at", "overall_status", "cards"})
         self.assertEqual(payload["app"], "presto-ai-dash")
         self.assertEqual(datetime.fromisoformat(payload["updated_at"]), snapshot.updated_at)
@@ -213,10 +194,9 @@ class DashboardTests(unittest.TestCase):
         for card in payload["cards"]:
             self.assertEqual(set(card), {"id", "title", "status", "primary", "secondary",
                                          "detail", "accent", "alert"})
-            self.assertIn("fake source", card["secondary"])
             self.assertTrue(all(isinstance(line, str) for line in card["detail"]))
             self.assertIsNone(card["alert"])
-        self.assertIn("128000", payload["cards"][0]["primary"])
+        self.assertEqual(payload["cards"][2]["primary"], "42 requests today")
         json.dumps(payload)
         import presto_path  # noqa: F401
         from cards import parse_cards
@@ -224,31 +204,24 @@ class DashboardTests(unittest.TestCase):
         self.assertIsNone(error)
         self.assertEqual([card.id for card in parsed], ["dash", "ollama", "litellm"])
 
-    def test_empty_response_is_offline(self):
+    def test_nothing_configured_sends_an_empty_home_and_no_sample_reading(self):
+        """No source reported: the device draws its first-run screen."""
         payload = build_status_payload({})
-        self.assertEqual(payload["overall_status"], "offline")
+        self.assertEqual(payload["sources"], [])
+        self.assertEqual([card["id"] for card in payload["cards"]], ["dash"])
         self.assertIsNone(payload["updated_at"])
-        self.assertTrue(all(card["status"] == "offline" for card in payload["cards"]))
-        self.assertIn("unavailable", payload["cards"][0]["primary"])
-
-    def test_each_scenario_rolls_up_and_alerts_are_visible(self):
-        source = FakeSource()
-        for scenario in SCENARIOS:
-            with self.subTest(scenario=scenario):
-                with patch.object(source, "current_scenario", return_value=scenario):
-                    snapshot = source.collect()
-                payload = build_status_payload({"fake": snapshot})
-                self.assertEqual(payload["overall_status"], scenario)
-                self.assertTrue(all(card["status"] == scenario for card in payload["cards"]))
-                if snapshot.alerts:
-                    self.assertEqual(payload["cards"][0]["alert"]["severity"], scenario)
+        # The daemon's own status vocabulary is unchanged: the empty screen
+        # is the device's reading of "no rows", not a new status here.
+        self.assertEqual(payload["overall_status"], "ok")
 
 
 class ApiTests(unittest.TestCase):
     def setUp(self):
         self.storage = Storage(":memory:")
         self.addCleanup(self.storage.close)
-        self.storage.save_snapshot(FakeSource().collect())
+        self.storage.save_snapshot(SourceSnapshot("litellm", "ok", metrics={
+            "requests_today": 42, "tokens_today": 128000, "spend_today": 0.5,
+            "top_model": "gpt-4o", "errors_today": 0}))
         self.api = ApiServer("127.0.0.1", 0, self.storage, "test-token")
         self.api.start()
         self.addCleanup(self.api.stop)
@@ -325,18 +298,23 @@ class DaemonTests(unittest.TestCase):
             config = load_config()
         config["daemon"].update(host="127.0.0.1", port=0, database=":memory:",
                                 shared_token="test-token", poll_interval=1)
-        config["sources"]["fake"]["scenario_interval"] = 1
-        daemon = Daemon(config).setup().start()
+        config["sources"]["ollama"].update(enabled=True, base_url="http://127.0.0.1:1",
+                                            timeout=1)
+        def collect(source):
+            return source.snapshot("active", metrics={"loaded_model": "fixture"})
+        with patch.object(OllamaSource, "collect", new=collect):
+            daemon = Daemon(config).setup().start()
         try:
             url = "http://127.0.0.1:%d/api/v1/status" % daemon.api.actual_port
             opener = build_opener(ProxyHandler({}))
             request = Request(url, headers={"Authorization": "Bearer test-token"})
             with opener.open(request, timeout=3) as response:
-                self.assertEqual(json.load(response)["overall_status"], "ok")
+                self.assertEqual(json.load(response)["overall_status"], "active")
             deadline = time.monotonic() + 3
-            while daemon.storage.latest_snapshots()["fake"].status == "ok":
-                self.assertLess(time.monotonic(), deadline, "collector did not update")
+            while "ollama" not in daemon.storage.latest_snapshots():
+                self.assertLess(time.monotonic(), deadline, "collector did not report")
                 time.sleep(0.05)
+            self.assertEqual(daemon.storage.latest_snapshots()["ollama"].status, "active")
         finally:
             daemon.stop()
         self.assertFalse(daemon.api._thread.is_alive())

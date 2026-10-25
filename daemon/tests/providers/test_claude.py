@@ -81,7 +81,6 @@ class ClaudeDatabaseTests(ManagementBase):
         # Management fixtures clear env keys; real Windows shell launch needs these.
         process_patch = patch.dict(os.environ, process_env)
         process_patch.start(); self.addCleanup(process_patch.stop)
-        self.disable_fake()
         self.settings = Path(self.temp.name) / "settings.json"
         self.settings.write_text(json.dumps({"other": "preserved"}), encoding="utf-8")
         self.row = self.manager.save({"type": "claude", "name": "Claude personal", "enabled": True,

@@ -37,9 +37,9 @@ quiet_end = "07:00"
 pop_to_top = true
 mute_hours = 4
 
-[sources.fake]
-enabled = true
-scenario_interval = 20
+[demo]
+# Sample data instead of the real accounts. Off by default.
+enabled = false
 ```
 
 ## `[daemon]`
@@ -122,6 +122,7 @@ Every variable below overrides the matching configuration key.
 | `DASH_KEY_FILE` | `admin.key_file` | |
 | `DASH_ENCRYPTION_KEY` | The encryption master key | A Fernet key. Use it when the key file cannot be protected, such as in a container |
 | `DASH_INGEST_ENABLED` | `daemon.ingest_enabled` and the stored switch | Accepts `1/true/yes/on` and `0/false/no/off`, case-insensitively. An invalid value fails closed: the route stays off |
+| `DASH_DEMO` | `demo.enabled` and the stored switch | Accepts `1/true/yes/on` and `0/false/no/off`, case-insensitively. An invalid value fails closed: demo mode stays off |
 | `DASH_OVERFLOW_ROWS` | `display.overflow_rows` | 0 to 3. A value outside that range stops the daemon at startup |
 | `LITELLM_API_KEY` | The LiteLLM source's key | Only when `sources.litellm.api_key_env` names it |
 

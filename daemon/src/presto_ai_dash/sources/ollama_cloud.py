@@ -77,10 +77,16 @@ class OllamaCloudSource(QuotaHttpSource):
             if not isinstance(purchased, dict):
                 raise ValueError("invalid purchased cloud balance")
             balance["purchased_remaining_usd"] = self._amount(purchased.get("balance_usd"))
+        # Included credit exhaustion does not block usage backed by purchased funds.
+        if balance.get("purchased_remaining_usd", 0) > 0:
+            for window in windows:
+                if window["id"] == "monthly_credits":
+                    window["exhaustion_blocks"] = False
         report = quota_report(self.provider, self.product, windows,
                               max(180, self.config.get("refresh_seconds", 60) * 3))
         report["cloud_balance"] = balance
-        return report, any(w["used_percent"] is not None and w["used_percent"] >= 100
+        return report, any(w.get("exhaustion_blocks", True) and
+                           w["used_percent"] is not None and w["used_percent"] >= 100
                            for w in windows)
 
     def _read(self, url):
@@ -151,6 +157,10 @@ class OllamaCloudSource(QuotaHttpSource):
             activity["range"] = data["range"]
         for key in ("request_count", "usage_usd", "input_tokens", "cached_input_tokens", "output_tokens"):
             value = totals.get(key)
+            # Legacy requests report counts without monetary/token measurements.
+            if key != "request_count" and value is None:
+                activity[key] = None
+                continue
             if type(value) not in (int, float) or not math.isfinite(value) or value < 0:
                 raise ValueError("invalid cloud activity measurement")
             if key != "usage_usd" and type(value) is not int:

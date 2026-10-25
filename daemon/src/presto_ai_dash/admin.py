@@ -253,6 +253,14 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
                         log.error("admin ingest state failed")
                         self._send(500, {"error": "ingest state could not be read"})
                 return
+            if path == "/api/admin/demo":
+                if self._authorized():
+                    try:
+                        self._send(200, manager.demo_state())
+                    except Exception:
+                        log.error("admin demo state failed")
+                        self._send(500, {"error": "demo state could not be read"})
+                return
             if path == "/api/admin/display":
                 if self._authorized():
                     try:
@@ -317,13 +325,14 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
             reorder = method == "PUT" and path == "/api/admin/source-order"
             export = re.fullmatch(r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/claude-export", path)
             ingest_setting = method == "PUT" and path == "/api/admin/ingest"
+            demo_setting = method == "PUT" and path == "/api/admin/demo"
             display_setting = method == "PUT" and path == "/api/admin/display"
             alerts_setting = method == "PUT" and path == "/api/admin/alerts"
             service_alerts = method == "PUT" and re.fullmatch(SERVICE_ALERTS_PATH, path)
             if ((method == "POST" and path != "/api/admin/sources" and export is None) or
                     (method != "POST" and match is None and not reorder and
-                     not ingest_setting and not display_setting and not alerts_setting
-                     and not service_alerts)):
+                     not ingest_setting and not demo_setting and not display_setting
+                     and not alerts_setting and not service_alerts)):
                 self._send(404, {"error": "not found"})
                 return
             if (self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json"
@@ -348,6 +357,8 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
                     result = manager.reorder(data)
                 elif ingest_setting:
                     result = manager.set_ingest_enabled(data)
+                elif demo_setting:
+                    result = manager.set_demo_enabled(data)
                 elif display_setting:
                     result = manager.set_display(data)
                 elif alerts_setting:

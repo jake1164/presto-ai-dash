@@ -53,3 +53,16 @@ jobs:
       - name: Run the tests
         working-directory: daemon
         run: python -m unittest discover -s tests -q
+
+      - name: Build the demo page's app files
+        # The documentation site's clickable demo runs the real app in
+        # MicroPython WebAssembly. One job builds its files and one checks them,
+        # so a change to presto/ that MicroPython cannot import, or that draws
+        # different pixels than CPython, fails here and not on the live site.
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.13'
+        run: python tools/build_demo_site.py
+
+      - name: Check the demo page under MicroPython WebAssembly
+        # Uses the Node that ships on the runner; nothing is installed.
+        if: matrix.os == 'ubuntu-latest' && matrix.python == '3.13'
+        run: node tools/check_demo_wasm.mjs

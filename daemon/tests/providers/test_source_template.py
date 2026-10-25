@@ -104,6 +104,13 @@ class SourceTemplateTests(unittest.TestCase):
         """The matching test template ships with the source template."""
         self.assertTrue((TEMPLATE.parent / "test_source_template.py").is_file())
 
+    def test_the_template_tells_the_author_to_add_demo_data(self):
+        """A new source needs a demo account; the template is where a new source starts."""
+        text = TEMPLATE.read_text(encoding="utf-8")
+        self.assertIn("demo data", text)
+        self.assertIn("demo.py", text)
+        self.assertIn("test_demo.py", text)
+
 
 if __name__ == "__main__":
     unittest.main()

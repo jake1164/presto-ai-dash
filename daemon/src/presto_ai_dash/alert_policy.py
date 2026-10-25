@@ -220,6 +220,10 @@ def threshold_status(report, warning_percent=DEFAULT_WARNING_PERCENT,
             # not raise an alert.
             continue
         level = level_for_percent(percent, warning_percent, critical_percent)
+        if level == "rate_limited" and window.get("exhaustion_blocks") is False:
+            # Still alert on an exhausted allowance, without claiming that
+            # usage is blocked when separately reported funds can cover it.
+            level = "critical"
         if level is None:
             continue
         if best is None or THRESHOLD_ORDER.index(level) > THRESHOLD_ORDER.index(best):

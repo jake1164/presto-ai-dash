@@ -133,7 +133,6 @@ class FailedSignInTests(ManagementBase):
 
     def setUp(self):
         super().setUp()
-        self.disable_fake()
         self.api = ApiServer("127.0.0.1", 0, self.storage, "device-token-0123456789",
                              status_provider=self.manager.status_payload,
                              ingest_enabled=lambda: True)

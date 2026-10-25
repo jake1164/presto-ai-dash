@@ -43,6 +43,9 @@ purchased funds and team usage can make the totals differ.
 
 Missing or invalid balances stay unavailable; a zero allowance has no percentage.
 An exhausted included balance reads 100% consumed even if purchased funds remain.
+With purchased funds available, this raises an exhausted-allowance alert without
+claiming the account is rate limited. Legacy request-only activity shows requests;
+missing spend and token totals are omitted rather than displayed as zero.
 The connector does not infer a plan name from an allowance, fetch recent individual
 requests, or call model-generation, payment or account-management endpoints.
 

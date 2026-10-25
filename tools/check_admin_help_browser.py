@@ -24,6 +24,7 @@ environment's Python (the throwaway daemon still runs with .venv):
     .venv-browser/Scripts/python tools/check_admin_help_browser.py
 """
 
+import copy
 import os
 import re
 import shutil
@@ -230,6 +231,38 @@ def main():
             if page.evaluate("document.documentElement.scrollWidth > innerWidth"):
                 failures.append("expanded provider cards overflow the phone viewport")
             page.set_viewport_size({"width": 1280, "height": 900})
+            # Legacy activity has request counts without cost/token measurements.
+            cloud_fixture = next(source for source in fixtures["sources"] if source["type"] == "ollama_cloud")
+            saved_quota = copy.deepcopy(cloud_fixture["quota"])
+            cloud_fixture["quota"] = {
+                "windows": [{"label": "Weekly", "state": "available", "used_percent": 60,
+                             "period_minutes": 10080, "observed_at": now.isoformat(),
+                             "resets_at": (now + timedelta(days=3)).isoformat()}],
+                "activity": dict(saved_quota["activity"], request_count=23, usage_usd=None,
+                                 input_tokens=None, output_tokens=None, cached_input_tokens=None)}
+            page.reload()
+            page.wait_for_selector("#workspace:not([hidden])")
+            cloud = page.locator(".source").filter(has=page.get_by_role("button", name="Show the details of Ollama Cloud", exact=True))
+            if cloud.locator(".card-toggle").get_attribute("aria-expanded") != "true":
+                cloud.locator(".card-toggle").click()
+            page.wait_for_function("() => [...document.querySelectorAll('.reading-fact strong')].some(el => el.textContent === '23')")
+            legacy_text = cloud.inner_text()
+            if "NaN" in legacy_text or "Activity spend" in legacy_text or "Tokens" in legacy_text:
+                failures.append("legacy activity invents missing cost or tokens: " + legacy_text)
+            if cloud.locator(".reading-fact").count() != 1:
+                failures.append("legacy activity lost its single measured request total")
+            cloud.screenshot(path=os.path.join(shots, "ollama-legacy.png"))
+            page.set_viewport_size({"width": 390, "height": 800})
+            cloud.screenshot(path=os.path.join(shots, "phone-ollama-legacy.png"))
+            if page.evaluate("document.documentElement.scrollWidth > innerWidth"):
+                failures.append("legacy cloud card overflows phone viewport")
+            cloud_fixture["quota"] = saved_quota
+            page.set_viewport_size({"width": 1280, "height": 900})
+            page.reload()
+            page.wait_for_selector("#workspace:not([hidden])")
+            for toggle in page.locator(".card-toggle").all():
+                if toggle.get_attribute("aria-expanded") != "true":
+                    toggle.click()
             page.locator(".card-links a[href='#settings']").first.click()
             if page.locator("#remote-setting").get_attribute("open") is None:
                 failures.append("the footer remote-report link did not open its settings")

@@ -127,16 +127,16 @@ class DisplayAdminTests(AdminServerBase):
         self.request("/api/admin/display", "PUT", {"overflow_rows": 2})
         self.assertEqual(self.manager.status_payload()["display"], {"overflow_rows": 2})
 
-    def test_an_old_device_tolerates_the_new_key(self):
+    def test_the_device_parses_a_payload_that_carries_the_display_key(self):
         """The device ignores keys it does not know."""
         from cards import parse_cards
-        from net import embedded_payload
-        payload = embedded_payload()
+        from payloads import sample_payload
+        payload = sample_payload()
         payload["display"] = {"overflow_rows": 2}
         cards, error = parse_cards(payload)
         self.assertIsNone(error)
         self.assertEqual([card.id for card in cards],
-                         ["dash", "ollama", "litellm"])
+                         ["dash", "go", "cx", "cl", "oc", "ol", "li"])
 
     def test_the_page_wires_the_control(self):
         status, _, html = self.request("/")

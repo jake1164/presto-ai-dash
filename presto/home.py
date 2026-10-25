@@ -1,4 +1,4 @@
-"""Live source/quota rows, static preview data, and bounded Home scrolling.
+"""Live source/quota rows and bounded Home scrolling.
 
 Home lists the accounts in the saved order. When the list is taller than the
 list area, the rows that are not fully visible are named in a strip at the
@@ -11,7 +11,6 @@ from gestures import DRAG_SLOP_PX
 
 LIST_TOP = 56
 LIST_HEIGHT = 150
-ROW_HEIGHT = 50
 
 # Live Home: the accounts in the order they are saved. A quota account is two
 # lines; a local service among quota rows is one compact line.
@@ -63,13 +62,6 @@ STRIP_GAP = 4
 STRIP_SEPARATOR = 8
 STRIP_SLACK = 2
 STRIP_MIN_CHARS = 4
-
-DEMO_QUOTAS = (
-    {"name": "OpenAI", "daily": 62, "weekly": 38},
-    {"name": "Claude", "daily": 84, "weekly": 68},
-    {"name": "Ollama Cloud", "daily": 93, "weekly": 79},
-    {"name": "OpenCode.ai", "daily": 27, "weekly": 54},
-)
 
 
 def scroll_limit(total_height, height=LIST_HEIGHT):
@@ -633,9 +625,9 @@ def source_rows(payload):
                 requests, cost = activity.get("request_count"), activity.get("usage_usd")
                 amount = (("%.5f" % cost).rstrip("0").rstrip(".")
                           if _number(cost) and 0 < cost < 0.01 else "%.2f" % cost if _number(cost) else "")
-                text = ("%s req / $%s" % (requests, amount)
-                        if quota_value(requests) is not None and quota_value(cost) is not None
-                        else "Activity unavailable")
+                text = "%s req" % requests if quota_value(requests) is not None else "Activity unavailable"
+                if text != "Activity unavailable" and quota_value(cost) is not None:
+                    text += " / $" + amount
                 start, until = iso_seconds(activity.get("from")), iso_seconds(activity.get("until"))
                 if text[0] != "A" and start is not None and until is not None and until > start:
                     period = activity.get("range")

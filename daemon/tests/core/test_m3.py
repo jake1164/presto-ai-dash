@@ -37,7 +37,7 @@ class StorageM3Tests(unittest.TestCase):
         self.storage = Storage(self.path)
         self.addCleanup(lambda: self.storage.close())
 
-    def snapshot(self, status="ok", moment=None, alerts=None, source="fake"):
+    def snapshot(self, status="ok", moment=None, alerts=None, source="svc"):
         return SourceSnapshot(source, status, moment or datetime(2026, 1, 1, tzinfo=UTC),
                               metrics={"count": 1}, alerts=alerts or [])
 
@@ -46,19 +46,19 @@ class StorageM3Tests(unittest.TestCase):
         later = self.snapshot("active", datetime.fromisoformat("2026-01-01T11:00:00+00:00"))
         self.storage.save_snapshot(earlier)
         self.storage.save_snapshot(later)
-        latest = self.storage.latest_snapshots()["fake"]
+        latest = self.storage.latest_snapshots()["svc"]
         self.assertEqual(latest.status, "active")
         self.assertEqual(latest.updated_at, datetime(2026, 1, 1, 11, tzinfo=UTC))
-        rows = self.storage.snapshot_history("fake", datetime(2026, 1, 1, 10, tzinfo=UTC),
+        rows = self.storage.snapshot_history("svc", datetime(2026, 1, 1, 10, tzinfo=UTC),
                                              datetime(2026, 1, 1, 11, tzinfo=UTC))
         self.assertEqual([row.status for row in rows], ["warning"])
         self.assertEqual(self.storage.snapshot_history("missing", datetime(2026, 1, 1, tzinfo=UTC)), [])
 
     def test_latest_updated_at_is_the_newest_time_a_source_has_saved(self):
-        self.assertIsNone(self.storage.latest_updated_at("fake"))
+        self.assertIsNone(self.storage.latest_updated_at("svc"))
         self.storage.save_snapshot(self.snapshot("ok", datetime(2026, 1, 1, 12, tzinfo=UTC)))
         self.storage.save_snapshot(self.snapshot("ok", datetime(2026, 1, 1, 11, tzinfo=UTC)))
-        self.assertEqual(self.storage.latest_updated_at("fake"), datetime(2026, 1, 1, 12, tzinfo=UTC))
+        self.assertEqual(self.storage.latest_updated_at("svc"), datetime(2026, 1, 1, 12, tzinfo=UTC))
         self.assertIsNone(self.storage.latest_updated_at("other"))
 
     def test_history_source_isolation_newest_limit_and_ties(self):
@@ -66,13 +66,13 @@ class StorageM3Tests(unittest.TestCase):
         for status in ("ok", "active", "warning"):
             self.storage.save_snapshot(self.snapshot(status, moment))
         self.storage.save_snapshot(self.snapshot("critical", moment, source="other"))
-        rows = self.storage.snapshot_history("fake", moment, limit=2)
+        rows = self.storage.snapshot_history("svc", moment, limit=2)
         self.assertEqual([row.status for row in rows], ["active", "warning"])
         for bad in (0, 1001, True, 1.0, "2"):
             with self.subTest(limit=bad), self.assertRaises(ValueError):
-                self.storage.snapshot_history("fake", moment, limit=bad)
+                self.storage.snapshot_history("svc", moment, limit=bad)
         with self.assertRaises(ValueError):
-            self.storage.snapshot_history("fake", moment, moment)
+            self.storage.snapshot_history("svc", moment, moment)
 
     def test_alert_observations_dedupe_per_snapshot_and_reopen(self):
         moment = datetime(2026, 1, 1, tzinfo=UTC)
@@ -80,13 +80,13 @@ class StorageM3Tests(unittest.TestCase):
                  {"severity": "warning", "message": "Elevated"}]
         snapshot_id = self.storage.save_snapshot(self.snapshot("warning", moment, items))
         self.storage.save_snapshot(self.snapshot("warning", moment + timedelta(minutes=1), items))
-        observations = self.storage.alert_history("fake", moment, limit=10)
+        observations = self.storage.alert_history("svc", moment, limit=10)
         self.assertEqual(len(observations), 2)
         self.assertEqual(observations[0]["snapshot_id"], snapshot_id)
         self.assertEqual(observations[0]["observed_at"], moment)
         self.storage.close()
         self.storage = Storage(self.path)
-        self.assertEqual(len(self.storage.alert_history("fake", moment)), 2)
+        self.assertEqual(len(self.storage.alert_history("svc", moment)), 2)
 
     def test_invalid_alert_and_database_failure_roll_back_snapshot(self):
         invalid = self.snapshot("warning", alerts=[{"severity": "bogus", "message": "x"}])
@@ -97,7 +97,7 @@ class StorageM3Tests(unittest.TestCase):
         with self.assertRaises(sqlite3.IntegrityError):
             self.storage.save_snapshot(self.snapshot("warning", alerts=[
                 {"severity": "warning", "message": "x"}]))
-        self.assertEqual(self.storage.snapshot_history("fake", datetime(2020, 1, 1, tzinfo=UTC)), [])
+        self.assertEqual(self.storage.snapshot_history("svc", datetime(2020, 1, 1, tzinfo=UTC)), [])
 
     def test_history_reads_writes_and_pruning_can_overlap(self):
         start = datetime(2026, 1, 1, tzinfo=UTC)
@@ -119,8 +119,8 @@ class StorageM3Tests(unittest.TestCase):
                 gate.wait()
                 for _ in range(30):
                     self.storage.latest_snapshots()
-                    self.storage.snapshot_history("fake", start)
-                    self.storage.alert_history("fake", start)
+                    self.storage.snapshot_history("svc", start)
+                    self.storage.alert_history("svc", start)
             except Exception as exc:
                 errors.append(exc)
 
@@ -151,7 +151,7 @@ class StorageM3Tests(unittest.TestCase):
             id INTEGER PRIMARY KEY AUTOINCREMENT, source_id TEXT NOT NULL,
             status TEXT NOT NULL, updated_at TEXT NOT NULL, metrics TEXT NOT NULL,
             alerts TEXT NOT NULL, error TEXT)""")
-        connection.execute("INSERT INTO snapshots VALUES (7, 'fake', 'warning', ?, '{}', ?, NULL)",
+        connection.execute("INSERT INTO snapshots VALUES (7, 'legacy', 'warning', ?, '{}', ?, NULL)",
                            ("2026-01-01T12:00:00+02:00", json.dumps([
                                {"severity": "warning", "message": "Elevated", "created_at": "old"}])))
         connection.execute("PRAGMA user_version = 0")
@@ -160,17 +160,50 @@ class StorageM3Tests(unittest.TestCase):
         self.storage = Storage(self.path)
         row = self.storage._conn.execute("SELECT updated_at FROM snapshots WHERE id=7").fetchone()
         self.assertEqual(row[0], "2026-01-01T10:00:00.000000+00:00")
-        restored = self.storage.latest_snapshots()["fake"]
+        restored = self.storage.latest_snapshots()["legacy"]
         self.assertEqual(restored.status, "warning")
         self.assertEqual(restored.metrics, {})
         self.assertEqual(self.storage._conn.execute("SELECT id FROM snapshots").fetchone()[0], 7)
-        self.assertEqual(self.storage.alert_history("fake", datetime(2026, 1, 1, tzinfo=UTC))[0]["observed_at"],
+        self.assertEqual(self.storage.alert_history("legacy", datetime(2026, 1, 1, tzinfo=UTC))[0]["observed_at"],
                          datetime(2026, 1, 1, 10, tzinfo=UTC))
         self.storage.close()
         self.storage = Storage(self.path)
         self.assertEqual(self.storage._conn.execute("SELECT COUNT(*) FROM alerts").fetchone()[0], 1)
         self.assertEqual(self.storage._conn.execute("PRAGMA user_version").fetchone()[0],
                          Storage.SCHEMA_VERSION)
+
+    def test_a_saved_demo_source_is_removed_by_the_migration(self):
+        """A database from before the demo source was removed keeps working."""
+        self.storage.close()
+        connection = sqlite3.connect(self.path)
+        connection.execute(
+            "INSERT INTO source_instances (id, type, name, enabled, config, credential,"
+            " revision, position) VALUES ('fake', 'fake', 'Fake', 1, '{}', NULL, 1, 0)")
+        connection.execute(
+            "INSERT INTO snapshots (source_id, status, updated_at, metrics, alerts)"
+            " VALUES ('fake', 'warning', '2026-01-01T12:00:00+00:00', '{}', '[]')")
+        connection.execute("PRAGMA user_version = 8")
+        connection.commit()
+        connection.close()
+        self.storage = Storage(self.path)
+        self.assertEqual(self.storage.source_instances(), [])
+        self.assertEqual(self.storage.latest_snapshots(), {})
+        self.assertEqual(self.storage.schema_version(), Storage.SCHEMA_VERSION)
+        self.storage.close()
+        config = load_config()
+        config["daemon"].update(host="127.0.0.1", port=0, database=str(self.path),
+                                shared_token="device-token")
+        daemon = Daemon(config).setup().start()
+        try:
+            request = Request("http://127.0.0.1:%d/api/v1/status" % daemon.api.actual_port,
+                              headers={"Authorization": "Bearer device-token"})
+            with build_opener(ProxyHandler({})).open(request, timeout=3) as response:
+                payload = json.load(response)
+            # The upgraded daemon serves the empty Home, not sample data.
+            self.assertEqual([card["id"] for card in payload["cards"]], ["dash"])
+            self.assertEqual(payload["sources"], [])
+        finally:
+            daemon.stop()
 
     def test_bad_legacy_data_rolls_back_and_newer_schema_is_rejected(self):
         self.storage.close()
@@ -179,9 +212,9 @@ class StorageM3Tests(unittest.TestCase):
         connection.execute("DROP INDEX IF EXISTS idx_snapshots_source_time")
         connection.execute("DROP INDEX IF EXISTS idx_snapshots_time")
         connection.execute("INSERT INTO snapshots(source_id,status,updated_at,metrics,alerts) "
-                           "VALUES('fake','ok','2026-01-01T12:00:00+02:00','{}','[]')")
+                           "VALUES('legacy','ok','2026-01-01T12:00:00+02:00','{}','[]')")
         connection.execute("INSERT INTO snapshots(source_id,status,updated_at,metrics,alerts) "
-                           "VALUES('fake','ok','not-a-date','{}','[]')")
+                           "VALUES('legacy','ok','not-a-date','{}','[]')")
         connection.execute("PRAGMA user_version = 0")
         connection.commit()
         connection.close()
@@ -221,8 +254,8 @@ class StorageM3Tests(unittest.TestCase):
         self.storage.save_snapshot(self.snapshot("warning", cutoff, [
             {"severity": "warning", "message": "boundary"}]))
         self.assertEqual(self.storage.prune(now, 72), {"snapshots": 1, "alerts": 1})
-        self.assertEqual(len(self.storage.snapshot_history("fake", cutoff)), 1)
-        self.assertEqual(len(self.storage.alert_history("fake", cutoff)), 1)
+        self.assertEqual(len(self.storage.snapshot_history("svc", cutoff)), 1)
+        self.assertEqual(len(self.storage.alert_history("svc", cutoff)), 1)
         self.assertEqual(self.storage.prune(now, 72), {"snapshots": 0, "alerts": 0})
         self.assertEqual(self.storage.prune(now + timedelta(hours=72, microseconds=1), 72),
                          {"snapshots": 1, "alerts": 1})
@@ -304,7 +337,6 @@ class DaemonM3Tests(unittest.TestCase):
             config["daemon"].update(host="127.0.0.1", port=0,
                                     database=str(Path(temp) / "startup-failure.db"),
                                     shared_token="token")
-            config["sources"]["fake"]["enabled"] = False
             daemon = Daemon(config).setup()
             with patch.object(daemon.storage, "prune", side_effect=RuntimeError("cleanup failed")):
                 with self.assertRaisesRegex(RuntimeError, "cleanup failed"):
@@ -319,7 +351,6 @@ class DaemonM3Tests(unittest.TestCase):
             config["daemon"].update(host="127.0.0.1", port=0,
                                     database=str(Path(temp) / "periodic.db"),
                                     shared_token="token", cleanup_interval=1)
-            config["sources"]["fake"]["enabled"] = False
             daemon = Daemon(config).setup()
             calls = 0
             recovered = threading.Event()
@@ -354,7 +385,6 @@ class DaemonM3Tests(unittest.TestCase):
             config["daemon"].update(host="127.0.0.1", port=0, database=str(db),
                                     shared_token="token", poll_interval=100,
                                     retention_hours=72, cleanup_interval=100)
-            config["sources"]["fake"]["enabled"] = False
             daemon = Daemon(config).setup().start()
             try:
                 self.assertEqual(daemon.storage.latest_snapshots(), {})
@@ -410,8 +440,10 @@ class DaemonM3Tests(unittest.TestCase):
                     with opener.open(request, timeout=3) as response:
                         payload = json.loads(response.read())
                     self.assertEqual([card["id"] for card in payload["cards"]],
-                                     ["dash", "ollama", "litellm"])
-                    self.assertTrue(payload["updated_at"].endswith("+00:00"))
+                                     ["dash"])
+                    # The TOML enables no source, so nothing is invented.
+                    self.assertEqual(payload["sources"], [])
+                    self.assertIsNone(payload["updated_at"])
                 finally:
                     if process.stdin:
                         process.stdin.close()

@@ -45,6 +45,7 @@ one setting.
 | Decide the alert thresholds | `alert_policy.py`, `alerts.py` |
 | Build the status payload and the device view | `dashboard.py` |
 | Build a card's tiles and detail lines | `card_tiles.py` |
+| Sample data for demo mode, the preview and the docs demo | `demo.py` |
 | Serve the device API | `api.py` |
 | Wire it together and run | `app.py` |
 
@@ -124,6 +125,21 @@ revision hash the device and the preview report.
 
 So there is no simulator-specific copy of the app logic, and the code on
 the device is byte-for-byte the code the preview runs.
+
+The same is true of the demo, which has one scenario in `demo.py`, built with
+the daemon's own payload builders, and runs in three places:
+
+- the daemon's **demo mode** (`DASH_DEMO` or the admin page) serves it to a real
+  Presto, marked with a DEMO chip;
+- the preview's **Demo** checkbox plays it through a client with no network;
+- the documentation site's **clickable demo** runs the real app in MicroPython
+  compiled to WebAssembly. `tools/build_demo_site.py` copies the app files
+  from the shared inventory, writes the scenario as data and records the pixels
+  CPython draws, and `tools/check_demo_wasm.mjs` proves the browser draws the
+  same pixels. The page's own code is only the stand-in for the hardware.
+
+The app's loop body is `App._tick()`: the device calls it every 20 ms and the
+page calls it from a browser timer, so neither runs a copy of it.
 
 ## Storage
 

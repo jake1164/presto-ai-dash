@@ -1,155 +1,89 @@
+<div align="center">
+
 # Presto AI Dash
 
-A tiny AI usage dashboard for Pimoroni Presto with support for local and cloud AI providers.
+**Your AI coding limits, reset times, and local AI service health — right on your desk.**
+
+![License: MIT](https://img.shields.io/badge/License-MIT-blue)
+![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![MicroPython](https://img.shields.io/badge/Device-MicroPython-2b8a73)
+
+[**Live Demo**](https://jake1164.github.io/presto-ai-dash/demo/) · [**Documentation**](https://jake1164.github.io/presto-ai-dash/) · [**Get Started**](https://jake1164.github.io/presto-ai-dash/getting-started/install-the-daemon/) · [**Request a Source**](https://github.com/jake1164/presto-ai-dash/issues/new/choose) · [**♥ Support**](#support-development)
+
+</div>
 
 <p align="center">
-  <img src="docs/user/images/device-home.jpg" width="420" alt="The Presto showing the Home list: OpenCode Go, Codex and Claude with their quota percentages and bars, then Ollama Cloud, Ollama and LiteLLM">
+  <img src="docs/user/images/presto-ai-dash-hero.png" width="960" alt="Presto AI Dash on a physical Pimoroni Presto, with subscription quotas, reset countdowns, local AI health, and six supported AI services">
 </p>
+
+Try it in your browser, no Presto needed: [see it running](https://jake1164.github.io/presto-ai-dash/demo/).
+
+## Your AI usage at a glance
+
+Presto AI Dash turns a **Pimoroni Presto touchscreen** into a dedicated monitor for AI subscription quotas, reset countdowns, and local AI services. Swipe between service cards, see warnings at a glance, and know when a reading is stale or unavailable.
+
+Provider collection is **read-only**: the app never sends prompts, spends credits, or changes plans or limits. API keys are encrypted in the daemon's database; the Presto never holds a provider key.
+
+> [!IMPORTANT]
+> **A separate computer or server is required.** This is **not a standalone app that runs entirely on the Presto**. You must run the **Python daemon as a background process or Docker container** on a computer/server on your network. It collects the data and keeps provider credentials; the Presto connects over Wi-Fi to display readings and control its own alerts.
+
+```mermaid
+flowchart TB
+    S["Cloud + local AI services"] --> D
+    D["Computer / server REQUIRED<br/>Python daemon or Docker"]
+    D -->|"Wi-Fi"| P["Presto touchscreen<br/>Display and alerts"]
+```
+
+## Supported services <img align="right" src="https://img.shields.io/badge/6-integrations-238636" alt="6 integrations">
+
+<table>
+  <tr>
+    <td width="400"><a href="https://jake1164.github.io/presto-ai-dash/guides/claude/"><strong>Claude Code ↗</strong></a><br>Subscription quota &amp; activity</td>
+    <td width="400"><a href="https://jake1164.github.io/presto-ai-dash/guides/codex/"><strong>OpenAI Codex ↗</strong></a><br>Quotas, resets &amp; banked credits</td>
+  </tr>
+  <tr>
+    <td><a href="https://jake1164.github.io/presto-ai-dash/guides/opencode-go/"><strong>OpenCode Go ↗</strong></a><br>Subscription limits &amp; resets</td>
+    <td><a href="https://jake1164.github.io/presto-ai-dash/guides/ollama-cloud/"><strong>Ollama Cloud ↗</strong></a><br>Cloud requests, tokens &amp; spend</td>
+  </tr>
+  <tr>
+    <td><a href="https://jake1164.github.io/presto-ai-dash/guides/ollama/"><strong>Ollama ↗</strong></a><br>Local models &amp; server health</td>
+    <td><a href="https://jake1164.github.io/presto-ai-dash/guides/litellm/"><strong>LiteLLM ↗</strong></a><br>Gateway usage, health &amp; spend</td>
+  </tr>
+</table>
+
+Each service links to its metrics, setup, collection method, and limitations. Also see [Source concepts](https://jake1164.github.io/presto-ai-dash/concepts/sources/) and [where quota numbers come from](https://jake1164.github.io/presto-ai-dash/concepts/quotas-and-provenance/).
+
+### 🔌 Missing your favorite AI service?
+
+Presto AI Dash is designed to grow. Request a new provider, subscription, or local service—**no coding or API knowledge required, and requests are free.**
+
+[**💡 Request a Source →**](https://github.com/jake1164/presto-ai-dash/issues/new/choose) &nbsp;&nbsp; [**🔧 Contribute a Source →**](CONTRIBUTING.md)
+
+## Get started
+
+1. [Install the daemon](https://jake1164.github.io/presto-ai-dash/getting-started/install-the-daemon/) or [run it with Docker](https://jake1164.github.io/presto-ai-dash/getting-started/install-with-docker/) **on your computer or server**.
+2. [Add your first source](https://jake1164.github.io/presto-ai-dash/getting-started/add-the-first-source/), or enable **Demo mode** on the admin page's **Settings** tab. It shows six sample accounts, marks them with a DEMO chip, and writes nothing.
+3. [Set up the Presto](https://jake1164.github.io/presto-ai-dash/getting-started/set-up-the-presto/) to connect over Wi-Fi.
+
+For Claude and Codex with a Docker daemon, run a [remote collector](https://jake1164.github.io/presto-ai-dash/guides/remote-collectors/) on the computer where you use them.
+
+For configuration, troubleshooting, security, and detailed limitations, see the [documentation](https://jake1164.github.io/presto-ai-dash/) and [privacy notes](https://jake1164.github.io/presto-ai-dash/privacy/).
+
+## Support development
+
+If Presto AI Dash is useful, a **GitHub star** helps others discover it. Sponsorships and coffee donations help support maintenance, testing, and future integrations. Donations are optional and don't guarantee a particular integration.
 
 <p align="center">
-  <img src="docs/user/images/device-claude.jpg" width="200" alt="The Claude card in a near-limit state: 5-hour and weekly bars, last use, token totals and included credit">
-  <img src="docs/user/images/device-codex.jpg" width="200" alt="The Codex card: the weekly window at 36 percent, reset countdown, banked reset credits and the next expiry">
-  <img src="docs/user/images/device-litellm.jpg" width="200" alt="The LiteLLM card: requests, tokens, spend, errors and the top model for today">
+  <a href="https://github.com/sponsors/jake1164"><img src="docs/user/images/sponsor-github.svg" alt="Support on GitHub Sponsors" height="35"></a>
+  <a href="https://buymeacoffee.com/jake1164s"><img src="https://cdn.buymeacoffee.com/buttons/default-orange.png" alt="Buy Me a Coffee" height="35"></a>
 </p>
 
-Documentation: <https://jake1164.github.io/presto-ai-dash/>
+## More projects
 
-Try it in your browser, no Presto needed:
-[see it running](https://jake1164.github.io/presto-ai-dash/demo/).
+**Pimoroni and maker projects:** [Presto Snake](https://github.com/jake1164/presto-snake) · [Awesome Pimoroni Presto](https://github.com/jake1164/awesome-Pimoroni-Presto) · [Waveshare Weather Clock](https://github.com/jake1164/Pico-RGB-Matrix-Weather-Clock) · [Tempest Weather Clock](https://github.com/jake1164/tempest-led-weather-clock)
 
-Presto AI Dash puts your AI subscription quotas and the health of your local
-AI services on a 240x240 touchscreen on your desk. A small Python daemon on
-your LAN reads the numbers, read-only, and the Presto polls it and draws them.
+**Self-hosted software:** [Family Librarian](https://github.com/jake1164/family-librarian) · [M3Undle](https://github.com/Sydney-Elvis/M3Undle)
 
-## What it shows
+Developers: [contribution guide](CONTRIBUTING.md) · [running the tests](https://jake1164.github.io/presto-ai-dash/developers/running-the-tests/) · [internal notes](docs/README.md).
 
-- **Quota windows** for each subscription account (`5h`, `Weekly`, `Monthly`,
-  as the provider reports them), each with its percentage, a bar, the time
-  to its reset, and tick marks at the warning and critical thresholds.
-- **Local service health**: whether Ollama is up and which model is loaded,
-  whether the LiteLLM gateway is healthy, and today's requests, tokens,
-  spend and errors.
-- **A Home list** of every service in the order you set in the admin page,
-  and **a card per service** with its quota windows, tiles (for example
-  last use, tokens, spend, top model) and detail lines.
-- **Alerts**: a service that crosses its warning or critical threshold turns
-  yellow or red, the LED shows the worst service, and Home can scroll to the
-  alarmed service. **Sound is optional and off by default.** A long press
-  mutes, and the **mute expires** (four hours by default) with a chip that
-  says how long is left.
-- **Touch**: swipe between cards, drag to scroll Home, **tap a row or a page
-  dot** to jump to that card, and tap **the bell on a card** to switch that
-  one service's alerts on or off.
-- **Honest staleness**: an old reading is dimmed and labelled with its age,
-  an expired window shows `--`, and a missing reading is never shown as `0%`.
-
-## What it reads
-
-| Source | What it reads | Where it runs |
-| --- | --- | --- |
-| Claude | The Claude Code **status-line export** (5-hour and weekly quota, after a terminal response); optionally the **local activity logs** (timestamps, model and token counts only) and the **usage cache** Claude Code keeps for its `/usage` dialog | On the machine where Claude Code runs; the status-line export can also be pushed from another computer |
-| Codex | Quota buckets, resets and banked reset credits through the local **Codex app-server**, using your existing Codex login | On the machine with Codex and its login |
-| OpenCode Go | 5-hour, weekly and monthly quota and resets from its usage API, with your API key | Anywhere with internet access |
-| Ollama Cloud | Dated request, token and spend activity from its usage API (no allowance is reported) | Anywhere with internet access |
-| Ollama | Server health, version, installed and loaded models | Anywhere that can reach the Ollama server |
-| LiteLLM | Health, readiness, and today's requests, tokens, spend and errors | Anywhere that can reach the gateway |
-
-**Demo mode** replaces the readings with a scripted set of sample accounts, for
-demos and hardware checks, and writes nothing.
-API keys are stored encrypted in the daemon's SQLite database; the Presto
-never holds a provider key. Details per source:
-[Guides](https://jake1164.github.io/presto-ai-dash/guides/claude/).
-
-## Request or contribute a source
-
-Missing an AI service? [Request a source](https://github.com/jake1164/presto-ai-dash/issues/new/choose)
-with its name, official link, and the measurements you'd like to see. You
-don't need to know its API or write code.
-
-Want to build an integration?
-[Contribute a source](CONTRIBUTING.md) using the existing
-[source template](daemon/templates/source_template.py) and
-[developer guide](https://jake1164.github.io/presto-ai-dash/developers/contributing-sources/).
-You can submit a pull request directly; an issue is optional.
-
-## How it fits together
-
-```text
-  Claude Code, Codex, OpenCode Go, Ollama Cloud, Ollama, LiteLLM
-                |  read-only
-                v
-  +-------------------------------+      admin page (browser, port 8788):
-  |  daemon (Python 3.11+, LAN)   | <--  accounts, keys, alert settings
-  |  collect -> SQLite -> serve   |
-  +-------------------------------+
-                ^  GET /api/v1/status every ~15 s (shared token)
-                |  POST /api/v1/alerts/<id> (one service's alerts on/off)
-  +-------------------------------+
-  |  Pimoroni Presto (MicroPython)|  touchscreen, LEDs, buzzer
-  +-------------------------------+
-```
-
-More: [Architecture overview](https://jake1164.github.io/presto-ai-dash/developers/architecture/).
-
-## Quick start
-
-1. [Install the daemon](https://jake1164.github.io/presto-ai-dash/getting-started/install-the-daemon/)
-   (or [install with Docker](https://jake1164.github.io/presto-ai-dash/getting-started/install-with-docker/)).
-2. [Add the first source](https://jake1164.github.io/presto-ai-dash/getting-started/add-the-first-source/)
-   in the admin page.
-3. [Set up the Presto](https://jake1164.github.io/presto-ai-dash/getting-started/set-up-the-presto/).
-
-## Privacy
-
-The app only **reads** from providers. It never spends or redeems credits,
-never resets a quota, never changes a plan or a limit, and never sends a
-prompt or a model request to produce a number. It sends nothing about you
-anywhere. The one write the Presto can make is to switch one service's
-alerts on or off **on its own daemon**; no provider is contacted. Setup
-actions that touch an account (for example installing the Claude status-line
-export) run only when you press the button in the admin page. See
-[Privacy](https://jake1164.github.io/presto-ai-dash/privacy/).
-
-## Limits
-
-- **Containers:** the Claude activity and usage-cache readers and the Codex
-  source read files and logins on the daemon's own machine, so inside a
-  container they get nothing by themselves. A collector on the machine that
-  has them (its `watch` mode, plus the status line for Claude in a terminal)
-  pushes what they would read. It has been tested against a throwaway daemon,
-  not yet on a second real computer.
-- **Claude in the VS Code panel** does not run the status line; panel users
-  get quota from the usage cache reader instead, which reads an unofficial
-  file. See [The VS Code panel](https://jake1164.github.io/presto-ai-dash/troubleshooting/vs-code-panel/).
-- **Ollama Cloud** reports activity only, no allowance or balance, so it has
-  no quota bar. **Ollama** has no request history, so direct use cannot be
-  counted.
-- **The host preview** runs the real app against an emulated display, but it
-  cannot show sound, real LED hardware, memory or CPU limits, or Wi-Fi.
-
-## Running the tests
-
-```bash
-cd daemon
-../.venv/Scripts/python -m unittest discover -s tests -q    # .venv/bin/python off Windows
-```
-
-The suite is pure CPython with localhost HTTP only; the Presto logic is
-tested on the host too. Tests are grouped into `core`, `admin`, `providers`,
-`ingest`, `device`, `security` and `tooling` folders. VS Code offers **Run test
-group** and **Run all tests** tasks. See
-[Running the tests](https://jake1164.github.io/presto-ai-dash/developers/running-the-tests/)
-and, for the screen preview and the device sync,
-[The preview and the device sync](https://jake1164.github.io/presto-ai-dash/developers/preview-and-device/).
-Repository-internal notes (status, contracts, history) are indexed in
-[docs/README.md](docs/README.md).
-
-## Licence
-
-MIT. See [LICENSE](LICENSE) for the full text and the copyright notice.
-
-No provider logos, mascots or artwork are shipped in this repository. The
-host-side preview tools carry bitmap font data generated from Pimoroni's
-MIT-licensed fonts, so they draw the same letters as the Presto's firmware; its
-notice is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). The Presto itself
-uses the fonts built into its firmware.
+MIT licensed. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).

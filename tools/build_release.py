@@ -2,7 +2,7 @@
 
     python tools/build_release.py              stage the app, build, check
     python tools/build_release.py --stage-only copy the app into the package only
-    python tools/build_release.py --tag v0.49.0  also require the tag to match
+    python tools/build_release.py --tag v0.50.0  also require the tag to match
 
 The Presto app (``presto/``) is copied into ``presto_ai_dash/presto_app/`` using
 the same public-file inventory as the USB sync, so private files never travel.
@@ -54,7 +54,7 @@ def declared_versions():
 
 
 def check_tag(tag):
-    """The tag (``v0.49.0`` or ``v0.49.0-rc1``) must name the packaged version."""
+    """The tag (``v0.50.0`` or ``v0.50.0-rc1``) must name the packaged version."""
     match = re.fullmatch(r"v(\d+\.\d+\.\d+)(-[0-9A-Za-z.]+)?", tag)
     if not match:
         raise ValueError("tag %r is not vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-suffix" % tag)

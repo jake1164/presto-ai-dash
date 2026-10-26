@@ -23,6 +23,21 @@ runs as an unprivileged user (`dash`, uid 10001). It is about 95 MB.
 
 ## Quick start
 
+First get the two files the steps below use, `compose.yaml` and
+`.env.example`, into an empty folder on the machine that will run Docker. Each
+release carries them, so no checkout is needed:
+
+```bash
+mkdir presto-ai-dash && cd presto-ai-dash
+curl -LO https://github.com/jake1164/presto-ai-dash/releases/latest/download/compose.yaml
+curl -LO https://github.com/jake1164/presto-ai-dash/releases/latest/download/.env.example
+```
+
+To try a pre-release, take the files from that release instead (replace
+`latest/download` with `download/v0.50.0-rc1`) and set
+`DASH_IMAGE=ghcr.io/jake1164/presto-ai-dash:0.50.0-rc1` in `.env`: the
+`latest` image tag moves only for a full release.
+
 ```bash
 # 1. Two tokens: one for the admin page, one for the Presto device. Generate
 #    each, keep them, and keep them different.
@@ -158,8 +173,8 @@ docker compose up -d
 The image is `ghcr.io/jake1164/presto-ai-dash`. Its `latest` tag moves to every
 full release (pre-releases such as `v0.50.0-rc1` never move it), so the two
 commands above are the whole upgrade. Each release also keeps an exact tag, for
-example `0.49.0`. To stay on one version, set `DASH_IMAGE` in `.env`, for example
-`DASH_IMAGE=ghcr.io/jake1164/presto-ai-dash:0.49.0`.
+example `0.50.0`. To stay on one version, set `DASH_IMAGE` in `.env`, for example
+`DASH_IMAGE=ghcr.io/jake1164/presto-ai-dash:0.50.0`.
 
 To build the image from a checkout instead of pulling it:
 

@@ -1,6 +1,6 @@
 name: Release
 
-# Runs when a version tag is pushed: v0.49.0 is a release; v0.50.0-rc1 is a
+# Runs when a version tag is pushed: v0.50.0 is a release; v0.50.0-rc1 is a
 # pre-release. The tag must match the version in daemon/pyproject.toml.
 #
 # One job builds everything in order, so nothing is published unless the
@@ -83,4 +83,6 @@ jobs:
         run: |
           FLAGS="--generate-notes"
           if [[ "$TAG" == *-* ]]; then FLAGS="$FLAGS --prerelease"; fi
-          gh release create "$TAG" dist/* --title "$TAG" $FLAGS
+          # The compose file and its .env template travel with the release, so
+          # a machine without a checkout can follow the Docker guide.
+          gh release create "$TAG" dist/* compose.yaml .env.example --title "$TAG" $FLAGS

@@ -211,6 +211,27 @@ class DemoReadingTests(unittest.TestCase):
         self.assertEqual(payload["overall_status"], "ok")
 
 
+class DemoAlertSettingsTests(unittest.TestCase):
+    """The demo tells the device the alert settings it is given."""
+
+    def test_without_settings_the_demo_is_silent(self):
+        alerts = demo.demo_payload(0, now=FIXED)["alerts"]
+        self.assertIs(alerts["sound"], False)
+
+    def test_given_settings_reach_the_device(self):
+        alerts = demo.demo_payload(0, now=FIXED, device_alerts={
+            "sound": True, "quiet": True, "mute_hours": 9, "enabled": False})["alerts"]
+        self.assertEqual((alerts["sound"], alerts["quiet"], alerts["mute_hours"], alerts["enabled"]),
+                         (True, True, 9, False))
+
+    def test_unknown_keys_and_wrong_types_are_dropped(self):
+        alerts = demo.demo_payload(0, now=FIXED, device_alerts={
+            "sound": "yes", "pop_to_top": 1, "token": "x"})["alerts"]
+        self.assertIs(alerts["sound"], False)
+        self.assertIs(alerts["pop_to_top"], True)
+        self.assertNotIn("token", alerts)
+
+
 class DemoIdentityTests(unittest.TestCase):
     def test_every_demo_account_id_is_marked(self):
         for _, payload in payloads():

@@ -155,6 +155,11 @@ serve the same data. Nothing else changes: the real accounts keep their
 settings and keep being read, and no provider is contacted because of demo
 mode.
 
+Demo mode shows the alerts as you have set them up, sound included. The
+sound is off until you tick **Sound on a new warning**, so a demo never beeps
+unless you asked for it; tick the box and the scenes chirp, one for a warning
+and two for a critical. Quiet hours and the mute length apply too.
+
 The switch is on the Settings tab. It is off by default. When the
 demonstration is over, switch it off and the Presto goes back to the real
 readings on its next poll, with no restart.

@@ -30,7 +30,7 @@ def read_web(name):
 
 from presto_ai_dash import demo  # noqa: E402
 from presto_ai_dash.api import ApiServer  # noqa: E402
-from presto_ai_dash.config import (ConfigError, demo_enabled, load_config)  # noqa: E402
+from presto_ai_dash.config import (ALERT_KEYS, ConfigError, demo_enabled, load_config)  # noqa: E402
 from presto_ai_dash.models import SourceSnapshot  # noqa: E402
 
 
@@ -127,6 +127,29 @@ class DemoApiTests(ManagementBase):
         except HTTPError as exc:
             with exc:
                 return exc.code, json.load(exc)
+
+    def test_the_demo_sends_the_alert_settings_the_person_chose(self):
+        """Demo shows the product as set up: sound on only if it was turned on."""
+        base = self.managed(demo_device_alerts=self.manager.device_alerts)
+        _, silent = self.get(base, "/api/v1/status")
+        self.assertIs(silent["demo"], True)
+        self.assertIs(silent["alerts"]["sound"], False)
+        settings = dict(self.manager.alerts_state())
+        data = {key: settings[key] for key in ALERT_KEYS}
+        data["sound"] = True
+        data["mute_hours"] = 9
+        self.manager.set_alerts(data)
+        _, loud = self.get(base, "/api/v1/status")
+        self.assertIs(loud["demo"], True)
+        self.assertIs(loud["alerts"]["sound"], True)
+        self.assertEqual(loud["alerts"]["mute_hours"], 9)
+
+    def test_a_demo_that_cannot_read_the_settings_stays_silent(self):
+        def broken():
+            raise RuntimeError("no settings")
+        base = self.managed(demo_device_alerts=broken)
+        _, payload = self.get(base, "/api/v1/status")
+        self.assertIs(payload["alerts"]["sound"], False)
 
     def post_alert(self, base, instance_id, enabled):
         body = json.dumps({"enabled": enabled}).encode("utf-8")

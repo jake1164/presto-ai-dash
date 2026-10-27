@@ -287,7 +287,7 @@ class BoundedRequestHandler(BaseHTTPRequestHandler):
 def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                  *, ingest_enabled=None, ingest_rate_limiter=None, client_registry=None,
                  alert_writer=None, alert_rate_limiter=None, card_provider=None,
-                 demo_enabled=None, demo_second=None):
+                 demo_enabled=None, demo_second=None, demo_device_alerts=None):
     if not shared_token:
         raise ValueError("API requires a nonempty shared token")
     limiter = ingest_rate_limiter if ingest_rate_limiter is not None else _IngestRateLimiter()
@@ -354,8 +354,15 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
             same shape and size as a real payload. The builder resolves the
             in-memory bell taps before computing Home: no stored setting is read.
             """
+            device_alerts = None
+            if demo_device_alerts is not None:
+                try:
+                    device_alerts = demo_device_alerts()
+                except Exception:
+                    log.exception("the demo's alert settings could not be read")
             payload = demo.demo_payload(demo_second() if demo_second else 0,
-                                        alert_overrides=demo_alerts)
+                                        alert_overrides=demo_alerts,
+                                        device_alerts=device_alerts)
             if LAZY_QUERY in (query or ""):
                 lazy_cards(payload)
             return payload
@@ -747,7 +754,7 @@ class ApiServer:
                  status_provider=None, *, ingest_enabled=None, ingest_rate_limiter=None,
                  handler_class=None, client_registry=None, alert_writer=None,
                  alert_rate_limiter=None, card_provider=None, demo_enabled=None,
-                 demo_second=None):
+                 demo_second=None, demo_device_alerts=None):
         self.host = host
         self._server = _ExclusiveHTTPServer(
             (host, port), handler_class or make_handler(
@@ -759,7 +766,8 @@ class ApiServer:
                 alert_rate_limiter=alert_rate_limiter,
                 card_provider=card_provider,
                 demo_enabled=demo_enabled,
-                demo_second=demo_second))
+                demo_second=demo_second,
+                demo_device_alerts=demo_device_alerts))
         self._server.daemon_threads = False
         self._server.block_on_close = True
         self._server._active_condition = threading.Condition()

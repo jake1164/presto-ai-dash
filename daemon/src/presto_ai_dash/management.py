@@ -677,11 +677,17 @@ class SourceConfiguration:
         # The alert settings travel too: the device has no clock of its own,
         # so the daemon says whether it is quiet right now, and whether
         # alerts are on at all.
-        payload["alerts"] = {"quiet": settings["quiet"], "sound": settings["sound"],
-                             "pop_to_top": settings["pop_to_top"],
-                             "enabled": settings["enabled"],
-                             "mute_hours": settings["mute_hours"]}
+        payload["alerts"] = self.device_alerts(settings)
         return payload
+
+    def device_alerts(self, settings=None):
+        """The alert settings the Presto is told: sound, quiet now, pop to top, the
+        master switch and the mute length. Demo mode sends the same ones."""
+        settings = settings or self.alerts_state()
+        return {"quiet": settings["quiet"], "sound": settings["sound"],
+                "pop_to_top": settings["pop_to_top"],
+                "enabled": settings["enabled"],
+                "mute_hours": settings["mute_hours"]}
 
     def card_detail(self, card_id):
         """One card's lazy detail: its tiles and its lines.

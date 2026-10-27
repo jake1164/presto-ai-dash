@@ -60,6 +60,10 @@ UNREACHABLE_STATUSES = ()
 # The settings the payload is built with: the defaults a daemon uses, so the
 # two threshold ticks and the status decisions are the real ones.
 ALERT_SETTINGS = {"warning_percent": 80, "critical_percent": 95, "enabled": True}
+# What the demo tells the device about alerts when the daemon gives it nothing
+# better. A running daemon passes its real settings (see demo_payload), so the
+# demo chirps, dims and mutes exactly as the product would; the sound stays off
+# unless the person turned it on.
 DEVICE_ALERTS = {"quiet": False, "sound": False, "pop_to_top": True,
                  "enabled": True, "mute_hours": 4}
 DEVICE_DISPLAY = {"overflow_rows": 1}
@@ -330,11 +334,14 @@ def _builders(pairs):
             [row for row, _ in pairs])
 
 
-def demo_payload(t, now=None, alert_overrides=None):
+def demo_payload(t, now=None, alert_overrides=None, device_alerts=None):
     """The status payload a daemon in demo mode serves, at loop second ``t``.
 
     Built by the real builders and cut to the device view, so it is exactly
     the shape (and size) a real daemon sends; ``demo`` marks it as sample data.
+    ``device_alerts`` is the daemon's own alert settings for the device (sound,
+    quiet hours, pop to top, the master switch, the mute length): the demo shows
+    the product as this person has set it up, so it can demo the sound too.
     """
     now = now or now_utc()
     snapshots, instances = _builders(demo_pairs(t, now))
@@ -347,6 +354,9 @@ def demo_payload(t, now=None, alert_overrides=None):
     payload = dashboard.device_view(payload)
     payload["display"] = dict(DEVICE_DISPLAY)
     payload["alerts"] = dict(DEVICE_ALERTS)
+    for key, value in (device_alerts or {}).items():
+        if key in DEVICE_ALERTS and type(value) is type(DEVICE_ALERTS[key]):
+            payload["alerts"][key] = value
     payload["demo"] = True
     return payload
 

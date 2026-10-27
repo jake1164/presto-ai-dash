@@ -157,7 +157,11 @@ class Daemon:
                                  # Demo mode: sample data instead of the real
                                  # accounts, for the device and the API.
                                  demo_enabled=self.demo_allowed,
-                                 demo_second=self.demo_second)
+                                 demo_second=self.demo_second,
+                                 # The demo follows the alert settings the
+                                 # person chose, sound included.
+                                 demo_device_alerts=(self.source_configuration.device_alerts
+                                                     if managed else None))
             if self.config["admin"]["enabled"]:
                 token = resolve_admin_token(self.config, self.shared_token)
                 self.admin = AdminServer(self.config["admin"]["port"],

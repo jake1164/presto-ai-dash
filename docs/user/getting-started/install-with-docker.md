@@ -38,18 +38,6 @@ your file. (GitHub drops the leading dot of an attached file's name, so the
 template is published as `default.env.example`. The command saves it as
 `.env.example`.)
 
-`latest` means the newest full release. If there is only a pre-release so far,
-those commands fail with a 404. To try a pre-release, use its own address:
-
-```bash
-curl -fLO https://github.com/jake1164/presto-ai-dash/releases/download/v0.50.0-rc1/compose.yaml
-curl -fL -o .env.example https://github.com/jake1164/presto-ai-dash/releases/download/v0.50.0-rc1/default.env.example
-```
-
-Then set
-`DASH_IMAGE=ghcr.io/jake1164/presto-ai-dash:0.50.0-rc1` in `.env`: the
-`latest` image tag moves only for a full release.
-
 ```bash
 # 1. Two tokens: one for the admin page, one for the Presto device. Both are
 #    required, and they must be different. Generate each (run it twice):
@@ -59,7 +47,8 @@ openssl rand -hex 24
 # 2. Put them in .env next to compose.yaml.
 cp .env.example .env
 #    then edit .env and paste one token after DASH_ADMIN_TOKEN= and the other
-#    after DASH_SHARED_TOKEN=. Neither may be left empty.
+#    after DASH_SHARED_TOKEN=. Neither may be left empty. The same file sets
+#    the addresses and ports the two services are published on (see below).
 
 # 3. Pull the published image and start.
 docker compose up -d
@@ -108,11 +97,24 @@ settings (`presto/config.py`).
 
 | Port | Published as | Who uses it |
 | --- | --- | --- |
-| 8787 | `0.0.0.0:8787` (every address), or the one `DASH_PUBLISH_ADDRESS` names | The Presto display polls this. |
+| 8787 | `0.0.0.0:8787` (every address) | The Presto display polls this. |
 | 8788 | `127.0.0.1:8788` (this machine only) | The admin page. |
 
+Both are set in `.env` (the template lists all four with their defaults), so you
+never edit `compose.yaml`:
+
+| Variable | Default | What it sets |
+| --- | --- | --- |
+| `DASH_PUBLISH_ADDRESS` | `0.0.0.0` | The host address the device port listens on |
+| `DASH_DEVICE_PORT` | `8787` | The host port for the device |
+| `DASH_ADMIN_PUBLISH_ADDRESS` | `127.0.0.1` | The host address the admin page listens on |
+| `DASH_ADMIN_PUBLISH_PORT` | `8788` | The host port for the admin page |
+
+Only the host side changes: inside the container the daemon keeps 8787 and 8788.
+After editing `.env`, run `docker compose up -d` again.
+
 The admin page is published on the loopback address of the host on purpose.
-To reach it from another machine, use an SSH port forward:
+To reach it from another machine without changing that, use an SSH port forward:
 
 ```bash
 ssh -L 8788:127.0.0.1:8788 user@server
@@ -121,11 +123,16 @@ ssh -L 8788:127.0.0.1:8788 user@server
 and open <http://127.0.0.1:8788> on your own machine. The browser then uses
 `127.0.0.1:8788`, which the admin page always accepts.
 
-To reach the admin page from another machine on the LAN, publish it as
-`8788:8788` and add the name the browser will use to
-`DASH_ADMIN_ALLOWED_HOSTS` in `.env` (keep `localhost:8788,127.0.0.1:8788` in the
-list), for example `localhost:8788,127.0.0.1:8788,192.168.1.50:8788`. Read the
-security notes below before you do that.
+To reach the admin page from another machine on the LAN, put two lines in `.env`
+(the second keeps the page's own names in the list):
+
+```text
+DASH_ADMIN_PUBLISH_ADDRESS=0.0.0.0
+DASH_ADMIN_ALLOWED_HOSTS=localhost:8788,127.0.0.1:8788,toontown-int-srv1:8788
+```
+
+Use the name (or address) and port the browser will type. Read the security
+notes below before you do that.
 
 ## The health check
 
@@ -188,8 +195,7 @@ docker compose up -d
 ```
 
 The image is `ghcr.io/jake1164/presto-ai-dash`. Its `latest` tag moves to every
-full release (pre-releases such as `v0.50.0-rc1` never move it), so the two
-commands above are the whole upgrade. Each release also keeps an exact tag, for
+release, so the two commands above are the whole upgrade. Each release also keeps an exact tag, for
 example `0.50.0`. To stay on one version, set `DASH_IMAGE` in `.env`, for example
 `DASH_IMAGE=ghcr.io/jake1164/presto-ai-dash:0.50.0`.
 
@@ -403,12 +409,14 @@ hold any of them:
 | Variable | What it does |
 | --- | --- |
 | `DASH_SHARED_TOKEN` | The token the Presto device holds. Required by the compose file. |
-| `DASH_IMAGE` | The image to run. `ghcr.io/jake1164/presto-ai-dash:latest` (the newest full release) unless you set it, for example to a version or a pre-release. |
+| `DASH_IMAGE` | The image to run. `ghcr.io/jake1164/presto-ai-dash:latest` (the newest release) unless you set it, for example to a version. |
 | `DASH_PUBLISH_ADDRESS` | The host address the device port is published on. Every address by default; set your LAN address on a host with a public interface. |
+| `DASH_DEVICE_PORT` | The host port for the device. `8787`. |
+| `DASH_ADMIN_PUBLISH_ADDRESS`, `DASH_ADMIN_PUBLISH_PORT` | The host address and port the admin page is published on. `127.0.0.1` and `8788`. |
 | `DASH_ADMIN_TOKEN_FILE`, `DASH_SHARED_TOKEN_FILE`, `DASH_ENCRYPTION_KEY_FILE` | A path to a file holding the value, instead of the variable. Not both. |
 | `DASH_HOST` / `DASH_PORT` | The device port. `0.0.0.0:8787` inside the container. |
 | `DASH_ADMIN_HOST` | The admin page's bind address. `0.0.0.0` inside the container. |
-| `DASH_ADMIN_ALLOWED_HOSTS` | The names the admin page answers to, comma separated. `localhost:8788,127.0.0.1:8788` unless you set it in `.env`. |
+| `DASH_ADMIN_ALLOWED_HOSTS` | The names the admin page answers to, comma separated. `localhost` and `127.0.0.1` on `DASH_ADMIN_PUBLISH_PORT` unless you set it in `.env`. |
 | `DASH_ADMIN_TOKEN` | The admin page's token. Required for a non-loopback bind address. |
 | `DASH_ADMIN_SECURE_COOKIE` | `true` when a TLS proxy fronts the admin page, so the session cookie is marked `Secure`. |
 | `DASH_DATABASE` | The database. `/data/dash.db`. |

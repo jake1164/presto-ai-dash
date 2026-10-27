@@ -158,21 +158,26 @@ class ComposeTests(unittest.TestCase):
         self.entries = lines(COMPOSE)
 
     def test_the_device_port_is_published_so_the_presto_can_reach_it(self):
-        self.assertIn(":8787:8787", self.text)
+        self.assertIn(":8787", self.text)
 
-    def test_the_admin_port_is_published_on_this_machine_only(self):
-        self.assertIn('"127.0.0.1:8788:8788"', self.text)
-        # No admin port without the loopback prefix.
+    def test_the_admin_port_is_published_on_this_machine_only_by_default(self):
+        self.assertIn(
+            '"${DASH_ADMIN_PUBLISH_ADDRESS:-127.0.0.1}:${DASH_ADMIN_PUBLISH_PORT:-8788}:8788"',
+            self.text)
+        # No port is published without an address in front of it.
         for entry in self.entries:
-            if re.match(r'^"?\d+:\d+"?$', entry):
-                self.assertTrue(entry.startswith('"8787:'), entry)
+            self.assertFalse(re.match(r'^"?\d+:\d+"?$', entry), entry)
+
+    def test_the_host_ports_can_be_chosen_in_the_env_file(self):
+        for name in ("DASH_DEVICE_PORT", "DASH_ADMIN_PUBLISH_ADDRESS", "DASH_ADMIN_PUBLISH_PORT"):
+            self.assertIn(name, self.text)
 
     def test_the_data_lives_in_a_named_volume(self):
         self.assertIn("- dash-data:/data", self.text)
         self.assertIn("dash-data:", self.text)
 
     def test_the_device_port_address_can_be_chosen(self):
-        self.assertIn('"${DASH_PUBLISH_ADDRESS:-0.0.0.0}:8787:8787"', self.text)
+        self.assertIn('"${DASH_PUBLISH_ADDRESS:-0.0.0.0}:${DASH_DEVICE_PORT:-8787}:8787"', self.text)
 
     def test_the_shared_token_is_required_so_none_is_logged(self):
         self.assertRegex(self.text, r'DASH_SHARED_TOKEN: "\$\{DASH_SHARED_TOKEN:\?')

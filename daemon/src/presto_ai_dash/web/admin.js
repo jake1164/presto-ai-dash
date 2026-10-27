@@ -400,6 +400,7 @@
     element("overflow-rows").value = String(value ?? 1);
     element("overflow-rows").disabled = !!displayState?.locked_by_environment;
     element("display-lock").hidden = !displayState?.locked_by_environment;
+    element("display-hint").hidden = !!displayState?.locked_by_environment;
   }
   // The reason the reader sees in words when the master switch is off.
   // It is text, not only a colour, so it is never missed.

@@ -7,7 +7,7 @@
 # address of this host unless DASH_PUBLISH_ADDRESS in .env names one (the
 # host's LAN address). Docker's own firewall rules bypass ufw and firewalld,
 # so on a host with a public interface, set it. The admin page is published on
-# 127.0.0.1 only: it is reachable from this machine and from nowhere else. See
+# 127.0.0.1 only unless DASH_ADMIN_PUBLISH_ADDRESS in .env says otherwise. See
 # https://jake1164.github.io/presto-ai-dash/getting-started/install-with-docker/
 # (source: docs/user/getting-started/install-with-docker.md).
 
@@ -30,8 +30,9 @@ services:
       DASH_ADMIN_PORT: "8788"
       # The names the admin page answers to. This machine always works; to reach
       # the page from another computer, add the name the browser will use (for
-      # example 192.168.1.50:8788) to DASH_ADMIN_ALLOWED_HOSTS in .env.
-      DASH_ADMIN_ALLOWED_HOSTS: "${DASH_ADMIN_ALLOWED_HOSTS:-localhost:8788,127.0.0.1:8788}"
+      # example 192.168.1.50:8788) to DASH_ADMIN_ALLOWED_HOSTS in .env. The
+      # default follows DASH_ADMIN_PUBLISH_PORT.
+      DASH_ADMIN_ALLOWED_HOSTS: "${DASH_ADMIN_ALLOWED_HOSTS:-localhost:${DASH_ADMIN_PUBLISH_PORT:-8788},127.0.0.1:${DASH_ADMIN_PUBLISH_PORT:-8788}}"
       DASH_ADMIN_TOKEN: "${DASH_ADMIN_TOKEN:?DASH_ADMIN_TOKEN is empty in .env: put a token you generate there (openssl rand -hex 24)}"
       # The token the Presto device holds. Required: a temporary one would be
       # written to Docker's log, which outlives the container.
@@ -59,7 +60,9 @@ services:
       # volume; set it to move the database to another machine.
       DASH_ENCRYPTION_KEY: "${DASH_ENCRYPTION_KEY:-}"
       DASH_LOG_LEVEL: "${DASH_LOG_LEVEL:-INFO}"
-      DASH_OVERFLOW_ROWS: "${DASH_OVERFLOW_ROWS:-1}"
+      # Passed on only when it is set in .env. Set, it locks the admin page's
+      # Home display control; unset, you change it in the admin page.
+      DASH_OVERFLOW_ROWS:
       # The time zone of the process. A container starts in UTC, and the
       # quiet hours and the weekly reset estimate use the local time, so set
       # TZ in .env to your own zone (for example America/New_York).
@@ -76,10 +79,13 @@ services:
     volumes:
       - dash-data:/data
     ports:
-      # The device port, on every address unless DASH_PUBLISH_ADDRESS names one.
-      - "${DASH_PUBLISH_ADDRESS:-0.0.0.0}:8787:8787"
-      # The admin page, on this machine only.
-      - "127.0.0.1:8788:8788"
+      # The device port, on every address unless DASH_PUBLISH_ADDRESS names one,
+      # under DASH_DEVICE_PORT. Only the host side changes; the container keeps
+      # 8787.
+      - "${DASH_PUBLISH_ADDRESS:-0.0.0.0}:${DASH_DEVICE_PORT:-8787}:8787"
+      # The admin page, on this machine only unless DASH_ADMIN_PUBLISH_ADDRESS
+      # names another address, under DASH_ADMIN_PUBLISH_PORT.
+      - "${DASH_ADMIN_PUBLISH_ADDRESS:-127.0.0.1}:${DASH_ADMIN_PUBLISH_PORT:-8788}:8788"
       # The Presto preview, on this machine only. Nothing listens on it unless
       # DASH_PRESTO_PREVIEW=1.
       - "127.0.0.1:8790:8790"

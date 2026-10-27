@@ -126,9 +126,10 @@
             <option value="2">2</option>
             <option value="3">3</option>
           </select>
-          <p class="note">Most lines of names for services that do not fit; 0 turns it off.</p>
-          <p id="display-lock" class="note" hidden>The DASH_OVERFLOW_ROWS environment variable controls
-            the overflow strip for this daemon; edit the environment instead of this page.</p>
+          <p class="note" id="display-hint">Most lines of names for services that do not fit; 0 turns it off.</p>
+          <p id="display-lock" class="note" hidden>Fixed by <code>DASH_OVERFLOW_ROWS</code> in this
+            daemon's environment (in Docker, the <code>.env</code> file). Remove that variable to
+            change it here.</p>
         </div>
       </details>
 

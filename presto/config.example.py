@@ -46,15 +46,17 @@ LED_BRIGHTNESS = 0.35
 LED_DIM_WHEN_MUTED = True
 
 # --- Sound -----------------------------------------------------------------
-# Piezo on GPIO 43. Sound is quiet by design.
+# Piezo on GPIO 43. Sound is quiet by design. The piezo is loudest around
+# 3 kHz and barely audible below 1 kHz, so the chirps use 3 kHz; a warning is one
+# chirp and a critical alert is two.
 # This is the hardware permission only: the Presto also chirps only when the
 # daemon's alert settings say so (the admin page's "Sound on a new warning",
 # which is off until it is turned on). The audible result is the AND of the
 # two: both must be on.
 SOUND_ENABLED = True
-SOUND_VOLUME = 0.15          # duty cycle 0.0-1.0
-CHIRP_HZ = 880               # short chirp: new warning
-DOUBLE_CHIRP_HZ = 1320       # double chirp: critical alert
+SOUND_VOLUME = 0.3           # duty cycle 0.0-1.0
+CHIRP_HZ = 3000              # short chirp: new warning
+DOUBLE_CHIRP_HZ = 3000       # double chirp: critical alert
 CHIRP_MS = 90
 # Do not repeat an alarm unless this is True.
 SOUND_REPEAT = False

@@ -97,9 +97,9 @@ class App(object):
             getattr(config, "LED_DIM_WHEN_MUTED", True))
 
         self.sound_enabled = bool(getattr(config, "SOUND_ENABLED", True))
-        self.sound_volume = float(getattr(config, "SOUND_VOLUME", 0.15))
-        self.chirp_hz = int(getattr(config, "CHIRP_HZ", 880))
-        self.double_chirp_hz = int(getattr(config, "DOUBLE_CHIRP_HZ", 1320))
+        self.sound_volume = float(getattr(config, "SOUND_VOLUME", 0.3))
+        self.chirp_hz = int(getattr(config, "CHIRP_HZ", 3000))
+        self.double_chirp_hz = int(getattr(config, "DOUBLE_CHIRP_HZ", 3000))
         self.chirp_ms = int(getattr(config, "CHIRP_MS", 90))
         self.sound_repeat = bool(getattr(config, "SOUND_REPEAT", False))
 

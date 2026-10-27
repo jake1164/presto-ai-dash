@@ -5,6 +5,7 @@ from . import quotas
 from .alert_policy import (DEFAULT_CRITICAL_PERCENT, DEFAULT_WARNING_PERCENT,
                            apply_threshold, resolve_alert_settings,
                            threshold_status)
+from .card_tiles import gigabytes
 from .collectors import served_version, update_state
 from .models import Card, iso, now_utc, overall_status, severity
 from .quotas import (QUOTA_SCHEMA_VERSION, age_label, compact_age, compact_tokens,
@@ -220,9 +221,18 @@ def build_status_payload(snapshots):
     if ollama:
         loaded = ollama_metrics.get("loaded_model") or "No model loaded"
         speed = value(ollama_metrics, "last_measured_tokens_per_sec")
-        measured = ("Last measured: %s tok/s" % speed
-                    if speed != "unavailable" else "Last measured: unavailable")
-        details = [measured]
+        details = []
+        shape = " ".join(str(ollama_metrics[key]) for key in ("loaded_params", "loaded_quant")
+                         if ollama_metrics.get(key))
+        if shape:
+            details.append("Model: " + shape)
+        disk = ollama_metrics.get("disk_bytes")
+        if isinstance(disk, int):
+            details.append("Disk: %s for %s models" % (gigabytes(disk),
+                                                       value(ollama_metrics, "available_models")))
+        # A speed is only there when a collector wrote a sample; say nothing otherwise.
+        if speed != "unavailable":
+            details.append("Last measured: %s tok/s" % speed)
         if ollama.error:
             details.append("Error: " + ollama.error)
         ollama_card = Card(
@@ -535,7 +545,8 @@ DEVICE_WINDOW_KEYS = ("label", "used_percent", "state", "period_minutes",
 DEVICE_ACTIVITY_KEYS = ("request_count", "usage_usd", "from", "until", "state", "range")
 DEVICE_RESET_KEYS = ("available", "expires_at")
 DEVICE_METRICS_KEYS = ("requests_today", "tokens_today", "loaded_model", "spend_today",
-                       "errors_today", "last_measured_tokens_per_sec", "available_models")
+                       "errors_today", "last_measured_tokens_per_sec", "available_models",
+                       "gpu_percent")
 # The keys the device reads from a card. "tiles" is optional: the tiles
 # travel with the lazy card detail, and a payload that carries them inline
 # (a fixture, or a daemon that sends the whole card) is read the same way.

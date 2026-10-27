@@ -4,8 +4,10 @@ Reports live local-model health. Endpoints used, all verified against the
 official Ollama API documentation:
 
 - ``GET /api/version``  - reachability and version
-- ``GET /api/tags``     - models available locally
-- ``GET /api/ps``       - models currently loaded in memory
+- ``GET /api/tags``     - models available locally, and their size on disk
+- ``GET /api/ps``       - models currently loaded in memory: their size, how much
+                          of it is on the GPU, the context length, when each
+                          unloads, and the parameter count and quantisation
 
 Ollama exposes **no request history**, so "tokens used today against Ollama
 directly" is not reconstructable from Ollama alone. See docs/limitations.md.
@@ -15,6 +17,7 @@ last measured request is read from it and tokens/sec is computed. The
 arithmetic is implemented and tested now so it is ready for the v0.2 collector.
 """
 
+from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -64,6 +67,59 @@ def tokens_per_second(eval_count, eval_duration_ns):
     if duration <= 0 or count < 0:
         return None
     return count / duration * 1e9
+
+
+def _count(value):
+    """A non-negative whole number from Ollama, or None. A bool is not one."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if value != value or value < 0 or value > 1e15:
+        return None
+    return int(value)
+
+
+def loaded_facts(running):
+    """What ``/api/ps`` says about the loaded models, as metrics.
+
+    Sizes add up over every loaded model, so the GPU share is the share of
+    everything in memory. The context length, the unload time and the
+    parameter count are the first loaded model's: the one the card names. A
+    field Ollama did not send is left out, never shown as zero.
+    """
+    facts = {}
+    size = vram = 0
+    for entry in running:
+        if not isinstance(entry, dict):
+            continue
+        total, on_gpu = _count(entry.get("size")), _count(entry.get("size_vram"))
+        if total is not None:
+            size += total
+            vram += min(on_gpu or 0, total)
+    if size > 0:
+        facts["loaded_memory_bytes"] = size
+        facts["gpu_percent"] = int(round(vram * 100.0 / size))
+    first = next((entry for entry in running if isinstance(entry, dict)), None)
+    if first is None:
+        return facts
+    context = _count(first.get("context_length"))
+    if context:
+        facts["loaded_context"] = context
+    expires = first.get("expires_at")
+    if isinstance(expires, str) and expires:
+        try:
+            moment = datetime.fromisoformat(expires.replace("Z", "+00:00"))
+            if moment.tzinfo is not None:
+                facts["loaded_expires_at"] = moment.astimezone(timezone.utc).isoformat()
+        except ValueError:
+            pass
+    details = first.get("details")
+    if isinstance(details, dict):
+        for key, name in (("parameter_size", "loaded_params"),
+                          ("quantization_level", "loaded_quant")):
+            text = details.get(key)
+            if isinstance(text, str) and text.isascii() and text.isprintable() and len(text) <= 16:
+                facts[name] = text
+    return facts
 
 
 def _first_model_name(models):
@@ -181,6 +237,9 @@ class OllamaSource(Source):
             models = tags.get("models") if isinstance(tags, dict) else None
             if isinstance(models, list):
                 metrics["available_models"] = len(models)
+                sizes = [_count(entry.get("size")) for entry in models if isinstance(entry, dict)]
+                if any(size is not None for size in sizes):
+                    metrics["disk_bytes"] = sum(size or 0 for size in sizes)
         except (HttpError, HttpUnreachable) as exc:
             log.debug("ollama /api/tags failed: %s", exc)
 
@@ -192,6 +251,7 @@ class OllamaSource(Source):
             if isinstance(running, list) and running:
                 loaded = _first_model_name(running)
                 metrics["loaded_models"] = len(running)
+                metrics.update(loaded_facts(running))
         except (HttpError, HttpUnreachable) as exc:
             log.debug("ollama /api/ps failed: %s", exc)
 

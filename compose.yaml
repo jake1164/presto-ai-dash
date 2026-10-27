@@ -28,7 +28,7 @@ services:
       # names it is reached by before it may listen on anything but loopback.
       DASH_ADMIN_HOST: "0.0.0.0"
       DASH_ADMIN_PORT: "8788"
-      DASH_ADMIN_ALLOWED_HOSTS: "localhost:8788,127.0.0.1:8788"
+      DASH_ADMIN_ALLOWED_HOSTS: "localhost:8788,127.0.0.1:8788,localhost:18788,127.0.0.1:18788"
       DASH_ADMIN_TOKEN: "${DASH_ADMIN_TOKEN:?set DASH_ADMIN_TOKEN in .env}"
       # The token the Presto device holds. Required: a temporary one would be
       # written to Docker's log, which outlives the container.
@@ -36,8 +36,19 @@ services:
       # The database and its key file, in the volume below.
       DASH_DATABASE: "/data/dash.db"
       DASH_KEY_FILE: "/data/dash.db.key"
-      # The remote reports (push) switch, off unless the user turns it on.
-      DASH_INGEST_ENABLED: "${DASH_INGEST_ENABLED:-0}"
+      # The remote reports (push) switch. Off until it is turned on. Leave it
+      # unset in .env to tick "Accept remote reports" in the admin page; set it
+      # to 1 or 0 there to fix the choice, which locks that checkbox. With no
+      # value here, Compose passes it on only when it is set in .env.
+      DASH_INGEST_ENABLED:
+      # The Presto's screen in a browser, a test aid, off unless it is set to 1
+      # in .env. The page has no sign-in, so its port is published on this
+      # machine only (see ports). Leave the port and names alone unless you
+      # change the published port.
+      DASH_PRESTO_PREVIEW:
+      DASH_PRESTO_PREVIEW_HOST: "0.0.0.0"
+      DASH_PRESTO_PREVIEW_PORT: "8790"
+      DASH_PRESTO_PREVIEW_ALLOWED_HOSTS: "${DASH_PRESTO_PREVIEW_ALLOWED_HOSTS:-localhost:8790,127.0.0.1:8790}"
       # Demo mode: sample data on the device and the API, off unless asked for.
       # It overrides the real sources while it is on; nothing is written.
       # DASH_DEMO: "1"
@@ -66,6 +77,9 @@ services:
       - "${DASH_PUBLISH_ADDRESS:-0.0.0.0}:8787:8787"
       # The admin page, on this machine only.
       - "127.0.0.1:8788:8788"
+      # The Presto preview, on this machine only. Nothing listens on it unless
+      # DASH_PRESTO_PREVIEW=1.
+      - "127.0.0.1:8790:8790"
     healthcheck:
       test:
         - CMD

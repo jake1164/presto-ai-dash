@@ -6,6 +6,19 @@
   const TAB_HASHES = { services: "#services", status: "#status", settings: "#settings" };
   const STORAGE_KEY = "presto-ai-dash.tab";
   let csrfToken = "", unlocked = false, catalog = [], sources = [], editing = null;
+  // Whether the machine running the daemon has Codex. A container or a server
+  // usually does not; those accounts report through the remote collector.
+  let codexHere = true;
+  function noCodexNote() {
+    const note = el("p", "note", "Codex is not installed on the machine running the daemon, so it cannot "
+      + "sign in here. Run Codex on a computer that has it and send its readings with the remote "
+      + "collector. ");
+    const link = remoteSettingsLink();
+    // The editor sits over the page: leave it so the Settings tab is in view.
+    link.addEventListener("click", () => { if (!element("editor-modal").hidden && !busy) closeEditor(); });
+    note.append(link);
+    return note;
+  }
   let busy = false;
   let dragging = null;
   let ingestState = null, tokenReveal = null, displayState = null, demoState = null;
@@ -711,7 +724,7 @@
       "Monitors local Ollama health and loaded models. The local API needs no key; this does not monitor Ollama Cloud subscription quotas." :
       type?.id === "opencode_go" ? "Read-only subscription meters for your OpenCode Go account. This does not make model requests or sum tokens into quotas." :
       type?.id === "ollama_cloud" ? "Reads monthly included credits, purchased balance and reset dates (or legacy limits), plus separate rolling 7-day activity. Local Ollama is a separate source." :
-      type?.id === "codex" ? "Reads Codex subscription quotas using your ChatGPT login in Codex. Leave both paths blank for automatic discovery and the default profile. Separate accounts need separate Codex profile directories. OAuth stays with Codex; no pay-per-use API key is needed. Browser and device-code sign-in, cancellation, and sign-out are buttons in this account's Setup section (open the account's row)." :
+      type?.id === "codex" ? "Reads Codex subscription quotas using your ChatGPT login in Codex. Leave both paths blank for automatic discovery and the default profile. Separate accounts need separate Codex profile directories. OAuth stays with Codex; no pay-per-use API key is needed. Browser and device-code sign-in are buttons below; cancellation and sign-out are in this account's Setup section (open the account's row)." :
       type?.id === "claude" ? "Claude Code exports 5h/weekly subscription quotas after normal terminal responses. Save this source, then set up its exporter below. Readings go straight to the database; existing status-line output is preserved. No API key is needed. Idle readings become stale; the VS Code panel does not run the status line, but the optional usage cache reader reads the numbers Claude Code caches on disk for its /usage dialog." : "";
     // The setup guide stays inside the editor, below the source description.
     const guide = element("source-type-help");
@@ -727,6 +740,12 @@
       input.id = label.htmlFor; input.dataset.key = field.key;
       input.type = field.type === "int" ? "number" : field.type === "url" ? "url"
         : field.type === "bool" ? "checkbox" : "text";
+      // These are paths and URLs, never a person's details: keep the browser
+      // and the common password managers from offering a saved email here.
+      input.autocomplete = "off";
+      for (const hint of ["bwignore", "1pIgnore", "lpignore", "formType"]) {
+        input.dataset[hint] = hint === "formType" ? "other" : "true";
+      }
       if (field.type === "bool") {
         input.checked = Boolean(settings[field.key] ?? field.default);
       } else {
@@ -736,9 +755,44 @@
         input.min = field.minimum; input.max = field.maximum; input.step = "1"; input.required = true;
       } else if (field.type === "url") input.required = true;
       element("source-fields").append(label, input);
+      if (field.note) {
+        const note = document.createElement("p"); note.className = "note"; note.textContent = field.note;
+        element("source-fields").append(note);
+      }
     }
     element("key-section").hidden = !type.has_secret;
     if (type.id === "claude") element("source-fields").append(...vscodePreset());
+    if (type.id === "codex") element("source-fields").append(codexSignIn());
+  }
+  function codexSignIn() {
+    // Sign-in is a setup step the user starts here. Pressing a button saves the
+    // account first, because the sign-in belongs to a saved account.
+    const box = el("div", "codex-setup");
+    const remote = noCodexNote();
+    const signIn = el("div", "codex-signin");
+    signIn.append(el("p", "note", "Signing in saves this account first."));
+    for (const [flow, label] of [["browser", "Sign in with browser"], ["device", "Sign in with device code"]]) {
+      const button = el("button", "", label); button.type = "button";
+      button.dataset.codexAction = flow;
+      button.addEventListener("click", () => signInFromForm(flow));
+      signIn.append(button);
+    }
+    const login = el("div", "codex-login");
+    if (editing) login.dataset.codexLogin = editing.id;
+    login.setAttribute("aria-live", "polite");
+    signIn.append(login);
+    box.append(remote, signIn);
+    // A path typed in the executable box can make Codex usable after all, so the
+    // choice follows that box: the buttons show only where a sign-in can start.
+    const executable = element("field-executable");
+    const refresh = () => {
+      const usable = codexHere || !!(executable && executable.value.trim());
+      remote.hidden = usable; signIn.hidden = !usable;
+    };
+    if (executable) executable.addEventListener("input", refresh);
+    refresh();
+    if (editing) paintCodexLogin(editing.id, login);
+    return box;
   }
   function vscodePreset() {
     // One button for panel users: it only ticks the two local readers in the
@@ -810,7 +864,7 @@
     message("Saving account order...");
     try {
       const data = await request("/api/admin/source-order", "PUT", {order, expected_order: expected});
-      catalog = data.types; sources = data.sources;
+      catalog = data.types; sources = data.sources; codexHere = data.codex_found !== false;
       message("Account order saved. Presto will update on its next poll.");
     } catch (error) {
       if (unlocked) {
@@ -955,6 +1009,34 @@
     // An open card reads its own alert settings.
     if (open) loadServiceAlerts(id);
   }
+  function ingestAddress(reveal) {
+    // The host is what this page was opened with. The device port is the
+    // daemon's, moved by the same offset as the admin port when the page was
+    // reached through a different one (a container publishing 18788 for 8788
+    // publishes 18787 for 8787). Behind a proxy there is no port to compare:
+    // the box is the person's to correct.
+    const path = /^https?:\/\/[^/]*(\/.*)$/.exec(reveal.ingest_url || "");
+    let port = reveal.device_port || 8787;
+    if (location.port && reveal.admin_port) {
+      const moved = port + Number(location.port) - reveal.admin_port;
+      if (moved >= 1 && moved <= 65535) port = moved;
+    }
+    return location.protocol + "//" + location.hostname + ":" + port
+      + (path ? path[1] : "/api/v1/ingest");
+  }
+  function downloadSetupFile(reveal, url) {
+    // The token is shown once and the daemon keeps only its hash, so the setup
+    // file is made here, from what is on the page, and goes nowhere else.
+    const body = JSON.stringify({
+      kind: "presto-collector-setup", url: url, service: reveal.service,
+      name: reveal.name || reveal.service, token_file: reveal.token_file, token: reveal.token,
+    }, null, 2) + "\n";
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(new Blob([body], {type: "application/json"}));
+    link.download = "presto-collector-setup-" + reveal.token_file.replace(/\.token$/, "") + ".json";
+    document.body.append(link); link.click(); link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+  }
   function copyCell(text) {
     const container = document.createElement("div"); container.className = "ingest-line";
     const code = document.createElement("code"); code.className = "ingest-code";
@@ -991,16 +1073,24 @@
     }
     if (tokenReveal.collector_config) {
       // Everything without a status line is read on a timer by the collector's
-      // watch command, from a folder of its own.
-      const folder = tokenReveal.collector_folder || "~/.presto-ai-dash";
+      // watch command. Its setup command installs the file downloaded here.
       const label = document.createElement("p"); label.className = "note";
       label.textContent = (tokenReveal.service === "codex"
         ? "Codex has no status line, so the collector reads it on a timer. "
         : "The VS Code panel does not run the status line. To report its activity and usage cache, ")
         + "On the computer where " + (tokenReveal.service === "codex" ? "Codex is signed in" : "Claude Code runs")
-        + ": save the token as " + folder + "/" + tokenReveal.token_file + ", save this as "
-        + folder + "/collector.json (edit the URL), then run: python3 presto_collector.py watch";
-      box.append(label, copyCell(tokenReveal.collector_config));
+        + ": download presto_collector.py (Settings tab) and this setup file into the same "
+        + "Downloads folder, then run: python presto_collector.py setup";
+      const address = document.createElement("input"); address.type = "text";
+      address.className = "setup-address"; address.setAttribute("aria-label", "Daemon address for the collector");
+      address.value = ingestAddress(tokenReveal);
+      const save = document.createElement("button"); save.type = "button";
+      save.className = "setup-download"; save.textContent = "Download setup file";
+      save.addEventListener("click", () => downloadSetupFile(tokenReveal, address.value.trim()));
+      const addressNote = document.createElement("p"); addressNote.className = "note";
+      addressNote.textContent = "The address the collector will send to. Check it is one the other "
+        + "computer can reach (this page's address is filled in).";
+      box.append(label, addressNote, address, save);
       const caution = document.createElement("p"); caution.className = "note";
       caution.textContent = "This way of reporting has been tested against a throwaway daemon, "
         + "not yet on a second real computer. Run it once with --once and read what it says.";
@@ -1248,8 +1338,14 @@
   }
   function paintCodexLogin(sourceId, card) {
     // A card still being built is not in the document yet: it is passed in.
-    const box = card || document.querySelector('[data-codex-login="' + sourceId + '"]');
-    if (!box) return;
+    // The account's card and the editor form can both show the sign-in.
+    if (!card) {
+      for (const each of document.querySelectorAll('[data-codex-login="' + sourceId + '"]')) {
+        paintCodexLogin(sourceId, each);
+      }
+      return;
+    }
+    const box = card;
     const session = codexLogins.get(sourceId);
     box.replaceChildren();
     const open = !!session && session.status === LOGIN_OPEN;
@@ -1280,7 +1376,7 @@
     const text = session.status === "success" ? "Signed in. Codex quota appears after the next refresh." :
       session.status === "cancelled" ? "Sign-in cancelled." :
       session.status === "timeout" ? "Sign-in timed out. Start again if you still want to sign in." :
-      "Sign-in failed" + (session.error ? ": " + session.error : ".");
+      (session.what || "Sign-in") + " failed" + (session.error ? ": " + session.error : ".");
     const outcome = el("p", session.status === "success" ? "note" : "error", text);
     box.append(outcome);
   }
@@ -1313,7 +1409,13 @@
       paintCodexLogin(source.id);
       if (session.status === LOGIN_OPEN) pollCodexLogin(source.id, session.id);
       message("Codex sign-in started.");
-    } catch (error) { message(error.message, true); }
+    } catch (error) {
+      // Say it in the card, next to the button that was pressed: the status
+      // line at the top of the page is out of sight when the card is scrolled.
+      codexLogins.set(source.id, {status: "error", error: error.message});
+      paintCodexLogin(source.id);
+      message(error.message, true);
+    }
     finally { busy = false; }
   }
   async function cancelCodexLogin(sourceId, sessionId) {
@@ -1332,7 +1434,11 @@
       codexLogins.delete(source.id);
       message("Signed out of Codex.");
       await reload();
-    } catch (error) { message(error.message, true); }
+    } catch (error) {
+      codexLogins.set(source.id, {status: "error", what: "Sign-out", error: error.message});
+      paintCodexLogin(source.id);
+      message(error.message, true);
+    }
     finally { busy = false; }
   }
 
@@ -1371,7 +1477,10 @@
       });
       setupActions.append(setup);
     }
-    if (source.type === "codex") {
+    if (source.type === "codex" && source.codex_found === false) {
+      // No Codex on this machine: a sign-in cannot start, so say where to go.
+      setupActions.append(noCodexNote());
+    } else if (source.type === "codex") {
       // Sign-in is a setup step the user starts here; it never runs from polling.
       const buttons = [
         ["browser", "Sign in with browser", () => startCodexLogin(source, "browser")],
@@ -1480,6 +1589,15 @@
         const paragraph = document.createElement("p"); paragraph.className = "note";
         paragraph.textContent = line; readings.append(paragraph);
       }
+    }
+    if (Array.isArray(source.readings) && source.readings.length) {
+      // A service with no allowance windows: its facts, each with its label.
+      const facts = el("div", "reading-facts");
+      for (const [label, value] of source.readings) {
+        const fact = el("div", "reading-fact");
+        fact.append(el("span", "note", label), el("strong", "", value)); facts.append(fact);
+      }
+      readings.append(el("p", "reading-title", "Status: " + (source.status || "no data")), facts);
     }
     if (!readings.children.length) readings.append(el("p", "note", "Status: " + (source.status || "no data")));
     renderServiceAlerts(source, detail.querySelector("[data-card-alerts]"));
@@ -1595,7 +1713,7 @@
   async function reload(poll = false) {
     const data = await request("/api/admin/sources");
     if (poll && busy) return;
-    catalog = data.types; sources = data.sources; renderList();
+    catalog = data.types; sources = data.sources; codexHere = data.codex_found !== false; renderList();
   }
   function lock() {
     for (const sourceId of [...codexTimers.keys()]) stopCodexPoll(sourceId);
@@ -1739,10 +1857,16 @@
     element("source-name").value = selectedType()?.name ?? "";
     element("api-key").value = ""; element("clear-key").checked = false; renderFields();
   });
-  element("source-form").addEventListener("submit", async (event) => {
-    event.preventDefault(); if (busy) return;
+  element("source-form").addEventListener("submit", (event) => {
+    event.preventDefault(); saveSource();
+  });
+  // Saves the form and returns the saved source, or null when nothing was saved.
+  // The Codex sign-in buttons in the form use it: a sign-in belongs to a saved
+  // account, so pressing one saves first.
+  async function saveSource({quiet = false} = {}) {
+    if (busy) return null;
     const type = selectedType(), config = {};
-    if (!type) { message("Restore the source module before saving.", true); return; }
+    if (!type) { message("Restore the source module before saving.", true); return null; }
     for (const field of type.fields) {
       const input = element("field-" + field.key);
       config[field.key] = field.type === "int" ? Number(input.value)
@@ -1755,15 +1879,25 @@
       data.api_key = element("api-key").value;
       data.clear_key = element("clear-key").checked;
     }
+    const created = !editing;
     busy = true; element("save-source").disabled = true;
     try {
       const result = await request("/api/admin/sources" + (editing ? "/" + editing.id : ""),
         editing ? "PUT" : "POST", data);
       element("api-key").value = ""; await reload(); edit(result);
-      message("Saved. Collection will update automatically.");
-    } catch (error) { message(error.message, true); }
+      if (!quiet) {
+        message(type.id === "codex" && created
+          ? "Saved. Press Sign in with browser (or device code) below to connect Codex."
+          : "Saved. Collection will update automatically.");
+      }
+      return result;
+    } catch (error) { message(error.message, true); return null; }
     finally { busy = false; element("save-source").disabled = false; }
-  });
+  }
+  async function signInFromForm(flow) {
+    const saved = await saveSource({quiet: true});
+    if (saved) await startCodexLogin(saved, flow);
+  }
   element("delete-source").addEventListener("click", async () => {
     if (!editing || busy || !window.confirm("Delete this source and its stored key? Past observations remain.")) return;
     busy = true;

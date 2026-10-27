@@ -7,6 +7,7 @@ entry points, package installation, or browser uploads.
 
 import logging
 import importlib
+import os
 import pkgutil
 
 from ..models import SourceSnapshot, normalise_status
@@ -125,9 +126,38 @@ def source_type(type_id):
     return _REGISTRY[type_id]
 
 
-def source_catalog():
+CONTAINER_ENV = "DASH_IN_CONTAINER"
+# What a container calls the machine it runs on (Docker Desktop; on Linux the
+# compose file maps it with host-gateway).
+CONTAINER_HOST = "host.docker.internal"
+CONTAINER_NOTE = ("The daemon runs in a container, so localhost is the container itself. "
+                  "To reach a program on this computer use " + CONTAINER_HOST + ".")
+
+
+def in_container(environ=None, exists=os.path.exists):
+    """Whether the daemon runs in a container: the image says so, and Docker and
+    Podman leave a marker file."""
+    environ = os.environ if environ is None else environ
+    return (environ.get(CONTAINER_ENV, "").strip().lower() in ("1", "true", "yes")
+            or exists("/.dockerenv") or exists("/run/.containerenv"))
+
+
+def _container_field(field):
+    """A URL field's default and a note, for a daemon in a container."""
+    if field.get("type") != "url" or not str(field.get("default", "")).startswith(
+            "http://localhost:"):
+        return field
+    field = dict(field)
+    field["default"] = field["default"].replace("//localhost:", "//" + CONTAINER_HOST + ":", 1)
+    field["note"] = CONTAINER_NOTE
+    return field
+
+
+def source_catalog(container=None):
+    container = in_container() if container is None else container
     return [{"id": cls.id, "name": cls.name,
-             "fields": list(cls.config_fields), "has_secret": bool(cls.secret_field)}
+             "fields": [_container_field(f) if container else f for f in cls.config_fields],
+             "has_secret": bool(cls.secret_field)}
             for cls in _REGISTRY.values()]
 
 

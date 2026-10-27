@@ -9,7 +9,7 @@ import tempfile
 import time
 import unittest
 from unittest.mock import patch
-from envutil import clean_env
+from envutil import clean_env, seed_default_accounts
 from urllib.error import HTTPError
 from urllib.request import Request, build_opener, ProxyHandler
 
@@ -39,7 +39,7 @@ class ManagementBase(unittest.TestCase):
         env = clean_env(DASH_ENCRYPTION_KEY=self.master)
         env.start()
         self.addCleanup(env.stop)
-        self.config = load_config()
+        self.config = seed_default_accounts(load_config())
         self.config["daemon"].update(database=str(self.database), host="127.0.0.1", port=0,
                                      shared_token="device-token", poll_interval=1)
         self.config["admin"].update(enabled=True, port=0, token="admin-token")
@@ -50,6 +50,33 @@ class ManagementBase(unittest.TestCase):
     def add_litellm(self, name="Book app gateway", key="test-provider-key", enabled=False):
         return self.manager.save({"type": "litellm", "name": name, "enabled": enabled,
                                   "api_key": key, "config": {"base_url": "http://localhost:4000"}})
+
+
+class FirstStartTests(unittest.TestCase):
+    """What a fresh database starts with."""
+
+    def start(self, configure=None):
+        storage = Storage(":memory:")
+        self.addCleanup(storage.close)
+        env = clean_env(DASH_ENCRYPTION_KEY=Fernet.generate_key().decode("ascii"))
+        env.start()
+        self.addCleanup(env.stop)
+        config = load_config()
+        config["daemon"]["database"] = ":memory:"
+        if configure:
+            configure(config)
+        SourceConfiguration(storage, config)
+        return storage
+
+    def test_a_fresh_install_starts_with_no_accounts(self):
+        self.assertEqual(self.start().source_instances(), [])
+
+    def test_a_source_the_user_configured_is_still_imported(self):
+        def configure(config):
+            config["sources"]["ollama"].update(enabled=True, base_url="http://nas:11434")
+        records = self.start(configure).source_instances()
+        self.assertEqual([record["type"] for record in records], ["ollama"])
+        self.assertTrue(records[0]["enabled"])
 
 
 class EncryptedConfigurationTests(ManagementBase):
@@ -563,6 +590,37 @@ class ManagedDaemonTests(ManagementBase):
                 self.assertEqual(restarted.source_configuration.status_payload()["sources"][0]["type"], "ollama")
             finally:
                 restarted.stop()
+
+
+class CodexSignInRefusalTests(AdminServerBase):
+    """A sign-in that cannot start says why, instead of a generic server error."""
+
+    def codex_source(self):
+        return self.manager.save({"type": "codex", "name": "Codex", "enabled": False, "config": {}})
+
+    def test_a_missing_codex_is_named_in_the_answer(self):
+        from presto_ai_dash.sources._codex_rpc import CodexReportingError
+        row = self.codex_source()
+        message = "Install Codex or set its executable path in source configuration"
+        with patch("presto_ai_dash.codex_login.find_executable",
+                   side_effect=CodexReportingError(message)):
+            status, _, body = self.request(
+                "/api/admin/sources/%s/codex-login" % row["id"], "POST", {"flow": "device"})
+        self.assertEqual(status, 400)
+        self.assertEqual(body["error"], message)
+
+    def test_the_list_says_whether_this_machine_has_codex(self):
+        row = self.codex_source()
+        with patch("presto_ai_dash.management.find_executable", return_value="/bin/codex"):
+            listed = self.manager.list_sources()
+        self.assertTrue(listed["codex_found"])
+        self.assertTrue(next(s for s in listed["sources"] if s["id"] == row["id"])["codex_found"])
+        from presto_ai_dash.sources._codex_rpc import CodexReportingError
+        with patch("presto_ai_dash.management.find_executable",
+                   side_effect=CodexReportingError("Install Codex")):
+            listed = self.manager.list_sources()
+        self.assertFalse(listed["codex_found"])
+        self.assertFalse(next(s for s in listed["sources"] if s["id"] == row["id"])["codex_found"])
 
 
 if __name__ == "__main__":

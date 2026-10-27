@@ -56,6 +56,30 @@ class DockerIgnoreTests(unittest.TestCase):
                 self.assertIn(name, gitignore)
 
 
+class PreviewFilesTests(unittest.TestCase):
+    """The preview's app files travel in the image, through the public inventory only."""
+
+    def test_the_tool_files_are_let_into_the_build_context(self):
+        entries = lines(DOCKERIGNORE)
+        for name in ("!tools/presto_bundle.py", "!tools/presto_preview"):
+            with self.subTest(name=name):
+                self.assertIn(name, entries)
+        # The device's own files stay out, even though presto/ is now used.
+        for name in ("presto/config.py", "presto/secrets.py"):
+            self.assertIn(name, entries)
+
+    def test_the_image_keeps_only_what_the_inventory_names(self):
+        text = DOCKERFILE.read_text(encoding="utf-8")
+        self.assertIn("RUN python docker/collect_preview.py /build /opt/presto-preview", text)
+        self.assertIn("COPY --from=builder /opt/presto-preview /opt/presto-preview", text)
+        self.assertNotIn("COPY presto ./presto /opt", text)
+
+    def test_the_preview_port_is_published_on_this_machine_only(self):
+        text = COMPOSE.read_text(encoding="utf-8")
+        self.assertIn('"127.0.0.1:8790:8790"', text)
+        self.assertRegex(text, r"(?m)^\s+DASH_PRESTO_PREVIEW:\s*$")
+
+
 class DockerfileTests(unittest.TestCase):
     """The image: small, pinned, and not running as root."""
 

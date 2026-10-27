@@ -15,3 +15,15 @@ def clean_env(**extra):
     kept = {key: value for key, value in os.environ.items() if not key.startswith(PROJECT_PREFIXES)}
     kept.update(extra)
     return patch.dict(os.environ, kept, clear=True)
+
+
+def seed_default_accounts(config):
+    """Make a first start create the Ollama and LiteLLM accounts again.
+
+    A fresh install seeds an account only for a source its configuration
+    actually sets, so a test that needs the two accounts to exist says so.
+    A timeout different from the default is enough to count as configured.
+    """
+    for name in ("ollama", "litellm"):
+        config["sources"][name]["timeout"] += 1
+    return config

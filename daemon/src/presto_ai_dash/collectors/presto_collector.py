@@ -1,4 +1,4 @@
-"""Presto AI Dash collector: one file, stdlib only, Python 3.8+.
+r"""Presto AI Dash collector: one file, stdlib only, Python 3.8+.
 
 Runs on a machine other than the daemon's and posts observations to the
 daemon's ingest route. It is deliberately self-contained: no package imports,
@@ -441,7 +441,9 @@ def load_config(path):
         with open(path, "rb") as handle:
             raw = handle.read(MAX_CONFIG_BYTES + 1)
     except FileNotFoundError:
-        raise ConfigError("there is no configuration file at %s" % path) from None
+        raise ConfigError("there is no configuration file at %s\n"
+                          "Download the setup file from the daemon's admin page (Settings > "
+                          "Remote reports), then run: python presto_collector.py setup" % path) from None
     except OSError as error:
         raise ConfigError("cannot read %s (%s)" % (path, type(error).__name__)) from None
     if len(raw) > MAX_CONFIG_BYTES:
@@ -809,9 +811,192 @@ def watch(config_path, once=False, out=None, sleep=None, opener=None, rounds=Non
         return 0
 
 
+SETUP_MODE = "setup"
+SETUP_KIND = "presto-collector-setup"
+SETUP_KEYS = frozenset(("kind", "url", "service", "name", "token_file", "token"))
+MAX_SETUP_BYTES = 8192
+_SAFE_FILE_NAME = frozenset("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+
+
+class SetupError(Exception):
+    """A setup file cannot be used; the message says why."""
+
+
+def find_setup_files(explicit=None, folders=None):
+    """The setup files to use: the one named, or those the admin page downloaded.
+
+    The browser saves them in the Downloads folder, so that, the folder this
+    script is in and the current folder are searched, newest first.
+    """
+    if explicit:
+        return [explicit]
+    if folders is None:
+        folders = [os.path.dirname(os.path.abspath(__file__)), os.getcwd(),
+                   os.path.join(os.path.expanduser("~"), "Downloads")]
+    found, seen = [], set()
+    for folder in folders:
+        try:
+            names = os.listdir(folder)
+        except OSError:
+            continue
+        for name in names:
+            path = os.path.join(folder, name)
+            if (name.startswith("presto-collector-setup") and name.endswith(".json")
+                    and os.path.isfile(path) and path not in seen):
+                seen.add(path)
+                found.append(path)
+    found.sort(key=lambda path: os.path.getmtime(path), reverse=True)
+    return found
+
+
+def read_setup_file(path):
+    """The validated contents of one setup file, or SetupError."""
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read(MAX_SETUP_BYTES + 1)
+        if len(raw) > MAX_SETUP_BYTES:
+            raise SetupError("%s is too large to be a setup file" % path)
+        data = json.loads(raw.decode("utf-8-sig"))
+    except OSError as error:
+        raise SetupError("cannot read %s (%s)" % (path, type(error).__name__)) from None
+    except (ValueError, UnicodeError, RecursionError):
+        raise SetupError("%s is not a setup file (not valid JSON)" % path) from None
+    if not isinstance(data, dict) or data.get("kind") != SETUP_KIND:
+        raise SetupError("%s is not a Presto AI Dash setup file" % path)
+    if set(data) - SETUP_KEYS:
+        raise SetupError("%s has settings this collector does not know; download "
+                         "a newer presto_collector.py" % path)
+    for key in ("url", "service", "name", "token_file", "token"):
+        if not isinstance(data.get(key), str) or not data[key]:
+            raise SetupError("%s: %s is missing" % (path, key))
+    url, token, token_file = data["url"], data["token"], data["token_file"]
+    if (not url.startswith(("http://", "https://")) or len(url) > 300 or not url.isascii()
+            or "REPLACE-WITH" in url):
+        raise SetupError("%s: the daemon's address is not set. Download the setup "
+                         "file again with the address filled in" % path)
+    if data["service"] not in SERVICES:
+        raise SetupError("%s: service must be one of %s" % (path, ", ".join(SERVICES)))
+    if not token.isascii() or not token.isprintable() or " " in token or len(token) > 200:
+        raise SetupError("%s: the token is not usable" % path)
+    if (len(token_file) > 100 or token_file.startswith(".")
+            or set(token_file) - _SAFE_FILE_NAME):
+        raise SetupError("%s: token_file must be a plain file name" % path)
+    return data
+
+
+def _write_private(path, text):
+    """Write a file only its owner can read, replacing any earlier one atomically."""
+    temporary = path + ".tmp"
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(text)
+    os.replace(temporary, path)
+
+
+def apply_setup(setup, config_path):
+    """Install one setup: its token file, and its account in collector.json.
+
+    An account already listed for the same service and token file is replaced,
+    so running a setup again, or after a token is rotated, is safe. Other
+    accounts in the file are kept.
+    """
+    folder = os.path.dirname(os.path.abspath(config_path))
+    os.makedirs(folder, exist_ok=True)
+    config = {}
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, "rb") as handle:
+                config = json.loads(handle.read(MAX_CONFIG_BYTES + 1).decode("utf-8-sig"))
+        except (OSError, ValueError, UnicodeError, RecursionError):
+            raise SetupError("%s exists but cannot be read as JSON; fix or remove it"
+                             % config_path) from None
+        if not isinstance(config, dict):
+            raise SetupError("%s must hold one JSON object" % config_path)
+    accounts = [entry for entry in config.get("accounts", [])
+                if not (isinstance(entry, dict) and entry.get("service") == setup["service"]
+                        and entry.get("token_file") == setup["token_file"])]
+    accounts.append({"service": setup["service"], "name": setup["name"],
+                     "token_file": setup["token_file"]})
+    config["url"] = setup["url"]
+    config["accounts"] = accounts
+    candidate = os.path.join(folder, "collector.json.new")
+    _write_private(candidate, json.dumps(config, indent=2) + "\n")
+    try:
+        load_config(candidate)
+    except ConfigError as error:
+        os.remove(candidate)
+        raise SetupError("the result would not be a usable collector.json: %s" % error) from None
+    _write_private(os.path.join(folder, setup["token_file"]), setup["token"] + "\n")
+    os.replace(candidate, config_path)
+
+
+def setup(explicit=None, config_path=None, folders=None, keep=False, out=None, check=True):
+    """Install the setup files the admin page downloaded, then check them once."""
+    out = out or sys.stderr
+    config_path = config_path or default_config_path()
+    paths = find_setup_files(explicit, folders)
+    if not paths:
+        out.write("presto_collector: no setup file found. On the daemon's admin page "
+                  "(Settings > Remote reports), create a token and press \"Download setup "
+                  "file\", then run this again. It looks in your Downloads folder and "
+                  "next to this script.\n")
+        return 2
+    for path in paths:
+        try:
+            apply_setup(read_setup_file(path), config_path)
+        except SetupError as error:
+            out.write("presto_collector: %s\n" % error)
+            return 2
+        out.write("installed %s\n" % os.path.basename(path))
+        if not keep:
+            try:
+                os.remove(path)  # it holds the token, which now has a file of its own
+            except OSError:
+                out.write("presto_collector: delete %s yourself, it holds a token\n" % path)
+    out.write("wrote %s\n" % config_path)
+    if not check:
+        return 0
+    out.write("checking once:\n")
+    code = watch(config_path, once=True, out=out)
+    if code == 0:
+        out.write("working. To keep it going: python presto_collector.py watch\n")
+    return code
+
+
+HELP_TEXT = r"""Sends Claude Code and Codex usage from this computer to your Presto AI Dash
+daemon. Run it on the computer that has Claude Code or Codex installed.
+
+Quick start:
+  1. In the daemon's admin page, open Settings > Remote reports. Turn reports
+     on, create a token for each account, then download this file and the
+     setup file shown with the token.
+  2. Install it:    python presto_collector.py setup
+     (it finds the setup file in Downloads, saves your settings in
+     ~/.presto-ai-dash, deletes the setup file and checks once)
+  3. Keep it going: python presto_collector.py watch
+
+Codex: install Codex on this computer and sign in with ChatGPT once. The
+collector asks Codex for your usage limits and sends the limits, their reset
+times and your credit counts, never your account details. Add an account
+with "service": "codex":
+
+  {"url": "http://YOUR-DAEMON:8787/api/v1/ingest",
+   "accounts": [{"service": "codex", "token_file": "codex.token"}]}
+
+Claude Code: the VS Code panel and its usage cache are read the same way, with
+"service": "claude". Claude Code's terminal status line uses the
+claude-statusline mode instead; the admin page shows the command to paste.
+
+Run it with python (python presto_collector.py ...). Double-clicking it, or
+typing ./presto_collector.py on Windows, opens a window that closes at once.
+"""
+
+
 def main(argv=None, state_path=None):
-    parser = argparse.ArgumentParser(description=__doc__,
+    parser = argparse.ArgumentParser(description=HELP_TEXT,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--version", action="version",
+                        version="presto_collector version " + COLLECTOR_VERSION)
     # One subcommand per service. Each has its own options, so a service that
     # is polled rather than hooked can have different ones.
     modes = parser.add_subparsers(dest="mode", metavar="MODE", required=True)
@@ -821,12 +1006,25 @@ def main(argv=None, state_path=None):
     claude.add_argument("--host", default=socket.gethostname())
     claude.add_argument("previous", nargs=argparse.REMAINDER,
                         help="the previous status line command, after --")
-    watcher = modes.add_parser(WATCH_MODE, help="read on a timer and push (VS Code panel, Codex)")
+    watcher = modes.add_parser(WATCH_MODE, help="read on a timer and push (VS Code panel, Codex)",
+                               description="Reads Claude (VS Code panel) and Codex usage on a timer "
+                                           "and sends it to the daemon, as set in collector.json.")
     watcher.add_argument("--config", default=None,
                          help="the configuration file (default: ~/.presto-ai-dash/collector.json)")
     watcher.add_argument("--once", action="store_true",
                          help="make one round, say what was read and sent, and exit")
+    installer = modes.add_parser(SETUP_MODE, help="install the setup file the admin page downloaded",
+                                 description="Finds the setup file downloaded from the admin page "
+                                             "(Downloads folder, or next to this script), saves "
+                                             "your settings in ~/.presto-ai-dash, deletes the "
+                                             "setup file and checks once.")
+    installer.add_argument("file", nargs="?", default=None,
+                           help="the setup file (default: look in Downloads)")
+    installer.add_argument("--keep", action="store_true",
+                           help="do not delete the setup file afterwards")
     args = parser.parse_args(argv)
+    if args.mode == SETUP_MODE:
+        return setup(args.file, keep=args.keep)
     if args.mode == WATCH_MODE:
         return watch(args.config or default_config_path(), once=args.once)
     previous = list(args.previous)

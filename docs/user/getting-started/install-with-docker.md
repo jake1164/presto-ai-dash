@@ -294,7 +294,9 @@ that it is unavailable, and why, in its status. The container does not
 crash over it.
 
 `host.docker.internal` is the name Docker Desktop gives the machine that
-runs Docker. On Linux, add it yourself in the compose file:
+runs Docker. Inside the container `localhost` is the container itself, so the
+Add source form fills in `host.docker.internal` for Ollama and LiteLLM and
+says why. On Linux, add it yourself in the compose file:
 
 ```yaml
 extra_hosts:
@@ -309,8 +311,8 @@ The way in is the **remote collector**, the same one the local install
 uses:
 
 1. Turn the feature on: **Settings -> Remote reports -> Accept remote
-   reports** in the admin page, or `DASH_INGEST_ENABLED=1` in the
-   environment (the usual choice for a container).
+   reports** in the admin page, or `DASH_INGEST_ENABLED=1` in `.env`. The
+   `.env` value locks the checkbox, so use one or the other.
 2. On the same panel, download the collector `presto_collector.py`. It is a
    single file, Python 3.8 or newer, and it runs on the Claude machine. The
    panel shows its SHA-256 to compare after you copy it.
@@ -328,8 +330,11 @@ host label. **No credentials, no prompts, no transcripts.**
 That is the terminal's status line. Two things have no status line: the
 **VS Code panel** and **Codex**. For those the collector has a `watch` mode,
 which reads on a timer and pushes with the account's own token, from a folder
-of its own (`~/.presto-ai-dash/collector.json`). The admin page writes that
-file for you when you create the token. Read
+of its own (`~/.presto-ai-dash/collector.json`). You do not write it: when you
+create the token, press **Download setup file** (check the address first),
+download `presto_collector.py` beside it, and on that computer run
+`python presto_collector.py setup`. It finds the download, saves your settings
+and the token, deletes the download and checks once. Read
 [Remote collectors](../guides/remote-collectors.md) for it, and for what the
 collector says when the container is not accepting reports yet.
 
@@ -352,6 +357,28 @@ None of this has been run against a real second computer yet; see
 [Remote collectors](../guides/remote-collectors.md#what-reports-remotely-and-what-does-not)
 for exactly what has been tested.
 
+## Seeing the Presto screen without a Presto
+
+The image carries the Presto app and an emulated 240x240 screen, so you can
+try the container, and click through the cards, without a physical device.
+It is off by default. To turn it on, add this to `.env` and recreate the
+container (`docker compose up -d`):
+
+```text
+DASH_PRESTO_PREVIEW=1
+```
+
+Then open `http://127.0.0.1:8790/`. The screen shows your real accounts, polled
+from this daemon as a device named `psl`, which also appears on the **Status**
+tab. Tick **Demo** on the page for sample data instead.
+
+It is a test aid, not a feature to leave on. The page has no sign-in and shows
+live account names and quotas, so Compose publishes its port on `127.0.0.1`
+only. If you change the published port, set `DASH_PRESTO_PREVIEW_ALLOWED_HOSTS`
+in `.env` to the new `host:port` names (for example
+`localhost:18790,127.0.0.1:18790`), as the page refuses any other address. On a
+server, reach it with an SSH tunnel rather than by publishing it.
+
 ## The environment variables
 
 The compose file passes the documented variables through, so `.env` can
@@ -370,7 +397,9 @@ hold any of them:
 | `DASH_DATABASE` | The database. `/data/dash.db`. |
 | `DASH_KEY_FILE` | The key file. `/data/dash.db.key`. |
 | `DASH_ENCRYPTION_KEY` | The encryption master key, instead of the key file. |
-| `DASH_INGEST_ENABLED` | The remote reports switch. `0` by default. |
+| `DASH_INGEST_ENABLED` | The remote reports switch. Unset by default, so you can tick **Accept remote reports** in the admin page. Set to `1` or `0` in `.env` to fix the choice; the checkbox is then locked. |
+| `DASH_PRESTO_PREVIEW` | `1` serves the Presto screen in a browser at port 8790, on this machine only. Off unless set. |
+| `DASH_PRESTO_PREVIEW_ALLOWED_HOSTS` | The `host:port` names the preview answers. Change it only with the published port. |
 | `DASH_DEMO` | Demo mode: sample data instead of the real accounts. Off unless set to `1`. |
 | `DASH_LOG_LEVEL` | `INFO` by default. |
 | `DASH_OVERFLOW_ROWS` | The Home overflow strip. `1` by default. |

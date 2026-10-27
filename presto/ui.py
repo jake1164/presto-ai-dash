@@ -388,12 +388,13 @@ def _freshness(row, stale):
 def _update_note(row, stale):
     """Colour only the reading age; idle or disconnected readings stay grey."""
     from alerts import rgb_for_accent
+    from home import FRESH_UPDATE_SECONDS
     update = row.get("last_update")
     if not update:
         return "", INK_DIM
     rgb = INK_DIM
     if not stale and update["in_use"]:
-        rgb = rgb_for_accent("yellow" if update["age_seconds"] > 15 * 60 else "green")
+        rgb = rgb_for_accent("yellow" if update["age_seconds"] > FRESH_UPDATE_SECONDS else "green")
     return update["text"], rgb
 
 

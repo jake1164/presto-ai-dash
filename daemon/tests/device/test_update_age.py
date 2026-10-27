@@ -65,7 +65,7 @@ class UpdateAgeTests(unittest.TestCase):
                 display = Display()
                 draw_sources(display, Palette(display), [self.row(age, active)], 0, 2)
                 test_home.assert_layout(self, display)
-                update = next(i for i, r in enumerate(display.rows) if r[0].startswith("Updated"))
+                update = next(i for i, r in enumerate(display.rows) if r[0].startswith(("Updated", "stale")))
                 reset = next(r for r in display.rows if r[0].startswith("Wk resets"))
                 self.assertEqual(display.text_pens[update], rgb)
                 self.assertLess(display.rows[update][1], reset[1])
@@ -76,7 +76,7 @@ class UpdateAgeTests(unittest.TestCase):
         draw_sources(display, Palette(display), [self.row(7201, state="stale")], 0, 2,
                      stale=True)
         updates = [(r, pen) for r, pen in zip(display.rows, display.text_pens)
-                   if r[0].startswith("Updated")]
+                   if r[0].startswith(("Updated", "stale"))]
         self.assertEqual(updates[0][1], INK_DIM)
         self.assertTrue(any(r[0].startswith("Wk resets") for r in display.rows))
 
@@ -90,9 +90,11 @@ class UpdateAgeTests(unittest.TestCase):
         self.assertNotIn("25%", texts)
 
     def test_formats_and_invalid_readings(self):
-        for age, label in ((0, "0m"), (59, "0m"), (60, "1m"), (3599, "59m"),
-                           (3600, "1h"), (3900, "1h:05m"), (90000, "25h")):
-            self.assertEqual(update_note({"age_seconds": age})["text"], "Updated " + label)
+        for age, text in ((0, "Updated 0m"), (59, "Updated 0m"), (60, "Updated 1m"),
+                          (900, "Updated 15m"), (901, "stale 15m"), (3599, "stale 59m"),
+                          (3600, "stale 1h"), (3900, "stale 1h"), (33720, "stale 9h"),
+                          (90000, "stale 25h"), (172800, "stale 2d")):
+            self.assertEqual(update_note({"age_seconds": age})["text"], text)
         for value in (None, {}, {"age_seconds": True}, {"age_seconds": -1},
                       {"age_seconds": float("inf")}, {"age_seconds": "60"}):
             self.assertIsNone(update_note(value))

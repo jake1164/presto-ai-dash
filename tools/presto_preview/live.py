@@ -230,7 +230,7 @@ def watch(runner):
             runner.publish(runner.pixels, runner.led, runner.error)
 
 
-def request_refusal(host, origin, content_type, port, method):
+def request_refusal(host, origin, content_type, port, method, names=None):
     """Why a request must be refused, or ``None`` when it may proceed.
 
     The preview holds the real device token and drives the real daemon, so a
@@ -240,7 +240,7 @@ def request_refusal(host, origin, content_type, port, method):
     request is turned away by its Origin, and a write must be JSON, which a
     cross-site form or ``text/plain`` request cannot be.
     """
-    names = ("127.0.0.1:%d" % port, "localhost:%d" % port)
+    names = tuple(names) if names else ("127.0.0.1:%d" % port, "localhost:%d" % port)
     if (host or "").lower() not in names:
         return "unexpected Host"
     if origin is not None and origin not in tuple("http://" + name for name in names):
@@ -250,12 +250,12 @@ def request_refusal(host, origin, content_type, port, method):
     return None
 
 
-def make_handler(runner):
+def make_handler(runner, names=None):
     class Handler(BaseHTTPRequestHandler):
         def _refused(self):
             reason = request_refusal(self.headers.get("Host"), self.headers.get("Origin"),
                                      self.headers.get("Content-Type"),
-                                     self.server.server_address[1], self.command)
+                                     self.server.server_address[1], self.command, names)
             if reason:
                 self._send(403, reason.encode("ascii"), "text/plain")
             return bool(reason)
@@ -514,6 +514,22 @@ def open_tabs(first, preview_url, wait=30):
         traceback.print_exc()
 
 
+def start_server(runner, host, port, names=None):
+    """The preview's HTTP server, bound and ready for ``serve_forever``.
+
+    ``names`` are the Host values it answers (default: loopback on ``port``).
+    Raises OSError when the port is taken, with the same exclusive binding as
+    the daemon, so no two previews overlap.
+    """
+    daemon_src = os.path.join(render.REPO_ROOT, "daemon", "src")
+    if os.path.isdir(daemon_src) and daemon_src not in sys.path:
+        sys.path.append(daemon_src)
+    from presto_ai_dash.api import _ExclusiveHTTPServer
+    server = _ExclusiveHTTPServer((host, port), make_handler(runner, names))
+    server.daemon_threads = True
+    return server
+
+
 def main_cli(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--demo", action="store_true",
@@ -529,16 +545,11 @@ def main_cli(argv=None):
     threading.Thread(target=watch, args=(runner,), daemon=True).start()
     # Loopback only: the live dash shows account names and quotas.
     # Use the same exclusive binding as the daemon: no overlapping PSL processes.
-    daemon_src = os.path.join(render.REPO_ROOT, "daemon", "src")
-    if daemon_src not in sys.path:
-        sys.path.append(daemon_src)
-    from presto_ai_dash.api import _ExclusiveHTTPServer
     try:
-        server = _ExclusiveHTTPServer(("127.0.0.1", args.port), make_handler(runner))
+        server = start_server(runner, "127.0.0.1", args.port)
     except OSError:
         runner.stop()
         raise SystemExit("PSL is already running or its port is unavailable; use the existing preview.")
-    server.daemon_threads = True
     url = "http://127.0.0.1:%d/" % args.port
     print("Presto live preview on " + url, flush=True)
     if args.open:

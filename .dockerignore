@@ -55,5 +55,7 @@ daemon/tests
 daemon/templates
 docs
 tools
+!tools/presto_bundle.py
+!tools/presto_preview
 examples
 daemon/src/presto_ai_dash/presto_app

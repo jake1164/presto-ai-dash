@@ -11,6 +11,8 @@ from urllib.parse import urlsplit
 from .api import ApiServer, BoundedRequestHandler, parse_length
 from .collectors import COLLECTOR_FILE, collector_bytes
 from .admin_sessions import AdminSessions, SESSION_SECONDS, token_binding
+from .codex_login import CodexLoginError
+from .sources._codex_rpc import CodexReportingError
 from .storage import ConfigurationConflict
 
 log = logging.getLogger(__name__)
@@ -455,6 +457,11 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
                 except KeyError:
                     self._send(404, {"error": "source or login not found"})
                 except ValueError as exc:
+                    self._send(400, {"error": str(exc)})
+                except (CodexLoginError, CodexReportingError) as exc:
+                    # Fixed, secret-free messages such as "Install Codex or set its
+                    # executable path in source configuration": the page shows them.
+                    log.warning("codex login operation refused: %s", exc)
                     self._send(400, {"error": str(exc)})
                 except Exception:
                     log.error("codex login operation failed")

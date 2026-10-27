@@ -13,11 +13,12 @@ from . import __version__
 from .alert_policy import (apply_threshold, parse_clock, resolve_alert_settings,
                            threshold_status, validate_mute_hours,
                            validate_thresholds)
+from .card_tiles import local_readings
 from .clients import ClientRegistry
 from .codex_login import CodexLoginManager
 from .collectors import (collector_config_text, collector_info, presto_collector,
                           served_version, update_state)
-from .config import (ALERT_KEYS, alert_base_settings, alert_settings,
+from .config import (ALERT_KEYS, DEFAULTS, alert_base_settings, alert_settings,
                      demo_enabled, ingest_enabled, overflow_rows)
 from .credentials import load_cipher
 from .dashboard import build_card_details, build_instance_payload, device_view, lazy_cards
@@ -25,6 +26,7 @@ from .effective import effective_settings, uptime_label, uptime_seconds
 from .http_client import origin_of
 from .problems import ProblemBuffer
 from .sources import source_catalog, source_type
+from .sources._codex_rpc import CodexReportingError, find_executable
 from .models import SourceSnapshot, iso, now_utc
 from .quotas import claude_provenance, mark_passed_resets, present_quota, present_snapshot
 from .storage import ConfigurationConflict
@@ -33,6 +35,15 @@ from .storage import ConfigurationConflict
 INGEST_URL_PLACEHOLDER = "http://REPLACE-WITH-DASH-ADDRESS:8787/api/v1/ingest"
 
 log = logging.getLogger(__name__)
+
+
+def codex_found(executable=""):
+    """Whether this machine has a Codex program for the given executable setting."""
+    try:
+        find_executable(str(executable or ""))
+    except CodexReportingError:
+        return False
+    return True
 
 
 def _stamp(value):
@@ -156,10 +167,15 @@ class SourceConfiguration:
                                   config["admin"]["key_file"], existing=marker is not None)
         if marker is None:
             records = []
-            for description in source_catalog():
+            for description in source_catalog(container=False):
                 type_id = description["id"]
                 section = config["sources"].get(type_id)
                 if section is None:
+                    continue
+                # A section that is only the built-in default means the user
+                # configured nothing: a fresh install starts with no accounts
+                # instead of two disabled ones nobody asked for.
+                if section == DEFAULTS["sources"].get(type_id):
                     continue
                 cls = source_type(type_id)
                 settings = {field["key"]: section.get(field["key"], field["default"])
@@ -190,6 +206,8 @@ class SourceConfiguration:
             public["has_key"] = record["credential"] is not None
             if record["type"] == "claude":
                 public["export_installed"] = self.storage.claude_bridge(record["id"]) is not None
+            if record["type"] == "codex":
+                public["codex_found"] = codex_found((record.get("config") or {}).get("executable", ""))
             self._attach_ingest(public, record)
             resolution = resolve_alert_settings(settings, stored.get(record["id"]))
             # What the admin page needs to say: whether this service
@@ -219,13 +237,17 @@ class SourceConfiguration:
             public["updated_at"] = snapshot.to_dict()["updated_at"] if snapshot else None
             if snapshot and snapshot.metrics.get("quota"):
                 public["quota"] = mark_passed_resets(present_quota(snapshot.metrics["quota"]))
+            if snapshot and record["type"] in ("ollama", "litellm"):
+                public["readings"] = local_readings(record["type"], snapshot.metrics, now_utc())
             if record["type"] == "claude":
                 # Every Claude number says where it came from: the terminal
                 # export, the local session logs, or the freshness hint.
                 public["provenance"] = claude_provenance(public.get("quota"),
                                                          record.get("config"))
             sources.append(public)
-        return {"types": source_catalog(), "sources": sources}
+        # Whether this machine has Codex, so the page can send a user without it
+        # (a container, a server) to remote reports instead of a sign-in that fails.
+        return {"types": source_catalog(), "sources": sources, "codex_found": codex_found("")}
 
     def _attach_ingest(self, public, record):
         """Push-capable accounts gain token state and the collector trail."""
@@ -473,6 +495,10 @@ class SourceConfiguration:
         service = "codex" if record and record["type"] == "codex" else "claude"
         token_file = "%s-%s.token" % (service, instance_id)
         result = {"token": token, "service": service, "token_file": token_file,
+                  "name": (record or {}).get("name") or service,
+                  "ingest_url": INGEST_URL_PLACEHOLDER,
+                  "device_port": self.config["daemon"]["port"],
+                  "admin_port": self.config["admin"]["port"],
                   "collector_folder": "~/.presto-ai-dash",
                   "collector_config": collector_config_text(
                       service, (record or {}).get("name") or service, token_file,

@@ -159,16 +159,20 @@ page. The account's card says whether remote reports are on, and links there.
    elsewhere prints it.
 3. Under **Accounts that report remotely**, press **Create remote token** on
    the account. The token is shown once; the daemon stores only its hash. The
-   page also shows the file to save as `collector.json`, and, for Claude, the
-   status-line snippets.
+   page offers **Download setup file** (check the address in the box above it
+   is one the other computer can reach) and, for Claude, the status-line
+   snippets.
 4. On the remote computer:
     - **For the status line (Claude in a terminal):** set the `statusLine`
       command in that profile's Claude settings file to the snippet, with its
       URL edited to the daemon's real address.
-    - **For `watch` (the VS Code panel, Codex):** create `~/.presto-ai-dash/`,
-      save the token in it under the file name the page gives, save the
-      `collector.json` there with its URL edited, then run `watch --once` to
-      check and `watch` to keep it going.
+    - **For `watch` (the VS Code panel, Codex):** put the downloaded setup
+      file in your Downloads folder (or beside `presto_collector.py`) and run
+      `python presto_collector.py setup`. It saves `collector.json` and the
+      token in `~/.presto-ai-dash/` (the token file readable by you only),
+      deletes the setup file, which holds the token, and checks once. Run it
+      again for each further account: they are added to the same
+      `collector.json`. Then `python presto_collector.py watch` keeps it going.
 
 ## Running it by hand
 

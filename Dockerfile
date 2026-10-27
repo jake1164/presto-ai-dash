@@ -22,6 +22,14 @@ COPY docker/requirements.txt ./
 COPY daemon/pyproject.toml daemon/README.md daemon/LICENSE ./daemon/
 COPY daemon/src ./daemon/src
 
+# The Presto app and its preview tool, for the DASH_PRESTO_PREVIEW switch. Only
+# the public app files are kept, never a device's config or secrets.
+COPY presto ./presto
+COPY tools/presto_bundle.py ./tools/presto_bundle.py
+COPY tools/presto_preview ./tools/presto_preview
+COPY docker/collect_preview.py ./docker/collect_preview.py
+RUN python docker/collect_preview.py /build /opt/presto-preview
+
 # The pinned dependencies and then the daemon, into a virtual environment the
 # final image copies. A wheel exists for this platform, so no compiler is
 # needed, and pip itself is thrown away afterwards.
@@ -43,7 +51,8 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:$PATH" \
     DASH_DATABASE=/data/dash.db \
-    DASH_HOST=0.0.0.0
+    DASH_HOST=0.0.0.0 \
+    DASH_IN_CONTAINER=1
 
 # A non-root user owns the data directory. The daemon never needs to be root.
 # The base image's own pip is removed too: nothing installs packages here.
@@ -54,6 +63,7 @@ RUN rm -rf /usr/local/lib/python3.13/site-packages/pip* /usr/local/bin/pip* \
  && chown dash:dash /data
 
 COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /opt/presto-preview /opt/presto-preview
 COPY LICENSE THIRD_PARTY_NOTICES.md /licenses/
 
 USER dash

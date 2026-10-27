@@ -149,12 +149,40 @@ def _litellm_tiles(report, metrics, now):
     return tiles
 
 
+def gigabytes(size):
+    """A size in bytes as "8.4 GB", or "58 GB" from ten up."""
+    gigs = size / 1e9
+    return "%.1f GB" % gigs if gigs < 10 else "%d GB" % round(gigs)
+
+
 def _ollama_tiles(report, metrics, now):
-    """Ollama: the model that is loaded, its speed and how many there are."""
+    """Ollama: the loaded model, where it runs, what it holds and how many there are."""
     tiles = []
     model = metrics.get("loaded_model")
     if isinstance(model, str) and model.strip():
         tiles.append(tile("model", model))
+    gpu = _number(metrics.get("gpu_percent"))
+    if gpu is not None:
+        # All on the GPU is the fast case; a partial share means some layers
+        # run on the CPU, which is slower, and none is a CPU-only machine.
+        tiles.append(tile("gpu", "%d%%" % gpu,
+                          "normal" if gpu >= 100 else "warn" if gpu > 0 else "dim"))
+    memory = _number(metrics.get("loaded_memory_bytes"))
+    if memory is not None:
+        tiles.append(tile("memory", gigabytes(memory)))
+    context = _number(metrics.get("loaded_context"))
+    if context is not None and context >= 1024:
+        tiles.append(tile("context", "%dk" % round(context / 1024)))
+    expires = metrics.get("loaded_expires_at")
+    if expires:
+        try:
+            left = (timestamp(expires) - now).total_seconds()
+        except (TypeError, ValueError):
+            left = None
+        if left is not None:
+            # A model kept loaded without limit has an expiry years away.
+            tiles.append(tile("unloads", "kept" if left > 86400 else "now" if left <= 0
+                              else compact_age(left)))
     speed = _number(metrics.get("last_measured_tokens_per_sec"))
     if speed is not None and speed > 0:
         tiles.append(tile("speed", "%.0f tok/s" % speed))
@@ -162,6 +190,70 @@ def _ollama_tiles(report, metrics, now):
     if models is not None:
         tiles.append(tile("models", "%d" % models))
     return tiles
+
+
+def _text(value):
+    """A reported text, or None when it is missing or says it is unavailable."""
+    if isinstance(value, str) and value.strip() and value != "unavailable":
+        return value.strip()
+    return None
+
+
+def local_readings(source_type, metrics, now):
+    """Labelled facts for the admin page, for a service that has no quota windows.
+
+    The admin page has room for the whole story, so these are written out in
+    words, unlike the tiles. Only what the service really reported is listed.
+    """
+    rows = []
+
+    def add(label, value):
+        if value is not None:
+            rows.append([label, value])
+
+    if source_type == "ollama":
+        add("Version", _text(metrics.get("version")))
+        models = _number(metrics.get("available_models"))
+        add("Models installed", None if models is None else "%d" % models)
+        disk = _number(metrics.get("disk_bytes"))
+        add("Disk used by models", None if disk is None else gigabytes(disk))
+        loaded = _text(metrics.get("loaded_model"))
+        add("Loaded model", loaded or ("none" if models is not None else None))
+        if loaded:
+            shape = " ".join(str(metrics[key]) for key in ("loaded_params", "loaded_quant")
+                             if metrics.get(key))
+            add("Size and quantisation", shape or None)
+            memory = _number(metrics.get("loaded_memory_bytes"))
+            add("Memory in use", None if memory is None else gigabytes(memory))
+            gpu = _number(metrics.get("gpu_percent"))
+            if gpu is not None:
+                add("On the GPU", "%d%%%s" % (gpu, "" if gpu else " (CPU only)"))
+            context = _number(metrics.get("loaded_context"))
+            add("Context length", None if context is None else "{:,} tokens".format(int(context)))
+            expires = metrics.get("loaded_expires_at")
+            if expires:
+                try:
+                    left = (timestamp(expires) - now).total_seconds()
+                except (TypeError, ValueError):
+                    left = None
+                if left is not None:
+                    add("Unloads", "kept loaded" if left > 86400 else "now" if left <= 0
+                        else "in " + compact_age(left))
+        speed = _number(metrics.get("last_measured_tokens_per_sec"))
+        if speed is not None and speed > 0:
+            add("Last measured speed", "%.1f tokens/s" % speed)
+    elif source_type == "litellm":
+        add("Proxy", None if metrics.get("online") is None
+            else "online" if metrics["online"] else "offline")
+        add("Database", _text(metrics.get("database")))
+        for key, label in (("requests_today", "Requests today"), ("tokens_today", "Tokens today"),
+                           ("errors_today", "Failed requests today")):
+            value = _number(metrics.get(key))
+            add(label, None if value is None else "{:,}".format(int(value)))
+        spend = _number(metrics.get("spend_today"))
+        add("Spend today", None if spend is None else "$" + _money(spend))
+        add("Top model today", _text(metrics.get("top_model")))
+    return rows
 
 
 def _activity_tiles(report, metrics, now):

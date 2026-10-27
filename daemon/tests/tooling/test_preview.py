@@ -410,6 +410,15 @@ class LiveServerGuardTests(unittest.TestCase):
         self.assertIsNotNone(refusal("127.0.0.1:8790", "https://127.0.0.1:8790", None, port, "GET"))
         self.assertIsNotNone(refusal("127.0.0.1:8790", None, "text/plain", port, "POST"))
 
+    def test_a_container_names_the_hosts_it_answers(self):
+        names = ("localhost:18790", "127.0.0.1:18790")
+        refusal = live.request_refusal
+        self.assertIsNone(refusal("127.0.0.1:18790", "http://localhost:18790", None, 8790, "GET", names))
+        # The listening port is not the published one: only the named hosts pass.
+        self.assertIsNotNone(refusal("127.0.0.1:8790", None, None, 8790, "GET", names))
+        self.assertIsNotNone(refusal("evil.example:18790", None, None, 8790, "GET", names))
+        self.assertIsNotNone(refusal("127.0.0.1:18790", "http://evil.example", None, 8790, "GET", names))
+
 
 if __name__ == "__main__":
     unittest.main()

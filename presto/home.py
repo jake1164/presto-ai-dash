@@ -560,23 +560,31 @@ def home_windows(row):
     return shown or windows[:1]
 
 
+# A reading this old or younger is current; an older one is called stale.
+FRESH_UPDATE_SECONDS = 15 * 60
+
+
 def update_note(value):
-    """A bounded quota-reading age, separate from the quota's reset time."""
+    """A bounded quota-reading age, separate from the quota's reset time.
+
+    "Updated 4m" while it is current, then "stale 42m", "stale 9h" or
+    "stale 3d": the age is the whole message, in its largest whole unit.
+    """
     if not isinstance(value, dict):
         return None
     age = value.get("age_seconds")
     if not _number(age) or age < 0 or age > 315360000:
         return None
     minutes = int(age) // 60
-    hours, minutes = divmod(minutes, 60)
-    if not hours:
-        label = "%dm" % minutes
-    elif not minutes:
-        label = "%dh" % hours
+    if age <= FRESH_UPDATE_SECONDS:
+        text = "Updated %dm" % minutes
+    elif minutes < 60:
+        text = "stale %dm" % minutes
+    elif minutes < 48 * 60:
+        text = "stale %dh" % (minutes // 60)
     else:
-        label = "%dh:%02dm" % (hours, minutes)
-    return {"text": "Updated " + label, "age_seconds": age,
-            "in_use": value.get("in_use") is True}
+        text = "stale %dd" % (minutes // 1440)
+    return {"text": text, "age_seconds": age, "in_use": value.get("in_use") is True}
 
 
 def source_rows(payload):
@@ -689,7 +697,12 @@ def local_parts(metrics, usage):
     parts = []
     model = metrics.get("loaded_model")
     if isinstance(model, str) and model:
+        if model.endswith(":latest"):
+            model = model[:-7]  # the tag every model has says nothing
         parts.append(model[:16])
+    gpu = metrics.get("gpu_percent")
+    if _number(gpu) and 0 <= gpu <= 100:
+        parts.append("%d%% GPU" % gpu)
     parts.extend(usage)
     spend = metrics.get("spend_today")
     if _number(spend) and spend > 0:

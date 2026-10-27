@@ -248,6 +248,32 @@ class ClientDiagnosticsPageTests(AdminServerBase):
         for column in ("Last error", "Failures", "Free", "Signal", "Uptime"):
             self.assertIn('"%s"' % column, script)
 
+    def test_a_codex_sign_in_failure_is_shown_in_the_card(self):
+        script = self.script()
+        # The error is painted beside the buttons, not only in the status line
+        # at the top of the page, which is out of sight when the card is open.
+        self.assertIn('codexLogins.set(source.id, {status: "error", error: error.message});', script)
+        self.assertIn('what: "Sign-out"', script)
+
+    def test_the_codex_form_signs_in_by_saving_the_account_first(self):
+        script = self.script()
+        self.assertIn("function codexSignIn()", script)
+        self.assertIn("const saved = await saveSource({quiet: true});", script)
+        self.assertIn("await startCodexLogin(saved, flow);", script)
+
+    def test_a_machine_without_codex_is_sent_to_remote_reports(self):
+        script = self.script()
+        self.assertIn("data.codex_found !== false", script)
+        self.assertIn("source.codex_found === false", script)
+        self.assertIn("function noCodexNote()", script)
+        self.assertIn("const link = remoteSettingsLink();", script)
+
+    def test_the_source_fields_ask_the_browser_not_to_autofill(self):
+        script = self.script()
+        self.assertIn('input.autocomplete = "off";', script)
+        for hint in ("bwignore", "1pIgnore", "lpignore"):
+            self.assertIn('"%s"' % hint, script)
+
     def test_a_missing_value_is_a_dash_and_never_undefined(self):
         script = self.script()
         self.assertIn("NO_VALUE", script)

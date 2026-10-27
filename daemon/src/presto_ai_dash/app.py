@@ -19,6 +19,7 @@ from .config import (ConfigError, admin_bind_error, configure_logging,
                      resolve_admin_token)
 from .management import SourceConfiguration, ManagedCollector
 from .models import now_utc
+from .preview_host import start_preview
 from .problems import ProblemBuffer
 from .sources import build_sources
 from .storage import Storage
@@ -70,6 +71,7 @@ class Daemon:
         self.collectors = []
         self.api = None
         self.admin = None
+        self.preview = None
         self.source_configuration = None
         self.maintenance_thread = None
         self.clients = None
@@ -194,6 +196,9 @@ class Daemon:
             self.api.start()
             if self.admin is not None:
                 self.admin.start()
+            # A test aid, off unless DASH_PRESTO_PREVIEW is on. It polls this
+            # daemon's device port, so it starts after the port is open.
+            self.preview = start_preview(self.config["daemon"]["port"], self.shared_token)
             return self
         except Exception:
             self.stop()
@@ -223,6 +228,8 @@ class Daemon:
                     pass
             try:
                 try:
+                    if self.preview is not None:
+                        self.preview.stop()
                     if self.admin is not None:
                         self.admin.stop()
                 finally:

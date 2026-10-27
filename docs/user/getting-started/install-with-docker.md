@@ -29,15 +29,24 @@ release carries them, so no checkout is needed:
 
 ```bash
 mkdir presto-ai-dash && cd presto-ai-dash
-curl -LO https://github.com/jake1164/presto-ai-dash/releases/latest/download/compose.yaml
-curl -L -o .env.example https://github.com/jake1164/presto-ai-dash/releases/latest/download/default.env.example
+curl -fLO https://github.com/jake1164/presto-ai-dash/releases/latest/download/compose.yaml
+curl -fL -o .env.example https://github.com/jake1164/presto-ai-dash/releases/latest/download/default.env.example
 ```
 
-(GitHub drops the leading dot of an attached file's name, so the template is
-published as `default.env.example`. The command above saves it as `.env.example`.)
+The `-f` makes curl stop with an error instead of saving a "Not Found" page as
+your file. (GitHub drops the leading dot of an attached file's name, so the
+template is published as `default.env.example`. The command saves it as
+`.env.example`.)
 
-To try a pre-release, take the files from that release instead (replace
-`latest/download` with `download/v0.50.0-rc1`) and set
+`latest` means the newest full release. If there is only a pre-release so far,
+those commands fail with a 404. To try a pre-release, use its own address:
+
+```bash
+curl -fLO https://github.com/jake1164/presto-ai-dash/releases/download/v0.50.0-rc1/compose.yaml
+curl -fL -o .env.example https://github.com/jake1164/presto-ai-dash/releases/download/v0.50.0-rc1/default.env.example
+```
+
+Then set
 `DASH_IMAGE=ghcr.io/jake1164/presto-ai-dash:0.50.0-rc1` in `.env`: the
 `latest` image tag moves only for a full release.
 

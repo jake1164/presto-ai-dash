@@ -107,7 +107,8 @@ and open <http://127.0.0.1:8788> on your own machine. The browser then uses
 
 To reach the admin page from another machine on the LAN, publish it as
 `8788:8788` and add the name the browser will use to
-`DASH_ADMIN_ALLOWED_HOSTS`, for example `192.168.1.50:8788`. Read the
+`DASH_ADMIN_ALLOWED_HOSTS` in `.env` (keep `localhost:8788,127.0.0.1:8788` in the
+list), for example `localhost:8788,127.0.0.1:8788,192.168.1.50:8788`. Read the
 security notes below before you do that.
 
 ## The health check
@@ -215,10 +216,9 @@ does that:
 - and add the name the browser will use to the admin page's allowed hosts,
   because the admin page only answers to the names it knows:
 
-```yaml
-environment:
-  DASH_ADMIN_HOST: "0.0.0.0"
-  DASH_ADMIN_ALLOWED_HOSTS: "dash.example.com"
+```ini
+# in .env
+DASH_ADMIN_ALLOWED_HOSTS=localhost:8788,127.0.0.1:8788,dash.example.com
 ```
 
 With that name in the list, the admin page answers to
@@ -391,7 +391,7 @@ hold any of them:
 | `DASH_ADMIN_TOKEN_FILE`, `DASH_SHARED_TOKEN_FILE`, `DASH_ENCRYPTION_KEY_FILE` | A path to a file holding the value, instead of the variable. Not both. |
 | `DASH_HOST` / `DASH_PORT` | The device port. `0.0.0.0:8787` inside the container. |
 | `DASH_ADMIN_HOST` | The admin page's bind address. `0.0.0.0` inside the container. |
-| `DASH_ADMIN_ALLOWED_HOSTS` | The names the admin page answers to, comma separated. |
+| `DASH_ADMIN_ALLOWED_HOSTS` | The names the admin page answers to, comma separated. `localhost:8788,127.0.0.1:8788` unless you set it in `.env`. |
 | `DASH_ADMIN_TOKEN` | The admin page's token. Required for a non-loopback bind address. |
 | `DASH_ADMIN_SECURE_COOKIE` | `true` when a TLS proxy fronts the admin page, so the session cookie is marked `Secure`. |
 | `DASH_DATABASE` | The database. `/data/dash.db`. |

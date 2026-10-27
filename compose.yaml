@@ -28,7 +28,10 @@ services:
       # names it is reached by before it may listen on anything but loopback.
       DASH_ADMIN_HOST: "0.0.0.0"
       DASH_ADMIN_PORT: "8788"
-      DASH_ADMIN_ALLOWED_HOSTS: "localhost:8788,127.0.0.1:8788,localhost:18788,127.0.0.1:18788"
+      # The names the admin page answers to. This machine always works; to reach
+      # the page from another computer, add the name the browser will use (for
+      # example 192.168.1.50:8788) to DASH_ADMIN_ALLOWED_HOSTS in .env.
+      DASH_ADMIN_ALLOWED_HOSTS: "${DASH_ADMIN_ALLOWED_HOSTS:-localhost:8788,127.0.0.1:8788}"
       DASH_ADMIN_TOKEN: "${DASH_ADMIN_TOKEN:?set DASH_ADMIN_TOKEN in .env}"
       # The token the Presto device holds. Required: a temporary one would be
       # written to Docker's log, which outlives the container.

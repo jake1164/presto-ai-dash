@@ -1968,12 +1968,13 @@
         editing ? "PUT" : "POST", data);
       element("api-key").value = ""; await reload();
       // A saved source closes the form, so the person is not left to scroll
-      // back up to Close. Two cases keep it open: a new Codex account, whose
-      // sign-in buttons are in the form, and a save made on the way to a
-      // sign-in, which carries on with the same form.
-      if (quiet || (type.id === "codex" && created)) edit(result); else closeEditor();
+      // back up to Close. Two cases keep it open: a new Codex account on a
+      // machine that has Codex, whose sign-in buttons are in the form, and a
+      // save made on the way to a sign-in, which carries on with the same form.
+      const signInHere = type.id === "codex" && created && codexHere;
+      if (quiet || signInHere) edit(result); else closeEditor();
       if (!quiet) {
-        message(type.id === "codex" && created
+        message(signInHere
           ? "Saved. Press Sign in with browser (or device code) below to connect Codex."
           : "Saved. Collection will update automatically.");
       }

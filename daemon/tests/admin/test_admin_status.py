@@ -263,8 +263,9 @@ class ClientDiagnosticsPageTests(AdminServerBase):
 
     def test_a_saved_source_closes_the_form_except_while_codex_signs_in(self):
         script = self.script()
-        self.assertIn('if (quiet || (type.id === "codex" && created)) edit(result); '
-                      "else closeEditor();", script)
+        # Only a new Codex account on a machine that has Codex stays open.
+        self.assertIn('const signInHere = type.id === "codex" && created && codexHere;', script)
+        self.assertIn("if (quiet || signInHere) edit(result); else closeEditor();", script)
 
     def test_the_form_always_opens_at_the_top(self):
         script = self.script()

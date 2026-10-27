@@ -30,6 +30,10 @@ Set it up in the admin page:
 
 The quota appears after a response supplies the fields.
 
+**Daemon in a container?** It has no Claude Code profile to edit, so the page
+shows no setup button there. Claude Code runs on your own computer: send its
+quota with the [remote collector](remote-collectors.md) instead.
+
 **What it does.** The helper runs under your own operating system account,
 writes straight to the dashboard database, and works even while the daemon
 is stopped. The only change on the provider side is the `statusLine`

@@ -26,7 +26,7 @@ from .effective import effective_settings, uptime_label, uptime_seconds
 from .http_client import origin_of
 from .logbuffer import LogBuffer
 from .problems import ProblemBuffer
-from .sources import source_catalog, source_type
+from .sources import in_container, source_catalog, source_type
 from .sources._codex_rpc import CodexReportingError, find_executable
 from .models import SourceSnapshot, iso, now_utc
 from .quotas import claude_provenance, mark_passed_resets, present_quota, present_snapshot
@@ -208,6 +208,9 @@ class SourceConfiguration:
             public["has_key"] = record["credential"] is not None
             if record["type"] == "claude":
                 public["export_installed"] = self.storage.claude_bridge(record["id"]) is not None
+                # A container has no Claude Code profile to edit, so the setup
+                # button would only fail there: Claude reports through a collector.
+                public["export_available"] = public["export_installed"] or not in_container()
             if record["type"] == "codex":
                 public["codex_found"] = codex_found((record.get("config") or {}).get("executable", ""))
             self._attach_ingest(public, record)

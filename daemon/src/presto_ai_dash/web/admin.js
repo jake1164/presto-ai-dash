@@ -19,6 +19,14 @@
     note.append(link);
     return note;
   }
+  function noClaudeNote() {
+    const note = el("p", "note", "The daemon runs in a container, which has no Claude Code on it to set up. "
+      + "Run Claude Code on your own computer and send its quota with the remote collector. ");
+    const link = remoteSettingsLink();
+    link.addEventListener("click", () => { if (!element("editor-modal").hidden && !busy) closeEditor(); });
+    note.append(link);
+    return note;
+  }
   let busy = false;
   let dragging = null;
   let ingestState = null, tokenReveal = null, displayState = null, demoState = null;
@@ -1470,7 +1478,9 @@
     const summary = detail.querySelector("[data-card-summary]");
     summary.textContent = source.type + " · " + (source.enabled ? source.status : "disabled") +
       " · " + keyStatus;
-    if (source.type === "claude") {
+    if (source.type === "claude" && source.export_available === false) {
+      setupActions.append(noClaudeNote());
+    } else if (source.type === "claude") {
       const setup = document.createElement("button");
       setup.textContent = source.export_installed ? "Remove Claude export setup" : "Set up Claude export";
       setup.addEventListener("click", async () => {

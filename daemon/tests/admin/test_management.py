@@ -623,5 +623,15 @@ class CodexSignInRefusalTests(AdminServerBase):
         self.assertFalse(next(s for s in listed["sources"] if s["id"] == row["id"])["codex_found"])
 
 
+    def test_a_container_has_no_claude_export_to_set_up(self):
+        row = self.manager.save({"type": "claude", "name": "Claude", "enabled": False,
+                                 "config": {"settings_path": "/home/x/.claude/settings.json"}})
+        for container, offered in ((True, False), (False, True)):
+            with patch("presto_ai_dash.management.in_container", return_value=container):
+                listed = self.manager.list_sources()
+            found = next(s for s in listed["sources"] if s["id"] == row["id"])
+            self.assertEqual(found["export_available"], offered)
+
+
 if __name__ == "__main__":
     unittest.main()

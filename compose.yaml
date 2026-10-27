@@ -32,10 +32,10 @@ services:
       # the page from another computer, add the name the browser will use (for
       # example 192.168.1.50:8788) to DASH_ADMIN_ALLOWED_HOSTS in .env.
       DASH_ADMIN_ALLOWED_HOSTS: "${DASH_ADMIN_ALLOWED_HOSTS:-localhost:8788,127.0.0.1:8788}"
-      DASH_ADMIN_TOKEN: "${DASH_ADMIN_TOKEN:?set DASH_ADMIN_TOKEN in .env}"
+      DASH_ADMIN_TOKEN: "${DASH_ADMIN_TOKEN:?DASH_ADMIN_TOKEN is empty in .env: put a token you generate there (openssl rand -hex 24)}"
       # The token the Presto device holds. Required: a temporary one would be
       # written to Docker's log, which outlives the container.
-      DASH_SHARED_TOKEN: "${DASH_SHARED_TOKEN:?set DASH_SHARED_TOKEN in .env}"
+      DASH_SHARED_TOKEN: "${DASH_SHARED_TOKEN:?DASH_SHARED_TOKEN is empty in .env: put a token you generate there (openssl rand -hex 24)}"
       # The database and its key file, in the volume below.
       DASH_DATABASE: "/data/dash.db"
       DASH_KEY_FILE: "/data/dash.db.key"

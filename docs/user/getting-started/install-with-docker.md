@@ -51,15 +51,15 @@ Then set
 `latest` image tag moves only for a full release.
 
 ```bash
-# 1. Two tokens: one for the admin page, one for the Presto device. Generate
-#    each, keep them, and keep them different.
-python -c "import secrets; print(secrets.token_urlsafe(24))"
-#    or: openssl rand -base64 24
+# 1. Two tokens: one for the admin page, one for the Presto device. Both are
+#    required, and they must be different. Generate each (run it twice):
+openssl rand -hex 24
+#    or: python -c "import secrets; print(secrets.token_urlsafe(24))"
 
 # 2. Put them in .env next to compose.yaml.
 cp .env.example .env
-#    then edit .env and paste the tokens after DASH_ADMIN_TOKEN= and
-#    DASH_SHARED_TOKEN=
+#    then edit .env and paste one token after DASH_ADMIN_TOKEN= and the other
+#    after DASH_SHARED_TOKEN=. Neither may be left empty.
 
 # 3. Pull the published image and start.
 docker compose up -d
@@ -72,18 +72,22 @@ The admin token you generated in step 1 is the token for the first login.
 It is the permanent one: it does not change when the container restarts.
 The daemon never prints it.
 
-If you leave `DASH_ADMIN_TOKEN` empty, the daemon generates a temporary
-token at every start and prints it in its log:
+**You cannot leave `DASH_ADMIN_TOKEN` empty in a container.** A local install
+(not Docker) generates a temporary token at every start when you give it none,
+and prints it in its log, because its admin page is only reachable from the
+machine itself. **In a container the admin page has to listen on all
+interfaces**, because that is how the published port reaches it, and a
+non-loopback address needs a token you chose. A generated one would also sit in
+Docker's log after the container is gone. So Compose refuses to start with an
+empty token:
 
 ```text
-temporary admin token (new at every start; set admin.token in dash.toml to keep one): ...
+required variable DASH_ADMIN_TOKEN is missing a value: DASH_ADMIN_TOKEN is empty
+in .env: put a token you generate there (openssl rand -hex 24)
 ```
 
-That is the path of a local install, where the admin page is only reachable
-from the machine itself. **In a container the admin page has to listen on
-all interfaces**, because that is how the published port reaches it, and a
-non-loopback address needs a token you chose. So the container refuses to
-start the admin page without one, and says why:
+If a token reaches the daemon some other way and is still missing, the daemon
+stops with:
 
 ```text
 daemon startup failed: the admin page would listen on 0.0.0.0, which is not a

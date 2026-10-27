@@ -399,6 +399,7 @@ hold any of them:
 | Variable | What it does |
 | --- | --- |
 | `DASH_SHARED_TOKEN` | The token the Presto device holds. Required by the compose file. |
+| `DASH_IMAGE` | The image to run. `ghcr.io/jake1164/presto-ai-dash:latest` (the newest full release) unless you set it, for example to a version or a pre-release. |
 | `DASH_PUBLISH_ADDRESS` | The host address the device port is published on. Every address by default; set your LAN address on a host with a public interface. |
 | `DASH_ADMIN_TOKEN_FILE`, `DASH_SHARED_TOKEN_FILE`, `DASH_ENCRYPTION_KEY_FILE` | A path to a file holding the value, instead of the variable. Not both. |
 | `DASH_HOST` / `DASH_PORT` | The device port. `0.0.0.0:8787` inside the container. |

@@ -138,6 +138,18 @@ class DockerfileTests(unittest.TestCase):
         self.assertIn("/healthz", self.text)
 
 
+class EnvTemplateTests(unittest.TestCase):
+    """A variable the compose file reads from .env must be in the template."""
+
+    def test_every_compose_variable_is_in_the_env_example(self):
+        template = (ROOT / ".env.example").read_text(encoding="utf-8")
+        used = set(re.findall(r"\$\{([A-Z][A-Z0-9_]*)", COMPOSE.read_text(encoding="utf-8")))
+        self.assertIn("DASH_IMAGE", used)
+        for name in sorted(used):
+            # Set, or shown commented out: either way a person can find it.
+            self.assertRegex(template, r"(?m)^#?\s*%s=" % name, "%s is not in .env.example" % name)
+
+
 class ComposeTests(unittest.TestCase):
     """The compose file: the ports, the volume and the time zone."""
 

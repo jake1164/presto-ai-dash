@@ -107,6 +107,8 @@ class Daemon:
     def _attach_problems(self):
         """Keep the recent warnings and errors, in memory only."""
         logging.getLogger().addHandler(self.problems)
+        if self.source_configuration is not None:
+            logging.getLogger().addHandler(self.source_configuration.logs)
 
     def setup(self):
         try:
@@ -224,6 +226,8 @@ class Daemon:
             if self.problems is not None:
                 try:
                     logging.getLogger().removeHandler(self.problems)
+                    if self.source_configuration is not None:
+                        logging.getLogger().removeHandler(self.source_configuration.logs)
                 except Exception:  # pragma: no cover - defensive
                     pass
             try:

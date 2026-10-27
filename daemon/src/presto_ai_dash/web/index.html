@@ -90,6 +90,24 @@
       <h3>Problems</h3>
       <p class="note">Recent warnings and errors from the daemon. The list is kept in memory only, holds the last 50 entries, and is empty again after a restart.</p>
       <div id="status-problems"></div>
+      <h3>Log</h3>
+      <p class="note" id="log-note">The daemon's recent log lines, newest first, kept in memory only
+        and gone after a restart. A line that repeats is counted, not listed again.</p>
+      <div class="log-controls">
+        <label for="log-level">Show</label>
+        <select id="log-level">
+          <option value="DEBUG">Everything logged</option>
+          <option value="INFO">Info and above</option>
+          <option value="WARNING">Warnings and errors</option>
+          <option value="ERROR">Errors only</option>
+        </select>
+        <label for="log-search">Search</label>
+        <input id="log-search" type="search" maxlength="100" autocomplete="off"
+               placeholder="words in a line or its source">
+      </div>
+      <p class="note" id="log-count" aria-live="polite"></p>
+      <div id="log-lines" class="log-lines" role="log" aria-label="Daemon log"></div>
+      <button type="button" id="log-more" hidden>Show 100 more</button>
     </section>
 
     <section class="panel" role="tabpanel" id="panel-settings" aria-labelledby="tab-settings" tabindex="0" hidden>

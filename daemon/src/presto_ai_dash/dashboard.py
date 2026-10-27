@@ -5,7 +5,7 @@ from . import quotas
 from .alert_policy import (DEFAULT_CRITICAL_PERCENT, DEFAULT_WARNING_PERCENT,
                            apply_threshold, resolve_alert_settings,
                            threshold_status)
-from .card_tiles import gigabytes
+from .card_tiles import compact_count, gigabytes, local_notices, spend_text
 from .collectors import served_version, update_state
 from .models import Card, iso, now_utc, overall_status, severity
 from .quotas import (QUOTA_SCHEMA_VERSION, age_label, compact_age, compact_tokens,
@@ -252,20 +252,44 @@ def build_status_payload(snapshots):
         request_count = value(litellm_metrics, "requests_today")
         primary = (request_count + " requests today"
                    if request_count != "unavailable" else "Usage unavailable")
-        details = ["Top model: %s" % value(litellm_metrics, "top_model"),
-                   "Errors today: %s" % value(litellm_metrics, "errors_today"),
-                   "Database: %s" % value(litellm_metrics, "database")]
-        if litellm.error:
+        # Why first, then only the facts it really has: a line that says
+        # "unavailable" three times tells nobody what to do.
+        details = []
+        for notice in local_notices(litellm.alerts, litellm.error, litellm_metrics):
+            details.extend(notice["short"] or [notice["message"][:28]])
+        usage_known = request_count != "unavailable"
+        top = litellm_metrics.get("top_model")
+        # The model tile holds ten characters: say the whole name only when it was cut.
+        if usage_known and isinstance(top, str) and top != "unavailable" and len(top) > 10:
+            details.append("Top model: " + top)
+        used = litellm_metrics.get("models_today")
+        if usage_known and isinstance(used, int) and used > 1:
+            details.append("Models used: %d" % used)
+        errors = litellm_metrics.get("errors_today")
+        if isinstance(errors, int) and errors > 0:
+            details.append("Errors today: %d" % errors)
+        database = litellm_metrics.get("database")
+        # The demo reports the database as true; a real gateway sends a word.
+        database = "connected" if database is True else database if isinstance(database, str) else ""
+        version = litellm_metrics.get("version")
+        build = " - ".join(part for part in (
+            "v" + version if isinstance(version, str) and version else "",
+            "DB " + database if usage_known and database else "") if part)
+        if build:
+            details.append(build)
+        if litellm.error and not details:
             details.append("Error: " + litellm.error)
+        spend = litellm_metrics.get("spend_today")
+        tokens = litellm_metrics.get("tokens_today")
+        if not usage_known and litellm_metrics.get("usage_note"):
+            secondary = "Usage: %s" % litellm_metrics["usage_note"]
+        else:
+            secondary = "%s tokens \u00b7 spend %s" % (
+                compact_count(tokens) if isinstance(tokens, (int, float)) else "unavailable",
+                spend_text(spend) if isinstance(spend, (int, float)) else "unavailable")
         litellm_card = Card(
             "litellm", "LiteLLM", litellm.status, primary=primary,
-            secondary="%s tokens · spend %s" % (
-                value(litellm_metrics, "tokens_today"),
-                ("$%.4f" % litellm_metrics["spend_today"]
-                 if isinstance(litellm_metrics.get("spend_today"), (int, float))
-                 else value(litellm_metrics, "spend_today"))),
-            detail=details,
-            alert=alert_for(litellm))
+            secondary=secondary, detail=details, alert=alert_for(litellm))
     else:
         litellm_card = Card("litellm", "LiteLLM", "offline",
                             primary="Not configured", secondary="Source disabled")
@@ -546,7 +570,7 @@ DEVICE_ACTIVITY_KEYS = ("request_count", "usage_usd", "from", "until", "state", 
 DEVICE_RESET_KEYS = ("available", "expires_at")
 DEVICE_METRICS_KEYS = ("requests_today", "tokens_today", "loaded_model", "spend_today",
                        "errors_today", "last_measured_tokens_per_sec", "available_models",
-                       "gpu_percent")
+                       "gpu_percent", "usage_note")
 # The keys the device reads from a card. "tiles" is optional: the tiles
 # travel with the lazy card detail, and a payload that carries them inline
 # (a fixture, or a daemon that sends the whole card) is read the same way.

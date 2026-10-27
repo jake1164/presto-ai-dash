@@ -19,7 +19,10 @@ MAX_MESSAGE_CHARS = 200
 MAX_LOGGER_CHARS = 64
 
 # An absolute path, either kind. Quoted and unquoted.
-_PATH = re.compile(r"[A-Za-z]:\\[^\s'\"]+|/(?:[^\s'\"]+/)+[^\s'\"]*")
+# A URL's slashes are not a path: "http://host:8788/" stays readable, while a
+# file:// URL, which names a file, is replaced.
+_PATH = re.compile(r"file:/{1,3}[^\s'\"]+|[A-Za-z]:\\[^\s'\"]+"
+                   r"|(?<![:/\w])/(?:[^\s'\"]+/)+[^\s'\"]*")
 # Credential-shaped text: a bearer token, or a token/key parameter.
 _SECRET = re.compile(
     r"(?i)\bbearer\s+\S+"

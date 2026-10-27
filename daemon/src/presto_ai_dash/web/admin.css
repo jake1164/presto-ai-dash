@@ -125,6 +125,27 @@ main > .panel { min-width: 0; }
 .facts dt { color: #7ce6da; font-size: .88rem; }
 .facts dd { margin: 0; color: #e3edf8; font-size: .9rem; }
 .problem { border-left: 2px solid #f87171; padding-left: 12px; }
+.log-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 8px 0; }
+.log-controls label { font-size: .85rem; color: #b1c2d7; }
+.log-controls input[type=search] { flex: 1 1 14rem; min-width: 0; }
+.log-lines { font: .8rem/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  max-height: 32rem; overflow: auto; border: 1px solid #2a3b53; border-radius: 8px; background: #0b1220; }
+.log-lines:empty { display: none; }
+.log-line { display: grid; grid-template-columns: 4.6rem 7.6rem 1fr; gap: 0 10px; padding: 3px 10px;
+  border-bottom: 1px solid #16202b; }
+.log-line:last-child { border-bottom: 0; }
+.log-line .log-level { grid-column: 1; grid-row: 1 / span 2; font-weight: 600; }
+.log-line .log-time { grid-column: 2; grid-row: 1 / span 2; color: #8aa0ba; white-space: nowrap; }
+.log-line .log-text { grid-column: 3; grid-row: 1; word-break: break-word; }
+.log-line .log-from { grid-column: 3; grid-row: 2; color: #8aa0ba; font-size: .72rem; }
+.log-line.WARNING .log-level { color: #fcd34d; }
+.log-line.ERROR .log-level, .log-line.CRITICAL .log-level { color: #ffb8c8; }
+.log-line.DEBUG .log-text { color: #8aa0ba; }
+@media (max-width: 560px) { .log-line { grid-template-columns: 4.6rem 1fr; }
+  .log-line .log-time { grid-column: 2; grid-row: 1; }
+  .log-line .log-text { grid-column: 1 / -1; grid-row: 2; }
+  .log-line .log-from { grid-column: 1 / -1; grid-row: 3; }
+  .log-line .log-level { grid-row: 1; } }
 .problem strong { color: #ffb8c8; }
 
 /* Help has one home in the header. Detailed guides appear inside open content. */

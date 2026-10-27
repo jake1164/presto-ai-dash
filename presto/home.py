@@ -666,7 +666,8 @@ def source_rows(payload):
         for key, label in (("requests_today", "req"), ("tokens_today", "tok")):
             value = metrics.get(key)
             if _number(value):
-                usage.append("%s %s" % (value, label))
+                usage.append("%s %s" % (compact_count(value) if key == "tokens_today" else value,
+                                        label))
         text = " / ".join(usage) if usage else "Usage unavailable"
         if not usage and metrics.get("loaded_model"):
             text = str(metrics["loaded_model"])
@@ -674,6 +675,7 @@ def source_rows(payload):
                      "name": str(source.get("name") or source.get("type") or "Source"),
                      "status": normalise_status(source.get("status")), "usage": text,
                      "parts": local_parts(metrics, usage),
+                     "note": clean_note(metrics.get("usage_note")),
                      "alerts": alerts_state(source)})
     return rows
 
@@ -685,6 +687,25 @@ def _number(value):
     """A real, finite number. A bool, nan and inf are not: %d overflows on them."""
     return (isinstance(value, (int, float)) and not isinstance(value, bool) and
             value == value and value != _INFINITY and value != -_INFINITY)
+
+
+def compact_count(value):
+    """A count in few characters: 940, 10.9k, 124k, 1.2M."""
+    value = int(value)
+    if value < 1000:
+        return "%d" % value
+    if value < 100000:
+        return "%.1fk" % (value / 1000.0)
+    if value < 1000000:
+        return "%dk" % (value // 1000)
+    return "%.1fM" % (value / 1000000.0)
+
+
+def clean_note(value):
+    """A short reason from the daemon, or None. Plain text only."""
+    if not isinstance(value, str) or not value or len(value) > 24:
+        return None
+    return value
 
 
 def local_parts(metrics, usage):

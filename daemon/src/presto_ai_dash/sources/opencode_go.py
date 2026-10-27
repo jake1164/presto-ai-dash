@@ -2,7 +2,7 @@
 
 from ..quotas import quota_report, quota_window
 from . import register
-from ._quota_http import QuotaHttpSource
+from ._quota_http import QuotaHttpSource, UsageReplyError
 
 USAGE_URL = "https://opencode.ai/zen/go/v1/usage"
 WINDOWS = (("rolling", "5h", 300), ("weekly", "Weekly", 10080),
@@ -21,7 +21,10 @@ class OpenCodeGoSource(QuotaHttpSource):
     def parse(self, data, observed):
         usage = data.get("usage") if isinstance(data, dict) else None
         if not isinstance(usage, dict) or not any(key in usage for key, _, _ in WINDOWS):
-            raise ValueError("unrecognized subscription usage response")
+            # A key that is valid but cannot see the subscription gets an answer
+            # without the allowance windows: say so, rather than "changed schema".
+            raise UsageReplyError("The usage reply has no Go allowance windows; "
+                                  "this key may not see the Go subscription")
         windows = []
         limited = False
         for key, label, minutes in WINDOWS:

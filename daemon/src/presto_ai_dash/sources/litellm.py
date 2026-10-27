@@ -21,6 +21,7 @@ Notes that shaped this module:
   zero, and the card must say so.
 """
 
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -31,6 +32,8 @@ from . import Source, register
 log = logging.getLogger(__name__)
 
 UNAVAILABLE = "unavailable"
+# Why usage could not be read, in a few words: the Presto shows it on the Home row.
+USAGE_NOTES = {401: "key rejected", 403: "key refused", 404: "no usage route"}
 
 
 def _metric(metrics, key):
@@ -41,30 +44,65 @@ def _metric(metrics, key):
     return value
 
 
-def _top_model(breakdown):
-    """The model with the highest spend in a LiteLLM breakdown, or None."""
-    if not isinstance(breakdown, dict):
-        return None
-    models = breakdown.get("models")
-    if not isinstance(models, dict) or not models:
-        return None
+def refusal_reason(body, api_key=""):
+    """The gateway's own words for refusing a request, safe to show.
 
-    best_name = None
-    best_spend = None
-    for name, entry in models.items():
-        spend = None
-        if isinstance(entry, dict):
-            entry_metrics = entry.get("metrics")
-            if isinstance(entry_metrics, dict):
-                spend = entry_metrics.get("spend")
-        try:
-            spend = float(spend) if spend is not None else 0.0
-        except (TypeError, ValueError):
-            spend = 0.0
-        if best_spend is None or spend > best_spend:
-            best_name = name
-            best_spend = spend
-    return best_name
+    LiteLLM answers with ``{"error": {"message": ...}}`` or ``{"detail": ...}``.
+    The text is cut short, kept to printable ASCII, and the key itself is
+    masked if the gateway echoed it. Returns "" when there is nothing usable.
+    """
+    text = ""
+    try:
+        data = json.loads(body)
+    except (TypeError, ValueError):
+        data = None
+    if isinstance(data, dict):
+        error = data.get("error")
+        candidate = error.get("message") if isinstance(error, dict) else error
+        candidate = candidate if candidate else data.get("detail")
+        if isinstance(candidate, (dict, list)):
+            candidate = json.dumps(candidate)
+        text = candidate if isinstance(candidate, str) else ""
+    if not text and isinstance(body, str) and not body.lstrip().startswith(("<", "{", "[")):
+        text = body
+    if api_key:
+        text = text.replace(api_key, "***")
+    text = "".join(ch if 32 <= ord(ch) < 127 else " " for ch in text)
+    return " ".join(text.split())[:200]
+
+
+def _model_stats(breakdowns):
+    """Per model: spend, requests and tokens, added up over the day's rows."""
+    stats = {}
+    for breakdown in breakdowns:
+        models = breakdown.get("models") if isinstance(breakdown, dict) else None
+        if not isinstance(models, dict):
+            continue
+        for name, entry in models.items():
+            row = entry.get("metrics") if isinstance(entry, dict) else None
+            row = row if isinstance(row, dict) else {}
+            total = stats.setdefault(name, {"spend": 0.0, "requests": 0, "tokens": 0})
+            for key, field in (("spend", "spend"), ("requests", "api_requests"),
+                               ("tokens", "total_tokens")):
+                try:
+                    total[key] += float(row.get(field) or 0) if key == "spend"                         else int(row.get(field) or 0)
+                except (TypeError, ValueError):
+                    pass
+    return stats
+
+
+def _top_model(breakdown):
+    """The model that did the most today, or None.
+
+    Most spend first. A gateway in front of local models prices everything at
+    zero, so ties fall to the most requests and then the most tokens: the first
+    model in the list is not "the top" of anything.
+    """
+    stats = _model_stats([breakdown])
+    if not stats:
+        return None
+    return max(stats, key=lambda name: (stats[name]["spend"], stats[name]["requests"],
+                                        stats[name]["tokens"]))
 
 
 @register
@@ -147,6 +185,9 @@ class LiteLLMSource(Source):
                 db_state = readiness.get("db")
                 if db_state is not None:
                     metrics["database"] = str(db_state)
+                version = readiness.get("litellm_version")
+                if isinstance(version, str) and version.isascii() and 0 < len(version) <= 24:
+                    metrics["version"] = version
         except (HttpError, HttpUnreachable) as exc:
             log.debug("litellm readiness failed: %s", exc)
 
@@ -162,6 +203,10 @@ class LiteLLMSource(Source):
             # Neither is fatal to the card, but both are worth surfacing.
             log.warning("litellm daily activity returned HTTP %s", exc.status)
             metrics["usage"] = UNAVAILABLE
+            metrics["usage_note"] = USAGE_NOTES.get(exc.status, "usage HTTP %d" % exc.status)
+            reason = refusal_reason(exc.body, self.api_key)
+            if reason:
+                metrics["usage_reason"] = reason
             if exc.status == 401:
                 alerts.append(Alert("warning",
                                     "LiteLLM rejected the API key").to_dict())
@@ -204,10 +249,12 @@ class LiteLLMSource(Source):
             return
 
         # The query is scoped to today; never mix yesterday into *_today fields.
-        keys = ("spend", "total_tokens", "api_requests", "failed_requests")
+        keys = ("spend", "total_tokens", "api_requests", "failed_requests",
+                "prompt_tokens", "completion_tokens")
         totals = {key: 0 for key in keys}
         seen = {key: False for key in keys}
         top = None
+        breakdowns = []
 
         for row in results:
             if not isinstance(row, dict):
@@ -242,7 +289,7 @@ class LiteLLMSource(Source):
                     except (TypeError, ValueError):
                         pass
 
-            top = _top_model(row.get("breakdown")) or top
+            breakdowns.append(row.get("breakdown"))
 
         metadata = activity.get("metadata")
         metadata_fields = {
@@ -262,7 +309,8 @@ class LiteLLMSource(Source):
         if prompt_total is not None and completion_total is not None:
             try:
                 totals["total_tokens"] = int(prompt_total) + int(completion_total)
-                seen["total_tokens"] = True
+                totals["prompt_tokens"], totals["completion_tokens"] = int(prompt_total), int(completion_total)
+                seen["total_tokens"] = seen["prompt_tokens"] = seen["completion_tokens"] = True
             except (TypeError, ValueError):
                 pass
 
@@ -271,10 +319,17 @@ class LiteLLMSource(Source):
         # A daily total cannot establish whether failures are happening now.
         # Keep it visible as history without making a healthy proxy yellow all day.
         metrics["errors_today"] = totals["failed_requests"] if seen["failed_requests"] else UNAVAILABLE
-        if top:
-            metrics["top_model"] = top
-        else:
-            metrics["top_model"] = UNAVAILABLE
+        stats = _model_stats(breakdowns)
+        top = (max(stats, key=lambda name: (stats[name]["spend"], stats[name]["requests"],
+                                            stats[name]["tokens"])) if stats else None)
+        metrics["top_model"] = top if top else UNAVAILABLE
+        if stats:
+            metrics["models_today"] = len(stats)
+        # What went in and what came out: two different costs, and a failure
+        # count means more beside the requests it is out of.
+        if seen["prompt_tokens"] and seen["completion_tokens"]:
+            metrics["input_tokens_today"] = totals["prompt_tokens"]
+            metrics["output_tokens_today"] = totals["completion_tokens"]
 
         if seen["spend"]:
             metrics["spend_today"] = round(totals["spend"], 4)

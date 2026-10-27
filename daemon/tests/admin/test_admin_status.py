@@ -261,6 +261,18 @@ class ClientDiagnosticsPageTests(AdminServerBase):
         self.assertIn("const saved = await saveSource({quiet: true});", script)
         self.assertIn("await startCodexLogin(saved, flow);", script)
 
+    def test_a_saved_source_closes_the_form_except_while_codex_signs_in(self):
+        script = self.script()
+        self.assertIn('if (quiet || (type.id === "codex" && created)) edit(result); '
+                      "else closeEditor();", script)
+
+    def test_the_form_always_opens_at_the_top(self):
+        script = self.script()
+        self.assertIn("function editorToTop()", script)
+        self.assertIn('querySelector(".modal-card")', script)
+        opener = script[script.index("function openEditor("):script.index("function closeEditor(")]
+        self.assertIn("editorToTop();", opener)
+
     def test_a_machine_without_codex_is_sent_to_remote_reports(self):
         script = self.script()
         self.assertIn("data.codex_found !== false", script)

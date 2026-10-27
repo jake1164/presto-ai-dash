@@ -130,22 +130,52 @@ def _codex_tiles(report, metrics, now):
     return tiles
 
 
+def compact_count(value):
+    """A count in few characters: 940, 10.9k, 124k, 1.2M."""
+    value = int(value)
+    if value < 1000:
+        return "%d" % value
+    if value < 100000:
+        return "%.1fk" % (value / 1000.0)
+    if value < 1000000:
+        return "%dk" % (value // 1000)
+    return "%.1fM" % (value / 1000000.0)
+
+
+def spend_text(value):
+    """A dollar amount that is never blank: $0.00, $0.42, $0.0031, $128.50."""
+    value = float(value)
+    return "$%.4f" % value if 0 < value < 0.01 else "$%.2f" % value
+
+
 def _litellm_tiles(report, metrics, now):
     """LiteLLM: the requests, the tokens, the spend, the errors, the model."""
     tiles = []
-    for key, label in (("requests_today", "requests"), ("tokens_today", "tokens")):
-        value = _number(metrics.get(key))
-        if value is not None:
-            tiles.append(tile(label, "%d" % value))
+    if metrics.get("online") is True and _number(metrics.get("requests_today")) is None:
+        # No usage numbers: say what is known instead of leaving the card empty.
+        tiles.append(tile("proxy", "online", "good"))
+        database = metrics.get("database")
+        if isinstance(database, str) and database and database != "unavailable":
+            tiles.append(tile("database", database, "good" if database == "connected" else "warn"))
+    requests = _number(metrics.get("requests_today"))
+    if requests is not None:
+        tiles.append(tile("requests", "%d" % requests))
+    tokens = _number(metrics.get("tokens_today"))
+    if tokens is not None:
+        tiles.append(tile("tokens", compact_count(tokens)))
     spend = _number(metrics.get("spend_today"))
     if spend is not None:
-        tiles.append(tile("spend", "$%s" % _money(spend)))
+        tiles.append(tile("spend", spend_text(spend)))
     errors = _number(metrics.get("errors_today"))
     if errors is not None:
         tiles.append(tile("errors", "%d" % errors, "bad" if errors else "good"))
     model = metrics.get("top_model")
-    if isinstance(model, str) and model.strip():
+    if isinstance(model, str) and model.strip() and model != "unavailable":
         tiles.append(tile("model", model))
+    sent, received = (_number(metrics.get("input_tokens_today")),
+                      _number(metrics.get("output_tokens_today")))
+    if sent is not None and received is not None:
+        tiles.append(tile("in/out", "%s/%s" % (compact_count(sent), compact_count(received))))
     return tiles
 
 
@@ -245,15 +275,85 @@ def local_readings(source_type, metrics, now):
     elif source_type == "litellm":
         add("Proxy", None if metrics.get("online") is None
             else "online" if metrics["online"] else "offline")
+        add("LiteLLM version", _text(metrics.get("version")))
         add("Database", _text(metrics.get("database")))
-        for key, label in (("requests_today", "Requests today"), ("tokens_today", "Tokens today"),
-                           ("errors_today", "Failed requests today")):
+        for key, label in (("requests_today", "Requests today"),
+                           ("errors_today", "Failed requests today"),
+                           ("tokens_today", "Tokens today"),
+                           ("input_tokens_today", "Input tokens"),
+                           ("output_tokens_today", "Output tokens")):
             value = _number(metrics.get(key))
             add(label, None if value is None else "{:,}".format(int(value)))
         spend = _number(metrics.get("spend_today"))
-        add("Spend today", None if spend is None else "$" + _money(spend))
-        add("Top model today", _text(metrics.get("top_model")))
+        add("Spend today", None if spend is None else spend_text(spend))
+        top = _text(metrics.get("top_model"))
+        used = _number(metrics.get("models_today"))
+        add("Top model today", top if not top or used is None or used < 2
+            else "%s (%d models used)" % (top, used))
     return rows
+
+
+# What to do about a warning a local service raised, keyed by the start of its message.
+# The same warnings in lines a 240-pixel screen can hold.
+_NOTICE_SHORT = (
+    ("LiteLLM key lacks permission", ("Key refused (HTTP 403)", "It may not read usage")),
+    ("LiteLLM rejected the API key", ("Key rejected (HTTP 401)", "Enter a current key")),
+    ("LiteLLM daily activity endpoint not found", ("No usage route (404)", "Check URL and version")),
+    ("LiteLLM returned HTTP", ("Gateway error (5xx)", "See the gateway logs")),
+    ("cannot reach", ("Cannot reach it", "Check the address")),
+)
+
+
+def _short_lines(message):
+    return next((list(lines) for start, lines in _NOTICE_SHORT if message.startswith(start)), [])
+
+
+_NOTICE_HINTS = (
+    ("LiteLLM key lacks permission", "The gateway answered but refused this key (HTTP 403), so "
+     "there are no usage numbers. Edit the source and enter a read-only "
+     "Management key owned by an Admin (View Only) user: the LiteLLM guide shows how."),
+    ("LiteLLM rejected the API key", "The gateway did not accept this key (HTTP 401). It may "
+     "be wrong or expired: edit the source and enter a current key."),
+    ("LiteLLM daily activity endpoint not found", "The gateway has no usage route at this "
+     "address (HTTP 404). Check the URL, and that this LiteLLM version has /user/daily/activity."),
+    ("LiteLLM returned HTTP", "The gateway is answering with a server error. Check its own logs."),
+    ("cannot reach", "Nothing answered at the address. Check it is right and the service runs; "
+     "in a container, localhost is the container (see the Docker guide)."),
+)
+
+
+# LiteLLM's own wording for a key limited to some routes, and what that means here.
+_ROUTE_LIMIT_HINT = ("This key is limited to certain routes (the list above) and usage is not "
+                     "one of them. Use the Management key of an Admin (View Only) user, "
+                     "or one whose allowed routes include /user/daily/activity.")
+
+
+def local_notices(alerts, error, metrics=None):
+    """The warnings of a local service, each with what to do about it.
+
+    The page shows these beside the readings, so a "warning" status is never
+    left without its reason.
+    """
+    notices = []
+    reason = (metrics or {}).get("usage_reason")
+    reason = reason if isinstance(reason, str) and reason else None
+    for alert in alerts or []:
+        if not isinstance(alert, dict) or not alert.get("message"):
+            continue
+        message = str(alert["message"])
+        notices.append({"severity": str(alert.get("severity") or "warning"), "message": message,
+                        "reason": reason if message.startswith("LiteLLM") else None,
+                        "short": _short_lines(message),
+                        "hint": _ROUTE_LIMIT_HINT if reason and "allowed to call routes" in reason
+                        else next((hint for start, hint in _NOTICE_HINTS
+                                   if message.startswith(start)), None)})
+    if error and not notices:
+        message = str(error)
+        notices.append({"severity": "warning", "message": message,
+                        "short": _short_lines(message),
+                        "hint": next((hint for start, hint in _NOTICE_HINTS
+                                      if message.startswith(start)), None)})
+    return notices
 
 
 def _activity_tiles(report, metrics, now):

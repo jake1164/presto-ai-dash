@@ -13,7 +13,7 @@ from . import __version__
 from .alert_policy import (apply_threshold, parse_clock, resolve_alert_settings,
                            threshold_status, validate_mute_hours,
                            validate_thresholds)
-from .card_tiles import local_readings
+from .card_tiles import local_notices, local_readings
 from .clients import ClientRegistry
 from .codex_login import CodexLoginManager
 from .collectors import (collector_config_text, collector_info, presto_collector,
@@ -24,6 +24,7 @@ from .credentials import load_cipher
 from .dashboard import build_card_details, build_instance_payload, device_view, lazy_cards
 from .effective import effective_settings, uptime_label, uptime_seconds
 from .http_client import origin_of
+from .logbuffer import LogBuffer
 from .problems import ProblemBuffer
 from .sources import source_catalog, source_type
 from .sources._codex_rpc import CodexReportingError, find_executable
@@ -155,6 +156,7 @@ class SourceConfiguration:
         # recent problems. Both are lost when the daemon restarts.
         self.clients = ClientRegistry()
         self.problems = ProblemBuffer()
+        self.logs = LogBuffer()
         self.changed = threading.Event()
         self._edit_lock = threading.RLock()
         # The services whose own alert thresholds are being ignored, so the
@@ -239,6 +241,7 @@ class SourceConfiguration:
                 public["quota"] = mark_passed_resets(present_quota(snapshot.metrics["quota"]))
             if snapshot and record["type"] in ("ollama", "litellm"):
                 public["readings"] = local_readings(record["type"], snapshot.metrics, now_utc())
+                public["notices"] = local_notices(snapshot.alerts, snapshot.error, snapshot.metrics)
             if record["type"] == "claude":
                 # Every Claude number says where it came from: the terminal
                 # export, the local session logs, or the freshness hint.
@@ -731,6 +734,13 @@ class SourceConfiguration:
             "problems": [dict(record, time=_stamp(record["time"]))
                          for record in self.problems.problems()],
         }
+
+    def log_view(self, limit=None, level="DEBUG", text=""):
+        """The recent log lines for the admin page, newest first, with their times."""
+        view = self.logs.view(limit if limit is not None else 100, level, text)
+        view["lines"] = [dict(line, time=_stamp(line["time"])) for line in view["lines"]]
+        view["level"] = self.config["logging"]["level"]
+        return view
 
     def _alert_state_view(self, sources):
         """Who is not alerting, and why: the Status tab's alert list."""

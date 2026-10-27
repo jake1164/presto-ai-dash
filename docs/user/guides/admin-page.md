@@ -88,6 +88,7 @@ foreground.
 | Accounts | One row per account: when it was last collected, its status, and the last problem in plain words |
 | Readers and collectors | The local activity reader, the usage cache reader, and the remote collectors with their last report and host |
 | Problems | The recent `WARNING` and `ERROR` messages, de-duplicated |
+| Log | The daemon's recent log lines, newest first, with a level filter, a search box and **Show more** |
 
 The daemon has one shared token, so authentication cannot tell clients
 apart. Each client therefore declares a name in the `X-Presto-Client`
@@ -113,6 +114,17 @@ The **Problems** list holds only the log message: paths and
 credential-shaped text are replaced and an exception contributes its type
 only, so no file contents and no secrets can end up on the page. The buffer
 is memory only and is empty again after a restart.
+
+The **Log** shows the last 2,000 lines the daemon logged, at the daemon's own
+log level (`INFO` unless `DASH_LOG_LEVEL` says otherwise; set it to `DEBUG`
+to see more). It opens with the newest 100 lines: **Show more** adds 100 at a
+time, the level menu keeps that level and above, and the search box keeps the
+lines that contain your words, in the message or in the part of the daemon
+that wrote it. A line that repeats, such as a source failing at every poll, is
+listed once with a count (`x12`) and moves to the top each time it happens, so
+it cannot push everything else out. The lines are cleaned the same way as the
+Problems list. The log is memory only and is empty after a restart; for the
+full history use `docker logs`.
 
 ### Settings
 

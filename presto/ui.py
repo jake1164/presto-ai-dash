@@ -493,6 +493,8 @@ def _draw_local_row(display, palette, row, y, row_width, stale):
     rgb = _marker(display, palette, row, 14, y, MARKER, stale)
     display.set_font("bitmap8")
     status = row["status"].upper()
+    if row["status"] not in ("ok", "active") and row.get("note"):
+        status = row["note"].upper()  # why, not a bare "WARNING"
     status_w = display.measure_text(status, 1)
     mark_w = (ALERT_MARK + 4) if row.get("alerts") is False else 0
     name_x = 14 + MARKER + 4
@@ -522,6 +524,9 @@ def _draw_compact_local_row(display, palette, row, y, row_width, stale):
     healthy = row["status"] in ("ok", "active")
     detail = (row["usage"].split(" / ")[0] if healthy
               and row["usage"] != "Usage unavailable" else row["status"].upper())
+    if not healthy and row.get("note"):
+        # Say why it is not healthy: "KEY REFUSED", not a bare "WARNING".
+        detail = row["note"].upper()
     parts = row.get("parts") if healthy else None
     if parts:
         # As many leading parts as fit beside the name; never fewer than before.

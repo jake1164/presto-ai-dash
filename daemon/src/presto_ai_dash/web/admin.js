@@ -72,8 +72,8 @@
     "claude-export": {page: "guides/claude.md", anchor: "the-terminal-status-line"},
     "source-claude": {page: "guides/claude.md", anchor: "the-terminal-status-line"},
     "source-codex": {page: "guides/codex.md", anchor: "set-it-up"},
-    "source-opencode-go": {page: "guides/opencode-go.md", anchor: "set-it-up"},
-    "source-ollama-cloud": {page: "guides/ollama-cloud.md", anchor: "set-it-up"},
+    "source-opencode-go": {page: "guides/opencode-go.md", anchor: "what-key-to-use"},
+    "source-ollama-cloud": {page: "guides/ollama-cloud.md", anchor: "a-warning-about-the-key"},
     "source-ollama": {page: "guides/ollama.md", anchor: "set-it-up"},
     "source-litellm": {page: "guides/litellm.md", anchor: "set-it-up"},
   };
@@ -722,9 +722,10 @@
     element("source-fields").replaceChildren();
     element("source-help").textContent = type?.id === "ollama" ?
       "Monitors local Ollama health and loaded models. The local API needs no key; this does not monitor Ollama Cloud subscription quotas." :
-      type?.id === "opencode_go" ? "Read-only subscription meters for your OpenCode Go account. This does not make model requests or sum tokens into quotas." :
-      type?.id === "ollama_cloud" ? "Reads monthly included credits, purchased balance and reset dates (or legacy limits), plus separate rolling 7-day activity. Local Ollama is a separate source." :
+      type?.id === "opencode_go" ? "Read-only subscription meters for your OpenCode Go account; it never makes model requests. Use a dedicated key with an expiry. A restricted service-account key (Usage: Read) is the least-privilege choice but is not confirmed to show Go allowances, so check it first: the setup guide below shows how." :
+      type?.id === "ollama_cloud" ? "Reads monthly included credits, purchased balance and reset dates (or legacy limits), plus separate rolling 7-day activity. Warning: Ollama keys have no read-only scope, so this key can also run models. Create a dedicated key named presto-ai-dash-monitor so you can revoke it alone. Local Ollama is a separate source." :
       type?.id === "codex" ? "Reads Codex subscription quotas using your ChatGPT login in Codex. Leave both paths blank for automatic discovery and the default profile. Separate accounts need separate Codex profile directories. OAuth stays with Codex; no pay-per-use API key is needed. Browser and device-code sign-in are buttons below; cancellation and sign-out are in this account's Setup section (open the account's row)." :
+      type?.id === "litellm" ? "Reads the usage LiteLLM routed today: requests, tokens, spend, failures and the busiest model. Use a read-only Management key owned by an Admin (View Only) user, never the master key; the setup guide below shows how." :
       type?.id === "claude" ? "Claude Code exports 5h/weekly subscription quotas after normal terminal responses. Save this source, then set up its exporter below. Readings go straight to the database; existing status-line output is preserved. No API key is needed. Idle readings become stale; the VS Code panel does not run the status line, but the optional usage cache reader reads the numbers Claude Code caches on disk for its /usage dialog." : "";
     // The setup guide stays inside the editor, below the source description.
     const guide = element("source-type-help");
@@ -817,13 +818,21 @@
     });
     return [preset, note, status];
   }
+  function editorToTop() {
+    // The form scrolls inside its card, and a hidden element keeps its scroll
+    // position: without this a form opened after a long one starts at the bottom.
+    const card = element("editor-modal").querySelector(".modal-card");
+    if (card) card.scrollTop = 0;
+  }
   function openEditor(source = null) {
     edit(source);
     element("editor-modal").hidden = false;
+    editorToTop();
   }
   function closeEditor() {
     editing = null;
     element("editor-modal").hidden = true;
+    editorToTop();
     element("source-form").reset();
     element("source-fields").replaceChildren();
   }
@@ -1560,7 +1569,7 @@
         const money = (amount) => new Intl.NumberFormat(undefined,
           {style: "currency", currency: "USD", maximumFractionDigits: amount > 0 && amount < .01 ? 5 : 2}).format(amount);
         const measurements = [["Requests", activity.request_count.toLocaleString()]];
-        if (typeof activity.usage_usd === "number") measurements.push(["Activity spend", money(activity.usage_usd)]);
+        if (typeof activity.usage_usd === "number") measurements.push(["Requests valued at", money(activity.usage_usd)]);
         if (typeof activity.input_tokens === "number" && typeof activity.output_tokens === "number") {
           measurements.push(["Tokens", new Intl.NumberFormat(undefined, {notation: "compact", maximumFractionDigits: 2})
             .format(activity.input_tokens + activity.output_tokens)]);
@@ -1590,6 +1599,16 @@
         paragraph.textContent = line; readings.append(paragraph);
       }
     }
+    if (Array.isArray(source.notices)) {
+      // Why the status is not plain ok, in words, and what to do about it.
+      for (const notice of source.notices) {
+        const box = el("div", "warning");
+        box.append(el("strong", "", notice.message));
+        if (notice.reason) box.append(el("p", "note", "LiteLLM says: " + notice.reason));
+        if (notice.hint) box.append(el("p", "note", notice.hint));
+        readings.append(box);
+      }
+    }
     if (Array.isArray(source.readings) && source.readings.length) {
       // A service with no allowance windows: its facts, each with its label.
       const facts = el("div", "reading-facts");
@@ -1616,8 +1635,59 @@
     try {
       statusState = await request("/api/admin/status");
       renderStatus();
+      await refreshLog();
     } catch (error) { message(error.message, true); }
   }
+  // The log: the newest lines, 100 at a time. "Show more" asks for 100 more of the
+  // same list, so the page never holds more than the daemon's buffer (2000 lines).
+  const LOG_STEP = 100;
+  let logShown = LOG_STEP, logTimer = null;
+  function logTime(value) {
+    // The time of day; another day's lines carry their date too.
+    const moment = new Date(Date.parse(value));
+    if (Number.isNaN(moment.getTime())) return "unknown";
+    const today = new Date().toDateString() === moment.toDateString();
+    return today ? moment.toLocaleTimeString() :
+      moment.toLocaleDateString(undefined, {month: "short", day: "numeric"}) + " " + moment.toLocaleTimeString();
+  }
+  async function refreshLog() {
+    if (!unlocked) return;
+    const level = element("log-level").value, text = element("log-search").value.trim();
+    const view = await request("/api/admin/logs?limit=" + logShown +
+      "&level=" + encodeURIComponent(level) + "&q=" + encodeURIComponent(text));
+    const box = element("log-lines");
+    // Keep the reader's place: a refresh that adds lines at the top must not
+    // pull the list out from under them.
+    const place = box.scrollTop;
+    box.replaceChildren(...view.lines.map((line) => {
+      const row = el("div", "log-line " + line.level);
+      const stamp = el("span", "log-time", logTime(line.time)); stamp.title = whenText(line.time);
+      row.append(stamp, el("span", "log-level", line.level),
+        el("span", "log-text", line.message + (line.count > 1 ? "  x" + line.count : "")),
+        el("span", "log-from", line.logger));
+      return row;
+    }));
+    box.scrollTop = place;
+    const filtered = level !== "DEBUG" || text;
+    element("log-count").textContent = !view.held ? "Nothing logged yet." :
+      !view.matched ? "No line matches. The daemon holds " + view.held + " lines, and logs at " +
+        view.level + " and above." :
+      "Showing " + view.lines.length + " of " + view.matched + (filtered ? " matching" : "") +
+        " lines (the daemon keeps the last " + view.capacity + ", and logs at " + view.level + " and above).";
+    const more = element("log-more");
+    more.hidden = view.lines.length >= view.matched;
+    more.textContent = "Show " + Math.min(LOG_STEP, view.matched - view.lines.length) + " more";
+  }
+  element("log-more").addEventListener("click", () => {
+    logShown += LOG_STEP; refreshLog().catch((error) => message(error.message, true));
+  });
+  element("log-level").addEventListener("change", () => {
+    logShown = LOG_STEP; refreshLog().catch((error) => message(error.message, true));
+  });
+  element("log-search").addEventListener("input", () => {
+    clearTimeout(logTimer); logShown = LOG_STEP;
+    logTimer = setTimeout(() => refreshLog().catch((error) => message(error.message, true)), 300);
+  });
   function renderStatus() {
     const state = statusState;
     if (!state) return;
@@ -1725,6 +1795,7 @@
     alertsState = null; masterOn = true; lastMasterOn = null;
     serviceAlertStates.clear(); serviceAlertDrafts.clear(); serviceAlertLoading.clear();
     statusState = null; configState = null; expanded.clear();
+    logShown = LOG_STEP; element("log-lines").replaceChildren(); element("log-search").value = "";
     element("admin-token").value = ""; element("source-form").reset();
     element("source-list").replaceChildren(); element("source-fields").replaceChildren();
     // A token that was shown once must not stay in a page that is locked.
@@ -1884,7 +1955,12 @@
     try {
       const result = await request("/api/admin/sources" + (editing ? "/" + editing.id : ""),
         editing ? "PUT" : "POST", data);
-      element("api-key").value = ""; await reload(); edit(result);
+      element("api-key").value = ""; await reload();
+      // A saved source closes the form, so the person is not left to scroll
+      // back up to Close. Two cases keep it open: a new Codex account, whose
+      // sign-in buttons are in the form, and a save made on the way to a
+      // sign-in, which carries on with the same form.
+      if (quiet || (type.id === "codex" && created)) edit(result); else closeEditor();
       if (!quiet) {
         message(type.id === "codex" && created
           ? "Saved. Press Sign in with browser (or device code) below to connect Codex."

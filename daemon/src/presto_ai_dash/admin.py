@@ -6,7 +6,7 @@ from importlib.resources import files
 import json
 import logging
 import re
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from .api import ApiServer, BoundedRequestHandler, parse_length
 from .collectors import COLLECTOR_FILE, collector_bytes
@@ -299,6 +299,19 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
                     except Exception:
                         log.error("admin status view failed")
                         self._send(500, {"error": "status could not be read"})
+                return
+            if path == "/api/admin/logs":
+                # Read-only: the daemon's recent log lines, newest first, from memory.
+                if self._authorized():
+                    query = parse_qs(urlsplit(self.path).query)
+                    try:
+                        self._send(200, manager.log_view(
+                            (query.get("limit") or [None])[0],
+                            (query.get("level") or ["DEBUG"])[0],
+                            (query.get("q") or [""])[0]))
+                    except Exception:
+                        log.error("admin log view failed")
+                        self._send(500, {"error": "the log could not be read"})
                 return
             if path == "/api/admin/config":
                 # Read-only: the effective configuration and where it came from.

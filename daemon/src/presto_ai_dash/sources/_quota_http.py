@@ -9,6 +9,27 @@ from ..quotas import quota_report, quota_window
 from . import Source
 
 
+class UsageReplyError(ValueError):
+    """The provider answered, but the answer lacks what this source needs.
+
+    The message is written for the person reading the card, and carries no
+    value from the reply.
+    """
+
+
+def refusal_text(status, product="usage"):
+    """What an HTTP refusal means, in words that tell a bad key from a missing permission."""
+    if status == 401:
+        return "API key rejected (invalid, expired or revoked)"
+    if status == 403:
+        return "Key may not read %s (HTTP 403)" % product
+    if status == 404:
+        return "Usage route not found (HTTP 404)"
+    if status == 429:
+        return "Rate limited by the usage server (HTTP 429)"
+    return "Usage server returned HTTP %d" % status
+
+
 class QuotaHttpSource(Source):
     secret_field = "api_key"
     config_fields = (
@@ -48,11 +69,13 @@ class QuotaHttpSource(Source):
                 self._last_quota, limited = self.parse(data, now_utc())
                 status = "rate_limited" if limited else "ok"
             except HttpError as exc:
-                error = ("API key rejected" if exc.status == 401 else
-                         "Subscription access denied" if exc.status == 403 else
-                         "Usage server returned HTTP %d" % exc.status)
-            except (HttpUnreachable, ValueError):
-                error = "Subscription usage unavailable; network or reporting schema changed"
+                error = refusal_text(exc.status, "subscription usage")
+            except HttpUnreachable:
+                error = "Cannot reach the %s usage server" % self.name
+            except UsageReplyError as exc:
+                error = str(exc)
+            except ValueError:
+                error = "Subscription usage unavailable; the reporting format changed"
         report = deepcopy(self._last_quota) if self._last_quota else self.empty_report()
         report["error"] = error
         self._last_snapshot = self.snapshot(status, metrics={"quota": report}, error=error)

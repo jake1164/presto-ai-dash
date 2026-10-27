@@ -104,8 +104,14 @@ class OllamaCloudSource(QuotaHttpSource):
                         self._next_probe = max(self._next_probe, time.monotonic() + seconds)
                 except (TypeError, ValueError):
                     pass
-            return ("API key rejected" if exc.status == 401 else
-                    "Cloud access denied" if exc.status == 403 else
+            # Ollama keys have no permission levels, so a 403 is the account (it is
+            # suspended), never a key that "may not" read: the words say so.
+            return ("API key rejected (invalid or revoked)" if exc.status == 401 else
+                    "Account suspended or access denied (HTTP 403)" if exc.status == 403 else
+                    "Rate limited (HTTP 429): Ollama allows 10 requests a minute across all keys"
+                    if exc.status == 429 else
+                    "%s reporting is temporarily unavailable (HTTP 503)" % endpoint
+                    if exc.status == 503 else
                     "%s server returned HTTP %d" % (endpoint, exc.status))
         return "%s unavailable; network or reporting schema changed" % endpoint
 

@@ -182,11 +182,13 @@ Every route has its own threshold and its own advice. See
 [Stale readings](../concepts/stale-readings.md) for the whole table.
 
 Home keeps the labelled reset countdown (`Wk resets 5d`, for example) and
-shows `Updated 8m` or `Updated 1h:05m` immediately to its left. Only the
-update label changes colour: grey while idle or activity is unknown, green
-while Claude is in use, and yellow while in use with a reading more than
-15 minutes old. This is the quota reading's age, not the daemon's last poll.
-The colour is an activity cue; the configured stale thresholds still apply.
+shows the reading's age immediately to its left. While the reading is 15
+minutes old or less it says `Updated 8m`. Older than that it says `stale 42m`,
+`stale 9h` or, from two days, `stale 3d`: one unit, the largest whole one. Only
+this label changes colour: grey while idle or activity is unknown, green while
+Claude is in use, and yellow while in use with a reading more than 15 minutes
+old. This is the quota reading's age, not the daemon's last poll. The colour is
+an activity cue; the configured stale thresholds still apply.
 
 The Claude card also carries the collector trail, as long as the report has
 one:

@@ -189,6 +189,7 @@ Any other method than the ones below is answered `501`.
 | GET | `/api/admin/sources/{id}/alerts` | One service's alert settings and the resolved values |
 | PUT | `/api/admin/sources/{id}/alerts` | Save one service's alert settings |
 | GET | `/api/admin/status` | The Status tab. Read-only |
+| GET | `/api/admin/logs` | The daemon's recent log lines, newest first, for the Status tab: `limit` (up to 2,000), `level` and `q` filters. Read-only |
 | GET | `/api/admin/config` | The effective configuration and where each value came from. Read-only |
 | POST | `/api/admin/session` | Exchange the admin token for a seven-day browser session |
 | GET | `/api/admin/session` | Restore a valid cookie session and get the CSRF token |

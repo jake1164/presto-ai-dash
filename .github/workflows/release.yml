@@ -11,10 +11,12 @@ name: Release
 #   4. the container image, pushed to ghcr.io (a "latest" tag moves only for a
 #      full release)
 #   5. a GitHub Release with the files and their SHA-256 sums
+#   6. a full release only: the same wheel and source archive, as attached to
+#      that Release, go to PyPI (the "publish" job below)
 #
-# It uses only the GitHub CLI and Docker that the runner already has, so no
-# third-party action sits between the repository and the published files. The
-# two actions it does use are pinned to a commit, as in the other workflows.
+# The release job uses only the GitHub CLI and Docker that the runner already
+# has. Every action it and the publish job use is pinned to a commit, as in the
+# other workflows.
 
 on:
   push:
@@ -86,3 +88,33 @@ jobs:
           # The compose file and its .env template travel with the release, so
           # a machine without a checkout can follow the Docker guide.
           gh release create "$TAG" dist/* compose.yaml .env.example --title "$TAG" $FLAGS
+
+  # PyPI never accepts a version twice, and a pre-release builds the same wheel
+  # version as the release it leads up to (v0.50.0-rc1 builds 0.50.0). So only a
+  # tag without a "-" ever reaches PyPI. It publishes through PyPI's trusted
+  # publishing: no token is stored; PyPI trusts this workflow, this repository
+  # and the "pypi" environment (set up once on pypi.org).
+  publish:
+    needs: release
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: pypi
+    permissions:
+      contents: read     # download the files from the GitHub Release
+      id-token: write    # trusted publishing to PyPI
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Download the wheel and the source archive from the Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir dist
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir dist             --pattern '*.whl' --pattern '*.tar.gz'
+          ls -l dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist

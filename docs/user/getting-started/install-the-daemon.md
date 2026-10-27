@@ -13,11 +13,25 @@ where you start it.
 | Disk | A few megabytes for the SQLite history |
 
 The daemon needs the `cryptography` package to encrypt the provider keys it
-stores. Installing the project with `pip` brings it in.
+stores. Installing the package brings it in.
 
 ## Install
 
-From a checkout of the repository:
+The package is on PyPI as `presto-ai-dash`. [pipx](https://pipx.pypa.io/) keeps
+it in its own environment and puts the `presto-ai-dash` command on your path:
+
+```bash
+pipx install presto-ai-dash
+presto-ai-dash --version
+```
+
+To upgrade later, run `pipx upgrade presto-ai-dash`.
+
+`pip install presto-ai-dash` works as well, inside a virtual environment you
+made yourself. If the `presto-ai-dash` command is not on your path, every
+command on this page also works as `python -m presto_ai_dash.app`.
+
+### From a checkout (to change the code)
 
 ```bash
 cd daemon
@@ -41,11 +55,9 @@ python -m venv .venv
 
 ## Create a configuration file
 
-The daemon reads a TOML file. Copy the example and edit it:
-
-```bash
-cp ../examples/config.example.toml dash.toml
-```
+The daemon reads a TOML file. Create one named `dash.toml` in the folder you
+will start the daemon from. (A checkout also has an annotated copy to start
+from: `examples/config.example.toml`.)
 
 At a minimum, set `daemon.shared_token`. That token is the key the Presto
 presents to the daemon. If you leave it empty the daemon generates a strong
@@ -77,19 +89,13 @@ already ignores it.
 ## Run it
 
 ```bash
-python -m presto_ai_dash.app --config dash.toml
-```
-
-Or, if the console script was installed:
-
-```bash
 presto-ai-dash --config dash.toml
 ```
 
 Add `--admin` to enable the local configuration page:
 
 ```bash
-python -m presto_ai_dash.app --config dash.toml --admin
+presto-ai-dash --config dash.toml --admin
 ```
 
 The daemon then listens on two ports:

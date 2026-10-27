@@ -85,18 +85,42 @@ The Presto's radio is 2.4 GHz only. A 5 GHz-only network will not work.
 
 ### Copying the private files
 
-From the repository root, with `mpremote` installed:
+These two files go on the device first. The app install in step 4 stops with an
+error until `/ai_dash_files/config.py` exists, because it never creates your
+settings for you.
+
+**With a checkout of the repository.** The files are `presto/config.py` and
+`presto/secrets.py`. From the repository root, with `mpremote` installed:
 
 ```bash
 python -m mpremote connect COM3 fs cp presto/config.py :/ai_dash_files/config.py
 python -m mpremote connect COM3 fs cp presto/secrets.py :/secrets.py
 ```
 
+**Without a checkout (installed with pipx, or the daemon runs in Docker).**
+Make two small text files in any folder, named `config.py` and `secrets.py`,
+with the contents shown above. The USB tool `mpremote` is installed with the
+`[device]` extra (step 4), and `pipx run` starts it:
+
+```bash
+pipx run mpremote connect COM3 fs mkdir :/ai_dash_files
+pipx run mpremote connect COM3 fs cp config.py :/ai_dash_files/config.py
+pipx run mpremote connect COM3 fs cp secrets.py :/secrets.py
+```
+
+If the first command says the folder already exists, carry on with the other two.
+
 Replace `COM3` with the port of your Presto. List the ports with:
 
 ```bash
 python -m mpremote connect list
 ```
+
+(`pipx run mpremote connect list` does the same without a checkout.)
+
+When `mpremote` copies a file it stops the running app, so the screen goes
+black. Restart the board with `mpremote connect COM3 reset` (or unplug and
+replug it), or run the app install in step 4, which relaunches it.
 
 Never put a provider API key on the device. It has no use for one.
 
@@ -105,17 +129,22 @@ Never put a provider API key on the device. It has no use for one.
 ### From a release (no checkout needed)
 
 A release wheel carries the Presto app, so the device always gets the version
-that matches your daemon. Install the wheel with its USB tools, then install the
-app with the port you found in step 2:
+that matches your daemon. Install the package with its USB tools, then install
+the app with the port you found above:
 
 ```bash
-pipx install "presto-ai-dash-daemon[device]"      # or the wheel from the GitHub Release
+pipx install "presto-ai-dash[device]"      # or the wheel from the GitHub Release
 presto-ai-dash install-presto --port COM3
 presto-ai-dash check-presto --port COM3          # compares only, writes nothing
 ```
 
+Run these on the computer the Presto is plugged into by USB. If the daemon runs
+in Docker or on a server, that is usually a different computer: the container
+never touches USB. Install the same version as the image, for example
+`pipx install "presto-ai-dash[device]==0.50.0"` for the `0.50.0` image.
+
 On macOS or Linux the port looks like `/dev/ttyACM0`. After an upgrade of the
-daemon, run `install-presto` again. It does the same verified, rolled-back copy
+daemon (`pipx upgrade presto-ai-dash`), run `install-presto` again. It does the same verified, rolled-back copy
 as the repository tool below, and leaves the firmware and your private settings
 alone. A daemon built from the source tree (not from a release wheel) does not
 include the app: use the repository tool.

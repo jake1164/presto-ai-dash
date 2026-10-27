@@ -272,7 +272,7 @@ def run(action, port, snapshot, receipt=DEFAULT_RECEIPT, out=None, err=None):
         return 2
     if importlib.util.find_spec("mpremote") is None:
         print('USB tools are missing. Install them with: pipx install --force '
-              '"presto-ai-dash-daemon[device]"  (or: pip install "presto-ai-dash-daemon[device]")',
+              '"presto-ai-dash[device]"  (or: pip install "presto-ai-dash[device]")',
               file=err)
         return 2
     try:

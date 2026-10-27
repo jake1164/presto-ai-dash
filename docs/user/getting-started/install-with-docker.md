@@ -30,8 +30,11 @@ release carries them, so no checkout is needed:
 ```bash
 mkdir presto-ai-dash && cd presto-ai-dash
 curl -LO https://github.com/jake1164/presto-ai-dash/releases/latest/download/compose.yaml
-curl -LO https://github.com/jake1164/presto-ai-dash/releases/latest/download/.env.example
+curl -L -o .env.example https://github.com/jake1164/presto-ai-dash/releases/latest/download/default.env.example
 ```
+
+(GitHub drops the leading dot of an attached file's name, so the template is
+published as `default.env.example`. The command above saves it as `.env.example`.)
 
 To try a pre-release, take the files from that release instead (replace
 `latest/download` with `download/v0.50.0-rc1`) and set

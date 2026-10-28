@@ -5,7 +5,7 @@ carry that licence, and the one piece of someone else's work in the repository,
 the bitmap font data generated from Pimoroni's fonts, should carry theirs.
 """
 
-import re
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -25,7 +25,8 @@ class ProjectLicenceTests(unittest.TestCase):
 
     def test_the_licence_is_mit_and_the_package_metadata_says_so(self):
         self.assertTrue(read("LICENSE").startswith("MIT License\n"))
-        self.assertRegex(read("daemon", "pyproject.toml"), r'(?m)^license\s*=\s*\{\s*text\s*=\s*"MIT"\s*\}')
+        metadata = tomllib.loads(read("daemon", "pyproject.toml"))
+        self.assertEqual(metadata["project"]["license"], "MIT")
 
     def test_the_licence_names_a_holder_and_a_year(self):
         self.assertRegex(read("LICENSE"), r"Copyright \(c\) 20\d\d \S+")

@@ -96,7 +96,14 @@ documentation site you are reading is covered below.
 
 The site is static files on GitHub Pages, so GitHub, which hosts them, sees the
 visits as any web host does. On top of that, **the site uses Google Analytics 4**
-(Google's `googletagmanager.com` script) to count visits.
+(Google's `googletagmanager.com` script) to count visits, **but only if you
+accept it**.
+
+- **Your choice comes first:** the first time you visit, a banner asks whether
+  Google Analytics may run. Until you accept, the script is not loaded, no
+  request goes to Google and no analytics cookie is set. If you reject, none of
+  that ever happens. Your choice is remembered in your browser, and **Change
+  cookie settings** in the footer of every page lets you change it.
 
 - **What it collects:** the standard page-view and visit data Google Analytics
   gathers: which page was read, roughly when, the browser and device type, an
@@ -107,10 +114,9 @@ visits as any web host does. On top of that, **the site uses Google Analytics 4*
   data is not sold.
 - **What it does not do:** Google Signals is turned off, so the data is not
   joined to the Google accounts of signed-in visitors.
-- **Opting out:** a content blocker, or Google's
-  [browser add-on](https://tools.google.com/dlpage/gaoptout), stops it. The
-  application itself never loads this script, and nothing on this site is
-  needed to run the daemon or the Presto.
+- **Opting out:** reject the banner, or use **Change cookie settings** later.
+  A content blocker also works. The application itself never loads this script,
+  and nothing on this site is needed to run the daemon or the Presto.
 - **Google's policy:** [policies.google.com/privacy](https://policies.google.com/privacy).
 
 Nothing else is requested from another host: no web fonts, no other scripts,
@@ -118,8 +124,8 @@ and the repository link in the header is a plain link that fetches nothing.
 The one exception is a browser too old to have `ResizeObserver` (before about
 2020): the theme then fetches a small polyfill from `unpkg.com`. The build
 checks all of this on the finished site each time it runs, and fails if any
-other host appears or if a page loads Google Analytics without the footer notice
-that links this page.
+other host appears or if a page loads Google Analytics without the cookie banner
+and the footer notice that links this page.
 
 ## The one write the Presto can make
 

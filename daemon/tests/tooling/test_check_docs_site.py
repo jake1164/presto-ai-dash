@@ -98,31 +98,37 @@ class AnalyticsTests(CheckerCase):
 
     SCRIPT = ('<script id="__analytics">var t=document.createElement("script");'
               't.src="https://www.googletagmanager.com/gtag/js?id=G-TEST";</script>')
+    BANNER = '<div class="md-consent" data-md-component="consent" id="__consent" hidden></div>'
     NOTICE = ('<div class="md-copyright"><div class="md-copyright__highlight">'
               'This site uses Google Analytics to count page views. '
               '<a href="privacy/">Privacy</a></div></div>')
 
-    def test_analytics_with_the_notice_is_clean(self):
-        self.assertEqual(self.problems(index_html=page(self.NOTICE, self.SCRIPT)), [])
+    def test_analytics_with_the_banner_and_the_notice_is_clean(self):
+        self.assertEqual(self.problems(index_html=page(self.BANNER + self.NOTICE, self.SCRIPT)), [])
 
     def test_analytics_without_the_notice_is_refused(self):
-        found = self.problems(index_html=page("", self.SCRIPT))
+        found = self.problems(index_html=page(self.BANNER, self.SCRIPT))
         self.assertEqual(len(found), 1, found)
         self.assertIn("without the footer notice", found[0])
 
+    def test_analytics_without_the_banner_is_refused(self):
+        found = self.problems(index_html=page(self.NOTICE, self.SCRIPT))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("without the cookie banner", found[0])
+
     def test_a_notice_without_a_privacy_link_is_refused(self):
         notice = self.NOTICE.replace('<a href="privacy/">Privacy</a>', "")
-        self.assertEqual(len(self.problems(index_html=page(notice, self.SCRIPT))), 1)
+        self.assertEqual(len(self.problems(index_html=page(self.BANNER + notice, self.SCRIPT))), 1)
 
     def test_the_script_may_also_be_a_tag_in_the_page(self):
         tag = '<script async src="https://www.googletagmanager.com/gtag/js?id=G-TEST"></script>'
-        self.assertEqual(self.problems(index_html=page(self.NOTICE, tag)), [])
+        self.assertEqual(self.problems(index_html=page(self.BANNER + self.NOTICE, tag)), [])
         found = self.problems(index_html=page("", tag))
-        self.assertIn("without the footer notice", found[0])
+        self.assertEqual(len(found), 2, found)
 
     def test_no_other_host_hides_in_an_inline_script(self):
         script = self.SCRIPT.replace("</script>", 'fetch("https://t.example/hit");</script>')
-        found = self.problems(index_html=page(self.NOTICE, script))
+        found = self.problems(index_html=page(self.BANNER + self.NOTICE, script))
         self.assertEqual(len(found), 1, found)
         self.assertIn("t.example", found[0])
 
@@ -227,9 +233,16 @@ class RepositoryWiringTests(unittest.TestCase):
         config = (ROOT / "mkdocs.yml").read_text(encoding="utf-8")
         self.assertRegex(config, r"(?m)^\s+provider:\s*google\s*$")
         self.assertRegex(config, r"(?m)^\s+property:\s*G-[A-Z0-9]+\s*$")
+        self.assertRegex(config, r"(?m)^\s+consent:\s*$")  # analytics waits for the reader's yes
         footer = (ROOT / "docs" / "overrides" / "partials" / "copyright.html").read_text(encoding="utf-8")
         self.assertIn("Google Analytics", footer)
         self.assertIn("privacy/", footer)
+
+    def test_the_accept_button_fix_is_published_and_touches_no_other_host(self):
+        config = (ROOT / "mkdocs.yml").read_text(encoding="utf-8")
+        self.assertIn("javascripts/consent.js", config)
+        script = (ROOT / "docs" / "user" / "javascripts" / "consent.js").read_text(encoding="utf-8")
+        self.assertNotIn("http", re.sub(r"(?m)^\s*//.*$", "", script))  # code only, not comments
 
     def test_the_privacy_page_discloses_analytics(self):
         privacy = (ROOT / "docs" / "user" / "privacy" / "index.md").read_text(encoding="utf-8")

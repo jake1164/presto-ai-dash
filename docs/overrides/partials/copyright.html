@@ -2,14 +2,18 @@
   Material's own "copyright" partial, with a privacy notice added.
 
   The site uses Google Analytics (extra.analytics in mkdocs.yml) to count page
-  views, so every page says so in the footer and links the privacy page. The
-  url filter makes the link correct from any page, on GitHub Pages and in a
-  local preview alike.
+  views, but only after the reader accepts the cookie banner (extra.consent).
+  Every page says so in the footer, links the privacy page, and links the
+  banner again so the choice can be changed. The url filter makes the link
+  correct from any page, on GitHub Pages and in a local preview alike.
 -#}
 <div class="md-copyright">
   <div class="md-copyright__highlight">
-    This site uses Google Analytics to count page views.
+    This site uses Google Analytics to count page views, if you accept.
     <a href="{{ 'privacy/' | url }}">Privacy</a>
+    {% if config.extra.consent %}
+      &middot; <a href="#__consent">Change cookie settings</a>
+    {% endif %}
   </div>
   {% if not config.extra.generator == false %}
     Made with

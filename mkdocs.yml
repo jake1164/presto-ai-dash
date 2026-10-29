@@ -5,9 +5,11 @@
 # repository and is never published.
 #
 # Privacy: this site loads one third-party script in a current browser, Google
-# Analytics 4 (extra.analytics below), to see which help pages are read. It is
-# disclosed on the privacy page, linked from the footer. Nothing else is
-# loaded: no external font, no CDN asset. Three things in the Material theme
+# Analytics 4 (extra.analytics below), to see which help pages are read, and
+# only after the reader accepts the cookie banner (extra.consent): the theme
+# does not run the analytics code until then. It is disclosed on the privacy
+# page, linked from the footer. Nothing else is loaded: no external font, no
+# CDN asset. Three things in the Material theme
 # would add to it, and each is switched off:
 #   - Google Fonts, with `font: false`, so the page uses the reader's own fonts;
 #   - Mermaid, by not enabling it: Material loads the library from a CDN;
@@ -82,12 +84,29 @@ extra:
   analytics:
     provider: google
     property: G-82FD55P3RH
+  consent:
+    title: Cookie consent
+    description: >-
+      This site would like to use Google Analytics to count which help pages
+      are read, so that pages nobody uses can be trimmed or rewritten. Nothing
+      is sent to Google and no cookie is set unless you accept. The app itself
+      sends nothing anywhere. See the Privacy page for details.
+    actions:
+      - accept
+      - reject
+      - manage
+    cookies:
+      analytics: Google Analytics
+      # Material would list a GitHub cookie for the repository widget, which
+      # this site does not use (docs/overrides/partials/source.html).
+      github: false
 
 extra_css:
   - demo/demo.css
 
 extra_javascript:
   - demo/demo.js
+  - javascripts/consent.js
 
 nav:
   - Home: index.md

@@ -21,7 +21,7 @@ It fails (exit 1) when it finds:
   theme loads the analytics script from there, so a link in the page is not
   where to look);
 * a page that loads Google Analytics without the footer notice that says so
-  and links the privacy page.
+  and links the privacy page, or without the cookie banner that asks first.
 
 It needs only the standard library.
 """
@@ -54,6 +54,7 @@ REQUEST_CALL = re.compile(
 # views. A page that uses it must also carry DISCLOSURE.
 ANALYTICS_HOSTS = {"www.googletagmanager.com", "www.google-analytics.com",
                    "analytics.google.com"}
+CONSENT_BANNER = 'data-md-component="consent"'
 DISCLOSURE = re.compile(r"""md-copyright__highlight">[^<]*Google Analytics[^<]*"""
                         r"""<a href="[^"]*">Privacy</a>""")
 
@@ -149,6 +150,9 @@ def check(site):
             elif host.strip("."):
                 problems.append("%s: an inline script names %s, a host that is not Google "
                                 "Analytics" % (name, host))
+        if uses_analytics and CONSENT_BANNER not in text:
+            problems.append("%s: loads Google Analytics without the cookie banner that asks "
+                            "first (extra.consent in mkdocs.yml)" % name)
         if uses_analytics and not DISCLOSURE.search(text):
             problems.append("%s: loads Google Analytics without the footer notice that links "
                             "the privacy page (docs/overrides/partials/copyright.html)" % name)

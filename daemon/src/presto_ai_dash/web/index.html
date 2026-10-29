@@ -83,9 +83,11 @@
         client name and a revision appears under Clients below instead.</p>
       <div id="status-devices"></div>
       <h3>Daemon release</h3>
-      <p class="note">Whether a newer published daemon exists, from the registry this installation
-        uses. It is read from a cached result: opening this page contacts no registry, and nothing
-        here upgrades anything.</p>
+      <p class="note">Whether a newer published daemon exists, from the one registry this
+        installation uses (PyPI for pip and pipx, GitHub Container Registry for the Docker image).
+        The daemon checks in the background about once a day. Opening this page contacts no
+        registry, and nothing here upgrades anything; Check for updates asks the daemon to look
+        again now.</p>
       <div id="status-release"></div>
       <h3>Clients</h3>
       <p class="note">Every device that fetches the status endpoint. Clients behind NAT, a reverse proxy or Docker Desktop can share one address, so two clients with the same name and address cannot be told apart. Nothing about a client is stored.</p>

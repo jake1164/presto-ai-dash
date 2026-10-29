@@ -26,7 +26,9 @@ from .management import SourceConfiguration, ManagedCollector
 from .models import now_utc
 from .preview_host import start_preview
 from .problems import ProblemBuffer
+from .release import installation as release_installation
 from .release import release_version
+from .release_checker import ReleaseChecker, checks_switched_off
 from .sources import build_sources, in_container
 from .storage import Storage
 
@@ -83,6 +85,7 @@ class Daemon:
         self.maintenance_thread = None
         self.clients = None
         self.lifecycle = None
+        self.release_checker = None
         self.problems = None
         self._stop_lock = threading.Lock()
         self._stopped = False
@@ -155,6 +158,15 @@ class Daemon:
             self.device_app = (self.source_configuration.device_app
                                if self.source_configuration is not None
                                else DeviceApp())
+            # Newer-release notices come from a background checker that asks
+            # only this installation's own registry. It is created here and
+            # started after the ports are open; nothing waits on it.
+            self.release_checker = ReleaseChecker(
+                self.storage, release_installation(),
+                enabled=not checks_switched_off(os.environ))
+            self.lifecycle.release_checks = self.release_checker.enabled
+            if self.source_configuration is not None:
+                self.source_configuration.release_checker = self.release_checker
             self._attach_problems()
             self._check_private_files()
             self.api = ApiServer(self.config["daemon"]["host"], self.config["daemon"]["port"],
@@ -250,6 +262,8 @@ class Daemon:
             self.api.start()
             if self.admin is not None:
                 self.admin.start()
+            if self.release_checker is not None:
+                self.release_checker.start()
             # A test aid, off unless DASH_PRESTO_PREVIEW is on. It polls this
             # daemon's device port, so it starts after the port is open.
             self.preview = start_preview(self.config["daemon"]["port"], self.shared_token)
@@ -282,6 +296,8 @@ class Daemon:
                         logging.getLogger().removeHandler(self.source_configuration.logs)
                 except Exception:  # pragma: no cover - defensive
                     pass
+            if self.release_checker is not None:
+                self.release_checker.stop()
             try:
                 try:
                     if self.preview is not None:

@@ -246,6 +246,7 @@ Any other method than the ones below is answered `501`.
 | GET | `/api/admin/devices/{id}` | One device: identity, reported and expected revision, update state, and its newest attempts. Read-only |
 | POST | `/api/admin/devices/{id}/retry` | Authorize a fresh bounded update budget. Answers `409 ota_not_enabled` while the updater is not enabled |
 | POST | `/api/admin/devices/{id}/confirm-recovery` | Ask for a fresh confirmed check-in after a manual repair. Answers `409 ota_not_enabled` while the updater is not enabled |
+| POST | `/api/admin/releases/check` | Queue a background check for a newer release and return at once: 202 queued or already running, 429 with `Retry-After` if one started within the last minute, 409 when this installation is never checked. It never contacts a registry on the request |
 | GET | `/api/admin/releases` | The cached daemon-release result and this installation's own update commands. It contacts no registry. Read-only |
 | GET | `/api/admin/logs` | The daemon's recent log lines, newest first, for the Status tab: `limit` (up to 2,000), `level` and `q` filters. Read-only |
 | GET | `/api/admin/config` | The effective configuration and where each value came from. Read-only |

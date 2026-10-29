@@ -52,7 +52,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install the build tools and the daemon's dependency
-        run: python -m pip install build "cryptography>=46" "mpremote>=1.24,<2"
+        run: python -m pip install build "cryptography>=46" "packaging>=24" "mpremote>=1.24,<2"
 
       - name: Check the tag against the package version
         run: python tools/build_release.py --tag "$TAG" --stage-only

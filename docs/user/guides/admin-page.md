@@ -85,7 +85,7 @@ foreground.
 | --- | --- |
 | Daemon | Version, database schema version, uptime, poll interval, start time, the bind address, the log level |
 | Presto devices | Every device the daemon keeps a durable record for: online/last seen, the revision it reports and the one this daemon serves, whether they match, its update state, what to do about it, and its update history |
-| Daemon release | Whether a newer published daemon exists, from the registry this installation uses, and the exact update command for it. Read from a cache: this page never contacts a registry and never upgrades anything |
+| Daemon release | Whether a newer published daemon exists, from the one registry this installation uses (PyPI for pip and pipx, the GitHub Container Registry for the Docker image). The daemon checks in the background about once a day; **Check for updates** asks it to look again now (at most once a minute). The block shows the running and newest eligible version, when it last checked, an official details link, and copyable commands for the actual target. Opening the page contacts no registry, a failed or old check says so instead of claiming you are up to date, and nothing is ever upgraded for you. Set `DASH_RELEASE_CHECK=off` to turn the checks off |
 | Clients | Every device that fetches the status endpoint: its name, address, when it last fetched, how often, the app revision it reports, and what it says about itself: last error, failures since boot, free memory, signal and uptime |
 | Accounts | One row per account: when it was last collected, its status, and the last problem in plain words |
 | Readers and collectors | The local activity reader, the usage cache reader, and the remote collectors with their last report and host |

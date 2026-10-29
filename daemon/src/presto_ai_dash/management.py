@@ -209,6 +209,10 @@ class SourceConfiguration:
                 "presto_ota_enabled", False)))
         # The exact slot bundle this running daemon serves to a device.
         self.device_app = DeviceApp()
+        # The background daemon-release checker, attached by the daemon. The
+        # admin page reads its cached result and asks it for a check; it never
+        # contacts a registry itself.
+        self.release_checker = None
     def list_sources(self):
         records = self.storage.source_instances()
         snapshots = self.storage.latest_snapshots()
@@ -801,14 +805,31 @@ class SourceConfiguration:
     def release_view(self):
         """The cached daemon-release result, with this install's own commands.
 
-        No registry is contacted: this only reads what a background checker
-        stored. Until that checker exists the state is ``disabled``, which is
-        honest about not having looked rather than claiming the install is
-        current.
+        No registry is contacted: this only reads what the background checker
+        stored. A development build or a switched-off check is ``disabled``,
+        which is honest about not having looked, never "current".
         """
         result = dict(self.lifecycle.release())
-        result["instructions"] = release_instructions(result["channel"])
+        checker = self.release_checker
+        installation = checker.installation if checker is not None else None
+        result["instructions"] = release_instructions(
+            result["channel"], result["latest"], result["state"],
+            ambiguous=(installation.running
+                       if installation is not None and installation.ambiguous else None))
+        result["checking"] = bool(checker is not None and checker.is_checking())
+        result["can_check"] = bool(checker is not None and checker.enabled)
+        result["next_check_at"] = checker.next_check_at() if checker is not None else None
+        result["running_note"] = (
+            "version_ambiguous" if installation is not None and installation.ambiguous
+            else None)
         return result
+
+    def request_release_check(self):
+        """Queue a background registry check. Returns ``(outcome, retry_after)``."""
+        checker = self.release_checker
+        if checker is None:
+            return "disabled", None
+        return checker.request_check()
 
     def log_view(self, limit=None, level="DEBUG", text=""):
         """The recent log lines for the admin page, newest first, with their times."""

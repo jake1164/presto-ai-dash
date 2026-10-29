@@ -91,7 +91,7 @@ def _token_digest(token):
 
 
 class Storage:
-    SCHEMA_VERSION = 10
+    SCHEMA_VERSION = 11
     # Live browser sessions the admin page keeps; the oldest go first.
     ADMIN_SESSION_LIMIT = 25
     MAX_HISTORY_LIMIT = 1000
@@ -315,7 +315,13 @@ class Storage:
                                "ON device_update_attempts(generation_id, attempt_no)")
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_device_admin_requests_created "
                                "ON device_admin_requests(device_id, created_at)")
-            self._conn.execute("PRAGMA user_version = 10")
+            # Version 11: a registry's "ask again after" time survives a restart.
+            columns = {row[1] for row in self._conn.execute(
+                "PRAGMA table_info(daemon_release_cache)")}
+            if "retry_after_at" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE daemon_release_cache ADD COLUMN retry_after_at TEXT")
+            self._conn.execute("PRAGMA user_version = 11")
             self._conn.commit()
         except Exception:
             self._conn.rollback()

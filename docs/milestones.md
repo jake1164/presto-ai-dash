@@ -557,6 +557,13 @@ pending because no browser surface was connected in the implementation session.
   reusable summary/detail views, and optional app-defined budgets. Direct-call
   reporting follows later. See [the design and acceptance outline](future.md#application-usage-monitoring).
   No book-app special cases or M3 application schema are required.
+- **Part 4, newer-release notifications (2026-10-29):** implemented. A background
+  checker asks one registry (PyPI for a published wheel, GHCR for a published
+  image, nothing for a checkout or local image), caches the result in the
+  existing `daemon_release_cache` row, and shows it in the admin Status tab
+  (with a **Check for updates** action) and as the blue arrow on the Presto.
+  Informational only. Design, dependency decision and acceptance limits:
+  [release-notifications.md](release-notifications.md).
 - **Deployment targets:** v0 direct Python/pip/pipx; v0.1 optional Docker;
   v0.2 optional separate tray runner; v1 binaries/installers if useful.
   These targets are plans, not delivered features. The planned daemon command

@@ -520,7 +520,13 @@ class AdminProjectionTests(Base):
 
 
 class ReleaseTests(Base):
+    def setUp(self):
+        super().setUp()
+        # A background checker exists in these tests; its result is what is read.
+        self.lifecycle.release_checks = True
+
     def test_without_a_checker_the_state_is_disabled_not_current(self):
+        self.lifecycle.release_checks = False
         shown = self.lifecycle.release()
         self.assertEqual(shown["state"], "disabled")
         self.assertEqual(shown["running"], "0.50.0")
@@ -533,7 +539,7 @@ class ReleaseTests(Base):
             "checked_at": "2026-10-29T09:00:00Z",
             "last_attempt_at": "2026-10-29T09:00:00Z", "state": "available",
             "error_code": None, "source_url": None})
-        self.assertEqual(self.lifecycle.release()["state"], "disabled")
+        self.assertEqual(self.lifecycle.release()["state"], "unknown")
 
     def test_a_fresh_available_result_is_returned(self):
         self.lifecycle.storage.save_release_cache({

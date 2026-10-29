@@ -1,7 +1,8 @@
 # The container image's Python dependencies, pinned to the versions the image
 # was tested with, so a rebuild installs the same packages. The daemon asks
-# only for cryptography>=46 (daemon/pyproject.toml); the rest are what it
+# only for cryptography>=46 and packaging>=24 (daemon/pyproject.toml); the rest are what it
 # needs in turn. Dependabot proposes newer versions here.
 cryptography==50.0.2
 cffi==2.1.1
 pycparser==3.11
+packaging==26.3

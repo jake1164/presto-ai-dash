@@ -32,7 +32,7 @@ from . import device_protocol as protocol
 from .clients import sanitize_header
 from .device_install import app_snapshot
 from .device_updater import OtaUpdater, stamp as _updater_stamp, parse_stamp as _updater_parse
-from .release import release_channel, release_version
+from .release import installation as release_installation
 from .sources import in_container
 from .storage import ConfigurationConflict
 
@@ -133,12 +133,12 @@ def _header_values(headers, name):
 def release_channel_name(environ=None):
     """The registry channel this running installation belongs to.
 
-    A container image comes from GHCR; a wheel or checkout comes from PyPI. A
-    locally built image is ``development`` and is never offered a release.
+    A published wheel (pip or pipx) is ``pypi``, a published image is ``ghcr``,
+    and a checkout, an editable install or a locally built image is
+    ``development`` and is never offered a release. The choice comes from what
+    is installed, never from a setting.
     """
-    if in_container():
-        return "ghcr" if release_channel(environ) == "published" else "development"
-    return "pypi" if release_channel(environ) == "published" else "development"
+    return release_installation(environ).channel
 
 
 class DeviceLifecycle(object):
@@ -159,8 +159,13 @@ class DeviceLifecycle(object):
             self.updater = OtaUpdater(self._clock)
         else:
             self.updater = DisabledUpdater()
-        self.running_version = running_version or release_version()
-        self.channel = channel or release_channel_name()
+        detected = (release_installation()
+                    if running_version is None or channel is None else None)
+        self.running_version = running_version or detected.running
+        self.channel = channel or detected.channel
+        # Set by the daemon once a background checker exists. Until then the
+        # honest answer is "disabled", never "unknown release" or "current".
+        self.release_checks = False
         self._lock = threading.Lock()
         # Keep tuple validation, registry admission and the resulting commit
         # together across the status server's concurrent request threads.
@@ -662,14 +667,20 @@ class DeviceLifecycle(object):
     def release(self):
         """The cached Part 4 result, projected into the status response.
 
-        No registry is contacted here. Until the checker exists there is no
-        cache row for this running version, and the honest answer is
-        ``disabled``: not "up to date", not "unknown release".
+        No registry is contacted here: this reads the row a background checker
+        stored and nothing else. ``disabled`` means this installation is never
+        checked (a development build, or checks switched off); ``unknown``
+        means a checker exists but has no result for this running version yet.
+        A failed or old result is never reported as current.
         """
+        state = ("unknown" if self.release_checks and self.channel != "development"
+                 else "disabled")
         base = {"v": protocol.PROTOCOL_VERSION, "running": self.running_version,
-                "latest": None, "channel": self.channel, "state": "disabled",
+                "latest": None, "channel": self.channel, "state": state,
                 "last_attempt_at": None, "checked_at": None,
                 "max_age_s": RELEASE_MAX_AGE_S, "error": None, "source_url": None}
+        if state == "disabled":
+            return base
         try:
             row = self.storage.release_cache(self.channel)
         except Exception:
@@ -682,8 +693,11 @@ class DeviceLifecycle(object):
         state = row["state"] if row["state"] in (
             "disabled", "unknown", "checking", "current", "available", "error",
             "stale") else "unknown"
-        if checked is not None and self._clock() - checked > RELEASE_MAX_AGE_S:
-            state = "stale"
+        if state in ("current", "available"):
+            if checked is None:
+                state = "unknown"
+            elif self._clock() - checked > RELEASE_MAX_AGE_S:
+                state = "stale"
         return {"v": protocol.PROTOCOL_VERSION, "running": self.running_version,
                 "latest": row["latest"], "channel": self.channel, "state": state,
                 "last_attempt_at": row["last_attempt_at"],
@@ -1036,38 +1050,107 @@ class DeviceLifecycle(object):
         return cleared, attempt
 
 
-def release_instructions(channel):
-    """The complete update commands for this installation's channel.
+def _command(text):
+    return {"kind": "command", "text": text}
+
+
+def _say(text):
+    return {"kind": "text", "text": text}
+
+
+def release_instructions(channel, latest=None, state=None, ambiguous=None):
+    """Complete update steps for this installation and its target release.
 
     The daemon cannot inspect the user's Compose reference or their Python
     environment, so it explains the applicable cases instead of pretending it
-    knows which one applies. It never runs any of them.
+    knows which one applies. It never runs any of them. ``groups`` holds the
+    copyable steps (``command`` steps are copyable, ``text`` steps are prose);
+    ``update`` is the short list of commands. A target release is named only
+    when one is actually available. ``ambiguous`` is the version of a wheel that
+    several early candidates shared; it adds the explicit way to move to the
+    final release of that version.
     """
+    target = latest if state == "available" and _safe_label(latest) else None
+    prerelease = bool(target) and _is_prerelease(target)
     if channel == "ghcr":
-        return {
-            "update": ["docker compose pull", "docker compose up -d"],
-            "note": ("A pull on its own only downloads the image: the running "
-                     "container keeps its current version until it is recreated. "
-                     "If your Compose file pins DASH_IMAGE to a version tag, "
-                     "change that reference first, then pull and recreate."),
-            "verify": "docker compose ps",
-        }
+        image = "ghcr.io/jake1164/presto-ai-dash:" + (target or "<version>")
+        groups = [
+            {"title": "Docker Compose with a pinned DASH_IMAGE",
+             "steps": [_say("In your .env file (or wherever Compose reads DASH_IMAGE), set:"),
+                       _command("DASH_IMAGE=" + image),
+                       _command("docker compose pull dash"),
+                       _command("docker compose up -d dash")]},
+        ]
+        if not prerelease:
+            groups.append({
+                "title": "Docker Compose following the latest stable tag",
+                "steps": [_command("docker compose pull dash"),
+                          _command("docker compose up -d dash")]})
+        groups.append({
+            "title": "Docker without Compose",
+            "steps": [_command("docker pull " + image),
+                      _say("Stop and remove the old container, then start it again with "
+                           "the same options and this image. Keep the /data volume.")]})
+        update = [step["text"] for step in groups[0]["steps"] if step["kind"] == "command"]
+        return {"update": update, "groups": groups,
+                "note": ("A pull on its own only downloads the image: the running "
+                         "container keeps its current version until it is recreated. "
+                         "This page cannot see how your Compose file names the image, "
+                         "so use the case that matches it. A pre-release tag is never "
+                         "moved by the latest tag."),
+                "verify": "Run docker compose ps, then reload this page: Running "
+                          "should show " + (target or "the new version") + ".",
+                "target": target}
     if channel == "pypi":
-        return {
-            "update": ["pipx upgrade presto-ai-dash",
-                       'pipx install --force "presto-ai-dash==<version>"'],
-            "note": ("pipx and pip skip pre-releases unless asked. To move to a "
-                     "release candidate, name the version or pass --pre. For a "
-                     "plain pip install, use python -m pip install --upgrade "
-                     "presto-ai-dash in the same Python environment."),
-            "verify": "presto-ai-dash --version",
-        }
+        pin = '"presto-ai-dash==%s"' % (target or "<version>")
+        which = "to this exact version" if target else "to a named version"
+        groups = []
+        if not prerelease:
+            groups.append({"title": "pipx",
+                           "steps": [_command("pipx upgrade presto-ai-dash")]})
+        groups.append({"title": "pipx, " + which,
+                       "steps": [_command("pipx install --force " + pin)]})
+        if not prerelease:
+            groups.append({"title": "pip, in the same Python environment",
+                           "steps": [_command("python -m pip install --upgrade presto-ai-dash")]})
+        groups.append({"title": "pip, " + which,
+                       "steps": [_command("python -m pip install --upgrade " + pin)]})
+        if ambiguous and _safe_label(ambiguous):
+            groups.append({
+                "title": "Not sure this is the final %s?" % ambiguous,
+                "steps": [
+                    _say("Version %s was also used by early release candidates, so this "
+                         "copy cannot be told apart from the final release. If you installed "
+                         "it before the final release existed, install the final one by name "
+                         "(this fails harmlessly if it is not published yet):" % ambiguous),
+                    _command('pipx install --force "presto-ai-dash==%s"' % ambiguous),
+                    _command('python -m pip install --force-reinstall "presto-ai-dash==%s"'
+                             % ambiguous)]})
+        update = [step["text"] for group in groups for step in group["steps"]
+                  if step["kind"] == "command"]
+        return {"update": update, "groups": groups,
+                "note": ("pip and pipx skip pre-releases unless a version is named. "
+                         "Restart the daemon after upgrading; your data folder is kept."),
+                "verify": "Run presto-ai-dash --version, restart the daemon, then "
+                          "reload this page.",
+                "target": target}
     return {
-        "update": [],
+        "update": [], "groups": [], "target": None, "verify": None,
         "note": ("This is a development build, not a published release, so no "
                  "release update commands apply."),
-        "verify": None,
     }
+
+
+def _safe_label(label):
+    """A release label that is safe to place in a copyable command."""
+    return (isinstance(label, str) and 0 < len(label) <= 32
+            and all(char.isalnum() or char in ".-" for char in label))
+
+
+def _is_prerelease(label):
+    from .release_policy import parse_running
+    version = parse_running(label)
+    return bool(version is not None and version.is_prerelease)
 
 
 def request_hash(method, path, body):

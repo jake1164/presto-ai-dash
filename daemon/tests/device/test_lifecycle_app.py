@@ -129,6 +129,23 @@ class NoticeTests(AppBase):
         self.app._set_payload(self.payload("current"))
         self.assertIsNone(self.app.lifecycle_notice)
 
+    def test_a_release_that_is_current_stale_or_failed_draws_no_arrow(self):
+        # A stale or failed check still names a newer version, kept from the
+        # last good result. It must not be shown as a fresh announcement.
+        for state in ("release-current", "release-stale", "release-error"):
+            with self.subTest(state=state):
+                self.app._set_payload(self.payload(state))
+                self.assertIsNone(self.app.lifecycle_notice)
+                self.assertIsNone(self.app.home_layout.dock_top)
+
+    def test_a_fresh_release_draws_the_blue_arrow_and_a_warning_outranks_it(self):
+        self.app._set_payload(self.payload("release"))
+        self.assertEqual(self.module.lifecycle.kind(self.app.lifecycle_notice), "release")
+        self.app._set_payload(self.payload("both"))
+        self.assertEqual(self.module.lifecycle.kind(self.app.lifecycle_notice), "warning")
+        text = " ".join(self.app.lifecycle_notice["lines"])
+        self.assertIn("0.50.0 -> 0.51.0", text)
+
     def test_a_mismatch_reserves_the_dock(self):
         self.app._set_payload(self.payload("usb-required"))
         self.assertIsNotNone(self.app.lifecycle_notice)

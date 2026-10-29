@@ -34,6 +34,9 @@ DEVICE_PATH = r"/api/admin/devices/([A-Za-z0-9_-]{1,80})"
 DEVICE_RETRY_PATH = r"/api/admin/devices/([A-Za-z0-9_-]{1,80})/retry"
 DEVICE_RECOVERY_PATH = r"/api/admin/devices/([A-Za-z0-9_-]{1,80})/confirm-recovery"
 RELEASES_PATH = "/api/admin/releases"
+RELEASES_CHECK_PATH = "/api/admin/releases/check"
+# The check request carries nothing; a small body is read and ignored.
+RELEASE_CHECK_BODY_LIMIT = 512
 # The retry and recovery bodies: two fields, and an idempotency key.
 DEVICE_BODY_LIMIT = 512
 IDEMPOTENCY_CHARS = 32
@@ -632,6 +635,42 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
                 return
             self._send(202, result)
 
+        def _release_check(self):
+            """Queue a background release check. Never contacts a registry here.
+
+            It goes through the same Host, Origin, session or bearer and CSRF
+            checks as every admin change. 202 means a check is queued or one
+            is already running; 429 means one started within the last minute.
+            """
+            if not self._authorized():
+                return
+            try:
+                length = parse_length(self.headers.get("Content-Length"), "0")
+            except ValueError:
+                self._send(400, {"error": "invalid body length"})
+                return
+            if self.headers.get("Transfer-Encoding") or length > RELEASE_CHECK_BODY_LIMIT:
+                self._send(413, {"error": "invalid or oversized request body"})
+                return
+            if length:
+                self.rfile.read(length)
+            try:
+                outcome, retry_after = manager.request_release_check()
+            except Exception:
+                log.error("admin release check request failed")
+                self._send(500, {"error": "the check could not be queued"})
+                return
+            if outcome in ("throttled", "rate_limited"):
+                # "throttled": a check started within the last minute.
+                # "rate_limited": the registry itself asked to be left alone.
+                code = "check_throttled" if outcome == "throttled" else "rate_limited"
+                self._send(429, {"error": code, "retry_after": retry_after},
+                           headers={"Retry-After": str(retry_after)})
+            elif outcome == "disabled":
+                self._send(409, {"error": "release_checks_disabled"})
+            else:
+                self._send(202, {"queued": True, "status": outcome})
+
         def do_POST(self):
             if urlsplit(self.path).path == "/api/admin/session":
                 if self._authorized(bearer_only=True):
@@ -650,6 +689,9 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
             token_create = re.fullmatch(INGEST_TOKEN_PATH, path)
             device_retry = re.fullmatch(DEVICE_RETRY_PATH, path)
             device_recovery = re.fullmatch(DEVICE_RECOVERY_PATH, path)
+            if path == RELEASES_CHECK_PATH:
+                self._release_check()
+                return
             if device_retry or device_recovery:
                 self._device_mutation((device_retry or device_recovery)[1],
                                       "retry" if device_retry else "confirm-recovery")

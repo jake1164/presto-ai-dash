@@ -1885,12 +1885,66 @@
       : "Every recorded device reports the application this daemon serves."));
     box.append(buildDeviceList(devices));
   }
+  const RELEASE_ERRORS = {
+    timeout: "the registry did not answer in time",
+    network_error: "the registry could not be reached",
+    http_error: "the registry answered with an error",
+    rate_limited: "the registry asked for fewer requests; it will be asked again later",
+    auth_challenge: "the registry's sign-in step was not what was expected",
+    invalid_metadata: "the registry's answer could not be understood",
+    incomplete_listing: "the registry's list of releases could not be read to the end",
+    no_eligible_release: "the registry lists no usable release",
+    running_version_unknown: "the running version is not a numbered release",
+    state_unavailable: "the saved result could not be read",
+  };
+  const REGISTRY_NAMES = {pypi: "PyPI (pypi.org)", ghcr: "GitHub Container Registry (ghcr.io)",
+    development: "none: this is a development build"};
   function releaseStateText(release) {
-    if (release.state === "disabled") {
-      return "not checked: this build does not query a registry yet";
+    const found = release.latest ? " (last result: " + release.latest + ")" : "";
+    switch (release.state) {
+      case "disabled":
+        return release.channel === "development"
+          ? "not checked: this is a development build, not a published release"
+          : "not checked: release checks are switched off";
+      case "unknown": return "no check has finished yet";
+      case "checking": return "checking now";
+      case "current":
+        return release.running_note === "version_ambiguous"
+          ? "no newer release was found (this copy cannot be confirmed as the final release; see below)"
+          : "up to date: no newer release was found";
+      case "available": return "a newer release is available: " + release.latest;
+      case "stale": return "not recently checked: the last successful check is over 48 hours old" + found;
+      case "error":
+        return "could not check: " + (RELEASE_ERRORS[release.error] || "the check failed") + found;
+      default: return release.state;
     }
-    if (release.state === "stale") return "stale: the last successful check is over 48 hours old";
-    return release.state;
+  }
+  let releaseWatch = null;
+  function watchRelease(tries = 12) {
+    // Poll the cached result while a queued check runs; it is a read only.
+    clearTimeout(releaseWatch);
+    releaseWatch = setTimeout(async () => {
+      await refreshStatus();
+      const release = statusState && statusState.release;
+      if (release && release.checking && tries > 0) watchRelease(tries - 1);
+    }, 2500);
+  }
+  async function checkForUpdates(button) {
+    button.disabled = true;
+    try {
+      const result = await request("/api/admin/releases/check", "POST", {});
+      message(result.status === "coalesced" ? "A check is already running." : "Checking for updates.");
+      await refreshStatus();
+      watchRelease();
+    } catch (error) {
+      const text = {
+        check_throttled: "A check started less than a minute ago. Try again shortly.",
+        rate_limited: "The registry asked to be left alone for a while. The daemon will try again later.",
+        release_checks_disabled: "This installation does not check for releases.",
+      }[error.message] || error.message;
+      message(text, true);
+      button.disabled = false;
+    }
   }
   function renderRelease() {
     const box = element("status-release");
@@ -1900,22 +1954,51 @@
       box.append(el("p", "note", "No release information."));
       return;
     }
-    box.append(factsList([
+    const available = release.state === "available";
+    if (available) {
+      box.append(el("p", "banner", "A newer Presto AI Dash is available: " + release.running +
+        " -> " + release.latest + ". Nothing is installed for you; follow the steps below."));
+    } else if (release.state === "error" || release.state === "stale") {
+      box.append(el("p", "note", "This installation is not confirmed to be up to date."));
+    }
+    const facts = [
       ["Running", release.running],
-      ["Channel", release.channel],
+      ["Registry", REGISTRY_NAMES[release.channel] || release.channel],
       ["State", releaseStateText(release)],
-      ["Available", release.latest || "—"],
+      ["Newest eligible", release.latest || "—"],
       ["Last checked", release.checked_at ? whenText(release.checked_at) : "never"],
       ["Last attempt", release.last_attempt_at ? whenText(release.last_attempt_at) : "never"],
-    ]));
+    ];
+    if (release.next_check_at && release.can_check) facts.push(["Next check", whenText(release.next_check_at)]);
+    box.append(factsList(facts));
+    if (release.source_url && /^https:\/\//.test(release.source_url)) {
+      const link = el("a", "", available ? "Release details" : "Official release page");
+      link.href = release.source_url; link.target = "_blank"; link.rel = "noopener noreferrer";
+      const line = el("p", "note"); line.append(link); box.append(line);
+    }
+    if (release.running_note === "version_ambiguous") {
+      box.append(el("p", "note", "Version " + release.running + " was also used by early release " +
+        "candidates, before candidates carried their own number. This page cannot tell which one " +
+        "this copy is, and does not claim it is the final release. If you installed it before the " +
+        "final release existed, use the named install command below."));
+    }
+    if (release.can_check) {
+      const row = el("p", "");
+      const button = el("button", "", release.checking ? "Checking…" : "Check for updates");
+      button.type = "button"; button.disabled = !!release.checking;
+      button.addEventListener("click", () => checkForUpdates(button));
+      row.append(button); box.append(row);
+      if (release.checking) watchRelease();
+    }
     const instructions = release.instructions || {};
     if (instructions.note) box.append(el("p", "note", instructions.note));
-    const commands = instructions.update || [];
-    if (commands.length) {
-      const list = el("ul", "commands");
-      for (const command of commands) list.append(el("li", "", command));
-      box.append(list);
+    for (const group of instructions.groups || []) {
+      box.append(el("h4", "", group.title));
+      for (const step of group.steps) {
+        box.append(step.kind === "command" ? copyCell(step.text) : el("p", "note", step.text));
+      }
     }
+    if (instructions.verify) box.append(el("p", "note", "Then: " + instructions.verify));
   }
 
   function renderStatus() {

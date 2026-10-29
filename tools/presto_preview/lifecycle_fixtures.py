@@ -20,7 +20,8 @@ ATTEMPT = "d" * 32
 
 # The states the preview can show, in the order they are most useful to review.
 STATES = ("none", "current", "usb-required", "retry-pending", "retry-exhausted",
-          "unconfirmed", "release", "both")
+          "unconfirmed", "release", "both", "release-current", "release-stale",
+          "release-error")
 
 
 def device_lifecycle(state="current", reason=None, attention=False, comparison=None,
@@ -56,19 +57,24 @@ def device_lifecycle(state="current", reason=None, attention=False, comparison=N
 
 
 def daemon_release(state="available", running="0.50.0", latest="0.51.0",
-                   channel="pypi"):
-    """One ``daemon_release`` object in the daemon's own shape."""
-    checked = "2026-10-29T09:00:00Z" if state in ("current", "available") else None
+                   channel="pypi", error=None):
+    """One ``daemon_release`` object in the daemon's own shape.
+
+    A stale or failed check keeps the last good ``latest`` and ``checked_at``,
+    exactly as the daemon does, so the preview proves such a result draws no
+    arrow even though a newer version is named in it.
+    """
+    kept = state in ("current", "available", "stale", "error")
     return {
         "v": 1,
         "running": running,
-        "latest": latest if state in ("current", "available") else None,
+        "latest": latest if kept else None,
         "channel": channel,
         "state": state,
         "last_attempt_at": "2026-10-29T09:00:00Z",
-        "checked_at": checked,
+        "checked_at": "2026-10-26T09:00:00Z" if kept else None,
         "max_age_s": 172800,
-        "error": None,
+        "error": error,
         "source_url": None,
     }
 
@@ -97,6 +103,12 @@ def extension(name):
                                 attempts=1), None
     if name == "release":
         return None, daemon_release()
+    if name == "release-current":
+        return None, daemon_release("current", latest="0.50.0")
+    if name == "release-stale":
+        return None, daemon_release("stale")
+    if name == "release-error":
+        return None, daemon_release("error", error="timeout")
     if name == "both":
         return (device_lifecycle("manual_action", "usb_update_required", True),
                 daemon_release())

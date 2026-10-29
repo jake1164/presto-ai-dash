@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 
 from . import demo
 from .dashboard import build_status_payload, lazy_cards
+from .device_protocol import MAX_STATUS_BYTES
 from .ingest import ingest as store_observation
 
 log = logging.getLogger(__name__)
@@ -287,7 +288,8 @@ class BoundedRequestHandler(BaseHTTPRequestHandler):
 def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                  *, ingest_enabled=None, ingest_rate_limiter=None, client_registry=None,
                  alert_writer=None, alert_rate_limiter=None, card_provider=None,
-                 demo_enabled=None, demo_second=None, demo_device_alerts=None):
+                 demo_enabled=None, demo_second=None, demo_device_alerts=None,
+                 device_lifecycle=None):
     if not shared_token:
         raise ValueError("API requires a nonempty shared token")
     limiter = ingest_rate_limiter if ingest_rate_limiter is not None else _IngestRateLimiter()
@@ -407,6 +409,12 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                 log.exception("could not build status payload")
                 self._send_json(500, {"error": "internal_error"})
                 return
+            if device_lifecycle is not None and not self._demo_on():
+                # The lifecycle extension describes only the requesting device.
+                # Demo mode is skipped on purpose: sample data must never
+                # create a durable device record, spend a retry or confirm an
+                # update, and real unresolved state is left exactly as it is.
+                payload = self._with_lifecycle(payload, device_lifecycle)
             if client_registry is not None:
                 # Who is polling: remembered in memory only, and never part of
                 # the response, which stays exactly as it was. The device's
@@ -420,6 +428,35 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                 except Exception:
                     log.debug("could not record the client", exc_info=True)
             self._send_json(200, payload)
+
+        def _with_lifecycle(self, payload, lifecycle):
+            """A request-local copy carrying the two optional extensions.
+
+            The provider's payload is never mutated: a cached or shared dict
+            must not grow one device's state. If the result would exceed the
+            device's own response bound, the extensions are dropped rather
+            than the quota data: a device with no room is told nothing new,
+            and nothing is dispatched or acknowledged.
+            """
+            merged = dict(payload)
+            try:
+                extension = lifecycle.observe(self.headers)
+                release = lifecycle.release()
+            except Exception:
+                log.debug("the lifecycle extension was skipped", exc_info=True)
+                return merged
+            if extension is not None:
+                merged["device_lifecycle"] = extension
+            if release is not None:
+                merged["daemon_release"] = release
+            try:
+                size = len(json.dumps(merged).encode("utf-8"))
+            except (TypeError, ValueError):
+                return dict(payload)
+            if size > MAX_STATUS_BYTES:
+                log.debug("no room for the lifecycle extension in a %d byte payload", size)
+                return dict(payload)
+            return merged
 
         def _status_payload(self, query):
             """The status payload, small when the client asks for lazy cards.
@@ -754,7 +791,7 @@ class ApiServer:
                  status_provider=None, *, ingest_enabled=None, ingest_rate_limiter=None,
                  handler_class=None, client_registry=None, alert_writer=None,
                  alert_rate_limiter=None, card_provider=None, demo_enabled=None,
-                 demo_second=None, demo_device_alerts=None):
+                 demo_second=None, demo_device_alerts=None, device_lifecycle=None):
         self.host = host
         self._server = _ExclusiveHTTPServer(
             (host, port), handler_class or make_handler(
@@ -767,7 +804,8 @@ class ApiServer:
                 card_provider=card_provider,
                 demo_enabled=demo_enabled,
                 demo_second=demo_second,
-                demo_device_alerts=demo_device_alerts))
+                demo_device_alerts=demo_device_alerts,
+                device_lifecycle=device_lifecycle))
         self._server.daemon_threads = False
         self._server.block_on_close = True
         self._server._active_condition = threading.Condition()

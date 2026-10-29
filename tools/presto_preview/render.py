@@ -19,6 +19,7 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 from urllib.request import Request, urlopen
 
@@ -31,6 +32,7 @@ from presto_bundle import app_files, snapshot  # noqa: E402
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import demo_client  # noqa: E402
+import lifecycle_fixtures  # noqa: E402
 
 PRESTO_DIR = os.path.join(REPO_ROOT, "presto")
 DEFAULT_OUT = os.path.join(REPO_ROOT, ".preview")
@@ -92,11 +94,19 @@ def _load_app_modules(real_sleep=False):
     main = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(main)
     main.__presto_revision__ = bundle["revision"]
+    # The preview is not a device: keep its boot counter in a temporary file
+    # rather than the filesystem root, which it cannot write anyway.
+    try:
+        main.config.BOOT_COUNTER_FILE = os.path.join(
+            tempfile.gettempdir(), "presto-preview-boot.txt")
+    except Exception:
+        pass
     import net
     # The preview is not a device: it says so, and it reports the revision of
     # the shared app code it runs.
     net.CLIENT_NAME_OVERRIDE = "psl"
     net.REVISION_OVERRIDE = bundle["revision"][:12]
+    net.DEVICE_ID_OVERRIDE = ""
     return main, net
 
 
@@ -160,7 +170,7 @@ def _fill_card_details(app, t):
 
 
 def render(payload="demo", out=DEFAULT_OUT, stale=False, offline=False, muted=False,
-           mute_left=None, scene=None):
+           mute_left=None, scene=None, lifecycle="none"):
     main, net = _load_app_modules()
     if HERE not in sys.path:
         sys.path.insert(0, HERE)
@@ -186,6 +196,10 @@ def render(payload="demo", out=DEFAULT_OUT, stale=False, offline=False, muted=Fa
     else:
         with open(payload) as handle:
             data = json.load(handle)
+    if lifecycle != "none":
+        # A display fixture: the agreed indicator states, fed through the real
+        # app. Nothing here is a device record or USB evidence.
+        data = lifecycle_fixtures.apply(data, lifecycle)
     app._set_payload(data)
     if payload == "demo":
         _fill_card_details(app, second)
@@ -232,6 +246,7 @@ def render(payload="demo", out=DEFAULT_OUT, stale=False, offline=False, muted=Fa
     state = {"payload": payload if payload in PAYLOADS else os.path.basename(payload),
              "scene": scene if payload == "demo" else None,
              "stale": stale, "offline": offline, "muted": muted,
+             "lifecycle": lifecycle,
              "code_revision": main.__presto_revision__}
     with open(os.path.join(out, "manifest.json"), "w") as handle:
         json.dump({"state": state, "screens": screens}, handle, indent=2)
@@ -284,9 +299,13 @@ def main_cli(argv=None):
                         help="with --payload demo, the scene to render: %s "
                              "(default %s)" % (", ".join(demo_client.SCENES),
                                                 demo_client.DEFAULT_SCENE))
+    parser.add_argument("--lifecycle", default="none",
+                        choices=lifecycle_fixtures.STATES,
+                        help="a display fixture for the shared bottom-right "
+                             "indicator: %s (default none)" % ", ".join(lifecycle_fixtures.STATES))
     args = parser.parse_args(argv)
     screens = render(args.payload, args.out, args.stale, args.offline, args.muted,
-                      args.mute_left, args.scene)
+                      args.mute_left, args.scene, args.lifecycle)
     for screen in screens:
         print(os.path.join(args.out, screen["file"]))
 

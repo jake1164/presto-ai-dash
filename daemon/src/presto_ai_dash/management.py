@@ -22,6 +22,7 @@ from .config import (ALERT_KEYS, DEFAULTS, alert_base_settings, alert_settings,
                      demo_enabled, ingest_enabled, overflow_rows)
 from .credentials import load_cipher
 from .dashboard import build_card_details, build_instance_payload, device_view, lazy_cards
+from .device_lifecycle import DeviceLifecycle, release_instructions
 from .effective import effective_settings, uptime_label, uptime_seconds
 from .http_client import origin_of
 from .logbuffer import LogBuffer
@@ -197,6 +198,10 @@ class SourceConfiguration:
             if record["credential"] is not None:
                 self.cipher.decrypt(record["id"], record["credential"])
         self.codex_logins = CodexLoginManager(self)
+        # Durable device identity and update state. Operational OTA is off in
+        # this stage: the coordinator issues no command and acknowledges no
+        # confirmation, so a known mismatch asks for a USB update instead.
+        self.lifecycle = DeviceLifecycle(storage)
     def list_sources(self):
         records = self.storage.source_instances()
         snapshots = self.storage.latest_snapshots()
@@ -718,8 +723,9 @@ class SourceConfiguration:
         snapshots = self.storage.latest_snapshots()
         poll_interval = self.config["daemon"]["poll_interval"]
         uptime = uptime_seconds(self.started_at)
-        return {
-            "daemon": {
+        devices = self.devices_view()
+        attention = devices["needs_attention_count"]
+        return {            "daemon": {
                 "version": __version__,
                 "schema_version": self.storage.schema_version(),
                 "uptime_seconds": uptime,
@@ -742,7 +748,46 @@ class SourceConfiguration:
             "collectors": self._collectors(sources),
             "problems": [dict(record, time=_stamp(record["time"]))
                          for record in self.problems.problems()],
+            # The durable devices, and how many need attention. These are the
+            # same authoritative projections the device routes return, so the
+            # page has one source of device truth. "clients" above stays the
+            # in-memory view of who polled, and is never mixed with them.
+            "devices": devices["devices"],
+            "device_attention_count": attention,
+            "release": self.release_view(),
         }
+
+    def devices_view(self):
+        """Every durable device, plus the count that needs attention."""
+        return self.lifecycle.devices_view(self.config["daemon"]["poll_interval"])
+
+    def device_view(self, device_id):
+        """One device's detail, or None for an ID the daemon does not know."""
+        return self.lifecycle.device_view(device_id, self.config["daemon"]["poll_interval"])
+
+    def device_attention_count(self):
+        return self.lifecycle.attention_count()
+
+    def refuse_device_mutation(self, device_id, kind):
+        """Refuse a retry or recovery request: there is no updater yet.
+
+        The route exists so a client can tell "not available" from "no such
+        device". It never authorizes a transfer, resets a budget or clears a
+        warning; a warning clears only on a supported recovery.
+        """
+        self.lifecycle.refuse_mutation(device_id, kind)
+
+    def release_view(self):
+        """The cached daemon-release result, with this install's own commands.
+
+        No registry is contacted: this only reads what a background checker
+        stored. Until that checker exists the state is ``disabled``, which is
+        honest about not having looked rather than claiming the install is
+        current.
+        """
+        result = dict(self.lifecycle.release())
+        result["instructions"] = release_instructions(result["channel"])
+        return result
 
     def log_view(self, limit=None, level="DEBUG", text=""):
         """The recent log lines for the admin page, newest first, with their times."""

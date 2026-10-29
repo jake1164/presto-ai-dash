@@ -24,6 +24,19 @@ from presto_bundle import app_files, snapshot  # noqa: E402
 
 
 class PreviewTests(unittest.TestCase):
+    def test_preview_cannot_report_a_configured_physical_device_identity(self):
+        configured = SimpleNamespace(DEVICE_ID="a" * 32)
+        with patch.dict(sys.modules, {"config": configured}):
+            app_module, preview_net = render._load_app_modules()
+            with patch.object(app_module.lifecycle, "bump_boot") as bump_boot:
+                app = app_module.App(render.FakePresto(Framebuffer()))
+            self.assertEqual(preview_net.current_client_name(), "psl")
+            self.assertIsNone(app.device_id)
+            self.assertIsNone(app._lifecycle_headers())
+            self.assertEqual(app.client.lifecycle_headers("/api/v1/status"), {})
+            bump_boot.assert_not_called()
+            self.assertEqual(configured.DEVICE_ID, "a" * 32)
+
     def test_source_loader_uses_snapshot_bytes_even_if_the_file_changes(self):
         with tempfile.TemporaryDirectory() as folder:
             path = os.path.join(folder, "helper.py")

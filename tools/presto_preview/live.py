@@ -103,6 +103,9 @@ class Runner(object):
         from demo_client import DEFAULT_SCENE
         self.scene = scene or DEFAULT_SCENE
         self.network_fail = False
+        # A display fixture for the shared bottom-right indicator. "none" is
+        # the quiet case: the daemon sends nothing and no icon is drawn.
+        self.lifecycle = "none"
         self.cond = threading.Condition()
         self.frame = 0
         self.pixels = bytes(240 * 240 * 3)
@@ -126,9 +129,11 @@ class Runner(object):
         with self.cond:
             self.cond.wait_for(lambda: self.frame != after, timeout)
             from demo_client import SCENES
+            from lifecycle_fixtures import STATES
             return {"frame": self.frame, "led": self.led, "error": self.error,
                     "demo": self.demo, "network_fail": self.network_fail,
                     "scene": self.scene, "scenes": list(SCENES),
+                    "lifecycle": self.lifecycle, "lifecycles": list(STATES),
                     "code_revision": self.code_revision,
                     "device_sync": sync_status(self.code_revision)}
 
@@ -176,7 +181,13 @@ class Runner(object):
                 if self.network_fail:
                     await asyncio.sleep(0.2)
                     raise net.NetworkUnavailable("simulated by preview")
-                return await fetch()
+                payload = await fetch()
+                if self.lifecycle != "none":
+                    # A fixture, not a device record: it only adds the two
+                    # extension objects the real app already parses.
+                    from lifecycle_fixtures import apply
+                    payload = apply(payload, self.lifecycle)
+                return payload
 
             app.client.fetch_async = fetch_async
             app.run()
@@ -306,6 +317,13 @@ def make_handler(runner, names=None):
                     name = str(body["scene"])
                     if name in SCENES:
                         runner.set_scene(name)
+                if "lifecycle" in body:
+                    from lifecycle_fixtures import STATES
+                    name = str(body["lifecycle"])
+                    if name in STATES and name != runner.lifecycle:
+                        runner.lifecycle = name
+                        # Restart so the next poll carries the fixture at once.
+                        runner.restart()
                 if body.get("restart"):
                     runner.restart()
                 return self._json({"ok": True})
@@ -358,6 +376,8 @@ button { font: inherit; background: #21262d; color: #c9d1d9; border: 1px solid #
   <label id="demo-label" title="Runs the app on the scripted demo instead of the daemon: it never contacts anything. The same sample accounts the daemon's demo mode and the published demo page show, with the device's own screens. Untick to go back to live data."><input type="checkbox" id="demo"> Demo</label>
   <label id="scene-label" title="Jumps the demo to one of its scenes. The loop keeps playing from there, so you can watch a scene progress instead of waiting for it.">Scene
     <select id="scene"></select></label>
+  <label id="lifecycle-label" title="Adds one of the agreed indicator states to the status payload as a display fixture: the same objects the daemon sends, parsed by the real app. Nothing is written and no device state is claimed.">Notice
+    <select id="lifecycle"></select></label>
   <label id="netfail-label" title="Makes every fetch fail, as if the daemon were off or unreachable. The app keeps its last good data marked 'STALE - retrying', then after 30 seconds switches to the red 'Daemon offline' screen, exactly as the device does. Untick to watch it recover. Your real daemon is not affected."><input type="checkbox" id="netfail"> Simulate network failure</label>
   <button id="restart" type="button" title="Restarts the app from boot, back on Home, with the current presto/*.py code. Saving a presto file already does this automatically, so use it to reset the app's state, such as scroll position, mute, or a stuck screen.">Restart app</button>
 </div>
@@ -417,6 +437,7 @@ button { font: inherit; background: #21262d; color: #c9d1d9; border: 1px solid #
       throw new Error("unknown gesture " + name);
     },
     state: () => fetch("/state?after=-1").then((r) => r.json()),
+    lifecycle: (name) => post("/control", {lifecycle: name}),
   };
   const keys = {ArrowLeft: "left", ArrowRight: "right", ArrowUp: "down", ArrowDown: "up", Enter: "tap", m: "long"};
   document.addEventListener("keydown", (e) => {
@@ -425,6 +446,7 @@ button { font: inherit; background: #21262d; color: #c9d1d9; border: 1px solid #
 
   document.getElementById("demo").addEventListener("change", (e) => post("/control", {demo: e.target.checked}));
   document.getElementById("scene").addEventListener("change", (e) => post("/control", {scene: e.target.value}));
+  document.getElementById("lifecycle").addEventListener("change", (e) => post("/control", {lifecycle: e.target.value}));
   document.getElementById("netfail").addEventListener("change", (e) => post("/control", {network_fail: e.target.checked}));
   document.getElementById("restart").addEventListener("click", () => post("/control", {restart: true}));
 
@@ -454,6 +476,14 @@ button { font: inherit; background: #21262d; color: #c9d1d9; border: 1px solid #
         }
         scene.value = state.scene;
         scene.disabled = !state.demo;
+        const notice = document.getElementById("lifecycle");
+        if (state.lifecycles && notice.options.length !== state.lifecycles.length) {
+          notice.replaceChildren(...state.lifecycles.map((name) => {
+            const option = document.createElement("option");
+            option.value = name; option.textContent = name; return option;
+          }));
+        }
+        notice.value = state.lifecycle || "none";
         document.getElementById("netfail").checked = state.network_fail;
         status.textContent = (state.demo ? "demo (sample data) · " + state.scene
           : "live daemon") + " · frame " + frame +

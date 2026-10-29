@@ -30,6 +30,7 @@ except ImportError:
 from alerts import AlertTracker, led_brightness, led_pattern, worst_accent
 from cards import (clean_id, error_card, normalise_status, offline_card, overall_status,
                    parse_cards, parse_lines, parse_tiles)
+import lifecycle
 from gestures import (
     LONG_PRESS,
     SWIPE_LEFT,
@@ -45,11 +46,14 @@ from net import (
     StatusError,
     Unauthorised,
     NetworkUnavailable,
+    current_device_id,
+    current_revision_hex,
 )
 from popup import PopToTop
 from ticks import Uptime
 from ui import (Palette, bell_hit, build_home_layout, dot_hit, draw_boot,
-                draw_card, draw_sources, draw_message)
+                draw_card, draw_lifecycle_view, draw_sources, draw_message,
+                lifecycle_hit)
 
 
 # How long a detail view stays open before returning to the card.
@@ -122,6 +126,15 @@ class App(object):
         # The device tells the daemon what it can about itself, so the Status
         # tab can say why a device is unhappy without a serial cable.
         self.client.diag_provider = self._diag_state
+        # The lifecycle report: which app revision this device runs, which
+        # boot and report this is, and that it is not updating its own app.
+        # A device without a generated identity sends none of it, and the
+        # daemon keeps its legacy name-and-revision view.
+        self.device_id = current_device_id()
+        self.boot = (lifecycle.bump_boot(getattr(config, "BOOT_COUNTER_FILE", None))
+                     if self.device_id else 1)
+        self.seq = 0
+        self.client.lifecycle_provider = self._lifecycle_headers
 
         self.gestures = GestureRecogniser(
             long_press_ms=self.long_press_ms,
@@ -182,6 +195,10 @@ class App(object):
         self.wifi_drops = 0
         self.started_at = None
         self._last_screen = None
+        # The shared bottom-right indicator: what the daemon says this device
+        # or its release needs, and whether the read-only view is open.
+        self.lifecycle_notice = None
+        self.lifecycle_open = False
         # The kind of error the main loop last raised, so it is shown once.
         self._loop_error = None
 
@@ -229,6 +246,14 @@ class App(object):
         self.cards = cards
         self.error = error
         self.demo = payload.get("demo") is True
+        # What the shared bottom-right indicator should show: a device problem,
+        # a daemon release, both, or nothing. An absent or unusable extension
+        # means nothing, so an older daemon costs the screen nothing.
+        self.lifecycle_notice = lifecycle.notice(payload)
+        if self.lifecycle_open and self.lifecycle_notice is None:
+            # The condition cleared while the view was open: go back to the
+            # card the user was on.
+            self.lifecycle_open = False
         if error is None:
             self.last_good_at = self.uptime.ms()
             # The rows carry the structured quota of every service, so a
@@ -243,7 +268,8 @@ class App(object):
             # strip takes its band out of the list, and the band is
             # decided by the layout, not by the scroll position.
             self.home_layout = build_home_layout(self.display, self.live_rows or [],
-                                                 overflow_rows(payload), self.width)
+                                                 overflow_rows(payload), self.width,
+                                                 dock=bool(self.lifecycle_notice))
             self.home_scroll.set_height(self.home_layout.total, SOURCE_TOP,
                                         SOURCE_HEIGHT, self.home_layout.region)
         self.index = next((i for i, card in enumerate(cards) if card.id == selected), 0)
@@ -500,6 +526,24 @@ class App(object):
         print("AI Dash: fetch failed (%d): %s; %s" %
               (self.fail_count, reason, " | ".join(self._diag_lines())))
 
+    def _lifecycle_headers(self):
+        """The device ID and the lifecycle report for one status poll, or None.
+
+        ``seq`` counts the reports of this run in RAM; ``boot`` is the durable
+        count of application starts. Nothing is sent for a device with no
+        generated identity, and nothing is sent when the report cannot be
+        built: a malformed header would cost the whole poll its lifecycle
+        data, which is worse than saying nothing.
+        """
+        if not self.device_id:
+            return None
+        self.seq += 1
+        text = lifecycle.build(self.device_id, self.boot, self.seq,
+                               current_revision_hex())
+        if text is None:
+            return None
+        return (self.device_id, text)
+
     def _diag_state(self):
         """Everything the device knows about itself, in one dict.
 
@@ -725,14 +769,39 @@ class App(object):
         self._needs_redraw = True
         return True
 
+    def _lifecycle_tap(self):
+        """A tap on the shared dock opens the read-only information view.
+
+        It is checked before the bell, the page dots, Home rows and the card's
+        tap-to-expand, so one area always means one thing. It starts no update,
+        spends no retry and dismisses no warning; those are admin actions.
+        """
+        if self._connection_screen() is not None or not self.lifecycle_notice:
+            return False
+        if not lifecycle_hit(self._touch_x, self._touch_y, self.width, self.height):
+            return False
+        self.lifecycle_open = True
+        self._needs_redraw = True
+        return True
+
+    def _close_lifecycle(self):
+        self.lifecycle_open = False
+        self._needs_redraw = True
+
     def _handle_gestures(self, gestures):
         for gesture in gestures:
             if gesture == SWIPE_LEFT:
+                self.lifecycle_open = False
                 self._next_card()
             elif gesture == SWIPE_RIGHT:
+                self.lifecycle_open = False
                 self._prev_card()
             elif gesture == TAP:
-                if self._bell_tap():
+                if self.lifecycle_open:
+                    self._close_lifecycle()
+                elif self._lifecycle_tap():
+                    pass
+                elif self._bell_tap():
                     pass
                 elif self._tap_navigates():
                     pass
@@ -764,8 +833,9 @@ class App(object):
             self.popup.touch(now)
         previous_offset = self.home_scroll.offset
         self.home_scroll.update(state, self._touch_x, self._touch_y,
-                                enabled=self._current_card().id == "dash" and
-                                self._connection_screen() is None)
+                                enabled=(self._current_card().id == "dash" and
+                                         self._connection_screen() is None and
+                                         not self.lifecycle_open))
         if self.home_scroll.offset != previous_offset:
             # The user scrolled: that also cancels a pending return.
             self.popup.scrolled(now)
@@ -826,6 +896,9 @@ class App(object):
             draw_message(self.display, self.palette, screen[0], screen[1],
                          detail=["Retrying..."] + self._diag_lines() +
                          ["RESET returns to carousel"], demo=self.demo)
+        elif self.lifecycle_open and self.lifecycle_notice:
+            draw_lifecycle_view(self.display, self.palette, self.lifecycle_notice,
+                                self.width, self.height, demo=self.demo)
         elif card.id == "dash" and self.live_rows is not None:
             draw_sources(self.display, self.palette, self.live_rows,
                          self.index, len(self.cards), status=card.status,
@@ -833,7 +906,7 @@ class App(object):
                          scroll=self.home_scroll.offset, stale=bool(self.connection_error),
                          layout=self.home_layout,
                          mute_text=self.alerts.mute_label(),
-                         demo=self.demo)
+                         demo=self.demo, notice=self.lifecycle_notice)
         else:
             row = self.card_rows.get(card.id)
             detail = self.card_details.get(card.id)
@@ -854,6 +927,7 @@ class App(object):
                 detail_open=self.detail_open,
                 mute_text=self.alerts.mute_label(),
                 demo=self.demo,
+                notice=self.lifecycle_notice,
             )
 
         self.presto.update()
@@ -915,7 +989,16 @@ class App(object):
             if self._last_screen != self._connection_screen():
                 self._needs_redraw = True
             if self.detail_open and _ticks_diff(_now_ms(), self.detail_opened_at) > DETAIL_TIMEOUT_MS:
-                self._close_detail()
+                # Not while the lifecycle view is open: closing it must return
+                # to the card exactly as the user left it.
+                if not self.lifecycle_open:
+                    self._close_detail()
+            if self.lifecycle_open and self._connection_screen() is not None:
+                # A full-screen connecting/offline/error screen owns the
+                # display and hides the dock with it, so the view goes too.
+                # The local record of the problem is kept either way.
+                self.lifecycle_open = False
+                self._needs_redraw = True
             if self._needs_redraw:
                 self._update_leds()
                 self._render()

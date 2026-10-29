@@ -13,6 +13,7 @@ from .collectors import COLLECTOR_FILE, collector_bytes
 from .admin_sessions import AdminSessions, SESSION_SECONDS, token_binding
 from .codex_login import CodexLoginError
 from .device_setup import HANDOFF_NAME, SCRIPT_NAME, SetupError, SetupUnavailable
+from .device_lifecycle import AdminRequestError
 from .sources._codex_rpc import CodexReportingError
 from .storage import ConfigurationConflict
 
@@ -25,6 +26,18 @@ SETUP_SCRIPT_PATH = r"/api/admin/presto-setup/([A-Za-z0-9_-]{1,80})/script"
 SETUP_HANDOFF_FILE_PATH = r"/api/admin/presto-setup/([A-Za-z0-9_-]{1,80})/handoff"
 SETUP_HANDOFF_PATH = r"/api/admin/presto-setup/([A-Za-z0-9_-]{1,80})"
 SETUP_BODY_LIMIT = 1024
+# Device identity, revision and update state. The ID is the 32 lowercase
+# hexadecimal characters the setup utility generates; the route takes the same
+# shape as every other admin identifier and the lifecycle coordinator refuses
+# anything that is not a well-formed device ID.
+DEVICE_PATH = r"/api/admin/devices/([A-Za-z0-9_-]{1,80})"
+DEVICE_RETRY_PATH = r"/api/admin/devices/([A-Za-z0-9_-]{1,80})/retry"
+DEVICE_RECOVERY_PATH = r"/api/admin/devices/([A-Za-z0-9_-]{1,80})/confirm-recovery"
+RELEASES_PATH = "/api/admin/releases"
+# The retry and recovery bodies: two fields, and an idempotency key.
+DEVICE_BODY_LIMIT = 512
+IDEMPOTENCY_CHARS = 32
+HEX_DIGITS = "0123456789abcdef"
 ASSETS = {"/": ("index.html", "text/html; charset=utf-8"),
           "/admin.js": ("admin.js", "text/javascript; charset=utf-8"),
           "/admin.css": ("admin.css", "text/css; charset=utf-8")}
@@ -326,6 +339,40 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
                         log.error("admin status view failed")
                         self._send(500, {"error": "status could not be read"})
                 return
+            if path == "/api/admin/devices":
+                # Read-only: the durable devices and the attention count.
+                if self._authorized():
+                    try:
+                        self._send(200, manager.devices_view())
+                    except Exception:
+                        log.error("admin device listing failed")
+                        self._send(500, {"error": "device records could not be read"})
+                return
+            device_detail = re.fullmatch(DEVICE_PATH, path)
+            if device_detail:
+                # Read-only: one device, with its newest attempt records.
+                if self._authorized():
+                    try:
+                        view = manager.device_view(device_detail[1])
+                    except Exception:
+                        log.error("admin device detail failed")
+                        self._send(500, {"error": "device record could not be read"})
+                        return
+                    if view is None:
+                        self._send(404, {"error": "device not found"})
+                    else:
+                        self._send(200, view)
+                return
+            if path == RELEASES_PATH:
+                # Read-only: the cached release result and this install's own
+                # update commands. No registry is contacted here.
+                if self._authorized():
+                    try:
+                        self._send(200, manager.release_view())
+                    except Exception:
+                        log.error("admin release view failed")
+                        self._send(500, {"error": "release state could not be read"})
+                return
             if path == "/api/admin/logs":
                 # Read-only: the daemon's recent log lines, newest first, from memory.
                 if self._authorized():
@@ -537,6 +584,52 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
                 return
             self._send(201, result)
 
+        def _device_mutation(self, device_id, kind):
+            """A retry or recovery request, refused while the updater is absent.
+
+            Both routes need the same body, CSRF and idempotency treatment as
+            any other admin mutation, so the request is validated in full
+            first: a malformed request is still 400/413/415. The answer to a
+            well-formed one is ``409 ota_not_enabled``, because nothing here
+            may authorize a transfer, spend a retry or clear a warning.
+            """
+            if not self._authorized():
+                return
+            if (self.headers.get("Content-Type", "").split(";")[0].strip()
+                    != "application/json" or self.headers.get("Transfer-Encoding")):
+                self._send(415, {"error": "send an application/json body"})
+                return
+            try:
+                length = parse_length(self.headers.get("Content-Length"), "0")
+            except ValueError:
+                self._send(400, {"error": "invalid body length"})
+                return
+            if not 2 <= length <= DEVICE_BODY_LIMIT:
+                self._send(413, {"error": "invalid or oversized request body"})
+                return
+            try:
+                data = json.loads(self.rfile.read(length))
+            except (ValueError, UnicodeError, RecursionError):
+                self._send(400, {"error": "invalid JSON"})
+                return
+            key = self.headers.get("Idempotency-Key", "")
+            if (not isinstance(data, dict) or len(key) != IDEMPOTENCY_CHARS or
+                    any(char not in HEX_DIGITS for char in key)):
+                self._send(400, {"error": "invalid request"})
+                return
+            try:
+                manager.refuse_device_mutation(device_id, kind)
+            except AdminRequestError as exc:
+                self._send(exc.status, {"error": exc.code})
+                return
+            except Exception:
+                log.error("admin device mutation failed")
+                self._send(500, {"error": "device request could not be processed"})
+                return
+            # Not reached while the updater is absent; kept so a future
+            # implementation cannot fall through without answering.
+            self._send(409, {"error": "ota_not_enabled"})
+
         def do_POST(self):
             if urlsplit(self.path).path == "/api/admin/session":
                 if self._authorized(bearer_only=True):
@@ -553,6 +646,12 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
             codex_login = re.fullmatch(r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/codex-login", path)
             codex_logout = re.fullmatch(r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/codex-logout", path)
             token_create = re.fullmatch(INGEST_TOKEN_PATH, path)
+            device_retry = re.fullmatch(DEVICE_RETRY_PATH, path)
+            device_recovery = re.fullmatch(DEVICE_RECOVERY_PATH, path)
+            if device_retry or device_recovery:
+                self._device_mutation((device_retry or device_recovery)[1],
+                                      "retry" if device_retry else "confirm-recovery")
+                return
             if path == SETUP_PATH:
                 # Prepare the two setup downloads and the one-time unlock code.
                 self.create_setup("POST")

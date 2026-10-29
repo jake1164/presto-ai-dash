@@ -84,11 +84,27 @@ foreground.
 | Section | What it shows |
 | --- | --- |
 | Daemon | Version, database schema version, uptime, poll interval, start time, the bind address, the log level |
+| Presto devices | Every device the daemon keeps a durable record for: online/last seen, the revision it reports and the one this daemon serves, whether they match, its update state, what to do about it, and its update history |
+| Daemon release | Whether a newer published daemon exists, from the registry this installation uses, and the exact update command for it. Read from a cache: this page never contacts a registry and never upgrades anything |
 | Clients | Every device that fetches the status endpoint: its name, address, when it last fetched, how often, the app revision it reports, and what it says about itself: last error, failures since boot, free memory, signal and uptime |
 | Accounts | One row per account: when it was last collected, its status, and the last problem in plain words |
 | Readers and collectors | The local activity reader, the usage cache reader, and the remote collectors with their last report and host |
 | Problems | The recent `WARNING` and `ERROR` messages, de-duplicated |
 | Log | The daemon's recent log lines, newest first, with a level filter, a search box and **Show more** |
+
+**Presto devices** and **Clients** answer different questions. A client row is a
+name and an address seen in memory since the daemon started, and it is gone
+after a restart. A device row is keyed by the device ID the setup utility
+generated, it is stored in the database, and it survives a restart so an
+unresolved problem is not forgotten. A device only gets a row once it runs a
+build that sends its device ID; an older app still appears under **Clients**
+with its revision.
+
+The revision is what the device says about itself. It is a content hash of the
+public app files, and a different hash is neither older nor newer: it is only
+different. When it differs from the revision this daemon serves, the row says
+**Update over USB** and points at **Set up a Presto** on the Settings tab; there
+is no over-the-air update yet, and nothing here will start one.
 
 The daemon has one shared token, so authentication cannot tell clients
 apart. Each client therefore declares a name in the `X-Presto-Client`

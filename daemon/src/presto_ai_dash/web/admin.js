@@ -1761,6 +1761,163 @@
     clearTimeout(logTimer); logShown = LOG_STEP;
     logTimer = setTimeout(() => refreshLog().catch((error) => message(error.message, true)), 300);
   });
+  // -- Presto devices and the daemon release ------------------------------
+  // Both are read-only. A device record is the daemon's durable view of one
+  // Presto; the release block is a cached registry result. Neither is a
+  // reason to run anything, and neither can clear a warning on its own.
+  function revisionText(value) {
+    if (!value || !value.revision) return "unknown";
+    return value.scheme + " " + String(value.revision).slice(0, 12);
+  }
+  function deviceStateLabel(device) {
+    const update = device.update || {};
+    return (update.state || "unknown") + (update.reason ? " (" + update.reason + ")" : "");
+  }
+  function deviceAdvice(device) {
+    const reason = (device.update || {}).reason;
+    if (reason === "usb_update_required") {
+      return "The installed app does not match the app this daemon serves. Update it over USB: " +
+        "Settings, Set up a Presto, run presto_setup.py on a computer plugged into the Presto.";
+    }
+    if (reason === "revision_uncomparable") {
+      return "The reported and expected revisions cannot be compared. Check the device over USB " +
+        "and run the setup utility to repair it.";
+    }
+    if (reason === "bundle_unavailable") {
+      return "The daemon cannot read its own Presto app bundle, so it cannot say what the device " +
+        "should run. Reinstall the daemon from a release wheel or image.";
+    }
+    if (reason === "registry_full") {
+      return "The daemon already keeps the maximum of 64 devices, so this one is not recorded.";
+    }
+    if (reason === "state_unavailable") {
+      return "The daemon cannot read its device records. Check the database and the log.";
+    }
+    if (reason) return "Reported by the device: " + reason + ". See the log for the same code.";
+    return "The installed app matches this daemon's. This is the device's own report, not a USB check.";
+  }
+  function factsList(pairs) {
+    const list = el("dl", "facts");
+    for (const [name, value] of pairs) {
+      list.append(el("dt", "", name), el("dd", "", String(value)));
+    }
+    return list;
+  }
+  function renderDeviceAttempts(box, detail) {
+    const attempts = detail.attempts || [];
+    if (!attempts.length) {
+      box.append(el("p", "note", "No update attempt has ever been recorded for this device."));
+      return;
+    }
+    box.append(buildTable(
+      ["Attempt", "Status", "Issued", "Started", "Finished", "Phase", "Error", "Recovery"],
+      attempts.map(attempt => [
+        "#" + attempt.attempt_no, attempt.status, whenText(attempt.issued_at),
+        whenText(attempt.started_at), whenText(attempt.finished_at),
+        attempt.last_phase || "—", attempt.error_code || "—", attempt.recovery || "—"])));
+  }
+  async function loadDeviceDetail(deviceId, box) {
+    try {
+      const detail = await request("/api/admin/devices/" + deviceId);
+      renderDeviceAttempts(box, detail);
+    } catch (error) {
+      box.replaceChildren(el("p", "note", error.message));
+    }
+  }
+  function buildDeviceList(devices) {
+    const wrap = el("div", "device-list");
+    for (const device of devices) {
+      const update = device.update || {};
+      const block = el("details", update.needs_attention ? "device needs-attention" : "device");
+      const summary = el("summary");
+      summary.append(el("strong", "", device.name + " "),
+        el("span", "note", device.connected ? "online" : "offline"),
+        el("span", "note", " · " + revisionText(device.reported) + " installed, " +
+          revisionText(device.expected) + " expected"),
+        el("span", "note", " · " + deviceStateLabel(device)));
+      block.append(summary);
+      block.append(el("p", "note", deviceAdvice(device)));
+      const body = el("div", "");
+      body.append(factsList([
+        ["Device ID", device.device_id],
+        ["Connection", device.connected ? "online" : "last seen " + whenText(device.last_seen_at) +
+          (device.last_seen_is_checkpoint ? " (a checkpoint; no report since this daemon started)" : "")],
+        ["Installed", revisionText(device.reported)],
+        ["Expected", revisionText(device.expected)],
+        ["Bootstrap", device.bootstrap_version === null ? "none (legacy install)" :
+          "v" + device.bootstrap_version],
+        ["Capabilities", (device.capabilities || []).join(", ") || "none"],
+        ["Update state", deviceStateLabel(device)],
+        ["Attempts", (update.attempts_started || 0) + " of " + (update.attempt_limit || 3)],
+        ["Automatic update", update.ota_enabled ? "enabled" : "not enabled in this build"],
+        ["USB observation", device.usb_observation ? "recorded" :
+          "none; this row is the device's own report"],
+        ["Last recovery", update.last_recovery_at
+          ? whenText(update.last_recovery_at) + " (" + (update.last_recovery_kind || "unknown") + ")"
+          : "never"],
+      ]));
+      const attemptsBox = el("div", "");
+      body.append(attemptsBox);
+      block.append(body);
+      // The attempt history is fetched only when someone opens the row.
+      block.addEventListener("toggle", () => {
+        if (block.open && attemptsBox.dataset.loaded !== "1") {
+          attemptsBox.dataset.loaded = "1";
+          loadDeviceDetail(device.device_id, attemptsBox);
+        }
+      });
+      wrap.append(block);
+    }
+    return wrap;
+  }
+  function renderDevices() {
+    const box = element("status-devices");
+    box.replaceChildren();
+    const devices = (statusState && statusState.devices) || [];
+    const attention = (statusState && statusState.device_attention_count) || 0;
+    if (!devices.length) {
+      box.append(el("p", "note", "No Presto has reported a device ID yet. Run the setup utility " +
+        "in Settings, or update an existing device over USB, and it appears here."));
+      return;
+    }
+    box.append(el("p", attention ? "banner" : "note", attention
+      ? attention + (attention === 1 ? " device needs attention" : " devices need attention")
+      : "Every recorded device reports the application this daemon serves."));
+    box.append(buildDeviceList(devices));
+  }
+  function releaseStateText(release) {
+    if (release.state === "disabled") {
+      return "not checked: this build does not query a registry yet";
+    }
+    if (release.state === "stale") return "stale: the last successful check is over 48 hours old";
+    return release.state;
+  }
+  function renderRelease() {
+    const box = element("status-release");
+    box.replaceChildren();
+    const release = statusState && statusState.release;
+    if (!release) {
+      box.append(el("p", "note", "No release information."));
+      return;
+    }
+    box.append(factsList([
+      ["Running", release.running],
+      ["Channel", release.channel],
+      ["State", releaseStateText(release)],
+      ["Available", release.latest || "—"],
+      ["Last checked", release.checked_at ? whenText(release.checked_at) : "never"],
+      ["Last attempt", release.last_attempt_at ? whenText(release.last_attempt_at) : "never"],
+    ]));
+    const instructions = release.instructions || {};
+    if (instructions.note) box.append(el("p", "note", instructions.note));
+    const commands = instructions.update || [];
+    if (commands.length) {
+      const list = el("ul", "commands");
+      for (const command of commands) list.append(el("li", "", command));
+      box.append(list);
+    }
+  }
+
   function renderStatus() {
     const state = statusState;
     if (!state) return;
@@ -1778,6 +1935,8 @@
     for (const [name, value] of facts) {
       daemon.append(el("dt", "", name), el("dd", "", String(value)));
     }
+    renderDevices();
+    renderRelease();
     const clients = state.clients || [];
     const clientBox = element("status-clients");
     clientBox.replaceChildren();

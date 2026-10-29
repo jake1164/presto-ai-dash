@@ -8,6 +8,7 @@ import sqlite3
 import sys
 import threading
 import time
+from datetime import timedelta
 
 from . import __version__, private_files
 from . import demo as demo_data
@@ -18,6 +19,7 @@ from .config import (ConfigError, admin_bind_error, configure_logging,
                      demo_enabled, ingest_enabled, load_config, resolve_shared_token,
                      resolve_admin_token)
 from .device_install import app_snapshot
+from .device_lifecycle import DeviceLifecycle
 from .device_setup import SetupService
 from .management import SourceConfiguration, ManagedCollector
 from .models import now_utc
@@ -79,6 +81,7 @@ class Daemon:
         self.source_configuration = None
         self.maintenance_thread = None
         self.clients = None
+        self.lifecycle = None
         self.problems = None
         self._stop_lock = threading.Lock()
         self._stopped = False
@@ -139,6 +142,12 @@ class Daemon:
                                    for source in build_sources(self.config)]
                 self.clients = ClientRegistry()
                 self.problems = ProblemBuffer()
+            # Device identity and update state are durable, so they work the
+            # same whether or not the admin page is running. Operational OTA
+            # stays off: this stage reports a mismatch and asks for USB.
+            self.lifecycle = (self.source_configuration.lifecycle
+                              if self.source_configuration is not None
+                              else DeviceLifecycle(self.storage))
             self._attach_problems()
             self._check_private_files()
             self.api = ApiServer(self.config["daemon"]["host"], self.config["daemon"]["port"],
@@ -165,7 +174,10 @@ class Daemon:
                                  # The demo follows the alert settings the
                                  # person chose, sound included.
                                  demo_device_alerts=(self.source_configuration.device_alerts
-                                                     if managed else None))
+                                                     if managed else None),
+                                 # Durable device identity, revision comparison
+                                 # and the release notice, per request.
+                                 device_lifecycle=self.lifecycle)
             if self.config["admin"]["enabled"]:
                 token = resolve_admin_token(self.config, self.shared_token)
                 # The setup downloads carry this running build's public app
@@ -201,9 +213,19 @@ class Daemon:
                           counts["snapshots"], counts["alerts"])
             except Exception:
                 log.exception("periodic retention cleanup failed")
+            try:
+                # An admin deduplication record is kept for a day; a live one
+                # is never dropped, so a double click still returns its result.
+                self.storage.prune_device_admin_requests(
+                    now_utc() - timedelta(hours=24))
+            except Exception:
+                log.exception("device request cleanup failed")
 
     def start(self):
         try:
+            # A release check that was in flight when the last process stopped
+            # is not happening now: say so instead of claiming it still is.
+            self.storage.clear_release_checking()
             # Collect once, then expire old history before reporting readiness.
             for collector in self.collectors:
                 collector.collect_once()

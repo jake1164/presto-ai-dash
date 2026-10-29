@@ -60,6 +60,27 @@ a real power cycle and user launch. The installation layout and the 12-character
 `legacy-v1` revision are unchanged; the A/B launcher is still the gated future
 work in Parts 2–4.
 
+**Built since (2026-10-29):** device reporting (Part 3 of the
+[device lifecycle plan](../.ai_docs/presto-ai-dash-device-lifecycle-plan.md)).
+A device now sends its persistent `X-Presto-Device-ID` (the 32 hex characters
+the setup utility writes into its private `config.py`) and one compact
+`X-Presto-Lifecycle` report on each status poll. The daemon validates both
+strictly, compares the reported revision with the identity of **its own**
+bundled app, and keeps a durable record per device in SQLite (schema v10), so an
+unresolved mismatch survives a restart. The Status tab gains a **Presto
+devices** list with a per-device panel — name, online/last seen, installed and
+expected revision, comparison, update state and reason, and the matching USB
+instruction — and a **Daemon release** block that reads a cached result only.
+On the device, the shared bottom-right indicator (Home and every service card)
+shows a yellow warning for a device that needs action, a blue arrow for a newer
+daemon release, and nothing when all is well; tapping it opens a read-only
+ASCII explanation. Operational OTA stays off: `ota_enabled` is false, no
+command is issued, and the retry and recovery routes answer
+`409 ota_not_enabled`. The installation layout, the 12-character `legacy-v1`
+revision and the A/B gating are unchanged. **Not proven:** any of the OTA,
+retry, confirmation or release-notice paths on hardware, because none of them
+exists yet.
+
 **Open:** Phase 8 (OpenTelemetry;
 researched, decision gate pending), several Presto devices, M8 acceptance
 (real expired-login recovery, a second

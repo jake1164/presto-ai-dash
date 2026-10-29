@@ -29,12 +29,22 @@ DEFAULT_CLIENT_NAME = "presto"
 DEFAULT_REVISION = "unknown"
 CLIENT_NAME_OVERRIDE = None
 REVISION_OVERRIDE = None
+# An empty override disables durable device telemetry in the host preview.
+DEVICE_ID_OVERRIDE = None
 
 # The deployment writes the app revision next to the app files, so the device
 # reports the build it actually runs.
 REVISION_FILE = "revision.txt"
 REVISION_FILES = (REVISION_FILE, "/ai_dash_files/revision.txt")
 MAX_LABEL = 32
+
+# The path the lifecycle extension belongs to. The two headers go on the
+# status GET only: a card fetch and an alert write carry neither.
+STATUS_PATH = "/api/v1/status"
+DEVICE_ID_HEADER = "X-Presto-Device-ID"
+LIFECYCLE_HEADER = "X-Presto-Lifecycle"
+DEVICE_ID_CHARS = 32
+HEX = "0123456789abcdef"
 
 # The diagnostics header: what the device says about itself.
 DIAG_HEADER = "X-Presto-Diag"
@@ -179,7 +189,8 @@ def request_headers(headers):
     diagnostics looks exactly as it did before.
     """
     lines = []
-    for name in ("Authorization", "X-Presto-Client", "X-Presto-Revision", DIAG_HEADER):
+    for name in ("Authorization", "X-Presto-Client", "X-Presto-Revision", DIAG_HEADER,
+                 DEVICE_ID_HEADER, LIFECYCLE_HEADER):
         value = headers.get(name)
         if value:
             lines.append("%s: %s" % (name, value))
@@ -290,19 +301,80 @@ def current_revision():
     return read_revision()
 
 
-def build_headers(token, client=None, revision=None, diag=None):
+def _hex_revision(text):
+    """A revision as 12 or 64 lowercase hexadecimal characters, or None."""
+    if not isinstance(text, str):
+        return None
+    text = text.strip().lower()
+    if len(text) not in (12, 64):
+        return None
+    for char in text:
+        if char not in HEX:
+            return None
+    return text
+
+
+def current_revision_hex():
+    """The installed revision for the lifecycle report, or None when unknown.
+
+    The lifecycle header carries only a genuine hexadecimal revision, because
+    the daemon compares it against a hash. The plain ``X-Presto-Revision``
+    header keeps its looser label, so an unreadable revision still shows as
+    "unknown" in the daemon's in-memory client list.
+    """
+    if REVISION_OVERRIDE:
+        return _hex_revision(REVISION_OVERRIDE)
+    configured = device_setting("DEVICE_REVISION", None)
+    if configured:
+        return _hex_revision(configured)
+    for candidate in REVISION_FILES:
+        try:
+            with open(candidate, "r") as handle:
+                text = handle.read(65)
+        except Exception:
+            continue
+        found = _hex_revision(text)
+        if found:
+            return found
+    return None
+
+
+def current_device_id():
+    """The persistent device identifier from the device's own config, or None.
+
+    It is generated once at setup and kept outside the replaceable app files,
+    so a repair keeps the identity the daemon already knows.
+    """
+    value = DEVICE_ID_OVERRIDE
+    if value is None:
+        value = device_setting("DEVICE_ID", None)
+    if not isinstance(value, str) or len(value) != DEVICE_ID_CHARS:
+        return None
+    for char in value:
+        if char not in HEX:
+            return None
+    return value
+
+
+def build_headers(token, client=None, revision=None, diag=None, device_id=None,
+                  lifecycle=None):
     """The request headers, including the shared bearer token.
 
     An empty token is still sent as an empty bearer so the daemon's error is a
     clean 401 rather than a confusing connection failure. Every request also
     names the client and the app revision it runs, and carries the device's
-    own diagnostics when they are known.
+    own diagnostics when they are known. The two lifecycle headers are added
+    by ``StatusClient.headers_for``, on the status GET only.
     """
     headers = {"Authorization": "Bearer {}".format(token or ""),
                "X-Presto-Client": safe_label(client) if client else current_client_name(),
                "X-Presto-Revision": safe_label(revision) if revision else current_revision()}
     if diag:
         headers[DIAG_HEADER] = diag
+    if device_id:
+        headers[DEVICE_ID_HEADER] = device_id
+    if lifecycle:
+        headers[LIFECYCLE_HEADER] = lifecycle
     return headers
 
 
@@ -337,7 +409,8 @@ class StatusClient(object):
     """
 
     def __init__(self, host, port, token, timeout=8,
-                 path="/api/v1/status", transport=None, diag_provider=None):
+                 path="/api/v1/status", transport=None, diag_provider=None,
+                 lifecycle_provider=None):
         self.host = host
         self.port = port
         self.token = token
@@ -345,6 +418,9 @@ class StatusClient(object):
         self.path = path
         self._transport = transport
         self.diag_provider = diag_provider
+        # A callable returning ``(device_id, lifecycle_text)`` or None. It is
+        # asked once per status poll and never breaks one.
+        self.lifecycle_provider = lifecycle_provider
         # Where the last async fetch got to and why it ended; the screen and
         # the serial log report these when the daemon looks unreachable.
         self.stage = "start"
@@ -361,6 +437,37 @@ class StatusClient(object):
     @property
     def headers(self):
         return build_headers(self.token, diag=self.diag_header())
+
+    def lifecycle_headers(self, path):
+        """The two lifecycle headers, for a status GET and nothing else.
+
+        The provider is asked at most once per request, and a provider that
+        raises or returns something unusable costs the poll nothing: the
+        request goes out without them and the daemon treats it as legacy
+        telemetry.
+        """
+        provider = self.lifecycle_provider
+        if provider is None:
+            return {}
+        if (path or "").split("?")[0] != STATUS_PATH:
+            return {}
+        try:
+            pair = provider()
+        except Exception:
+            return {}
+        if not isinstance(pair, tuple) or len(pair) != 2:
+            return {}
+        device_id, text = pair
+        if not device_id or not text:
+            return {}
+        return {DEVICE_ID_HEADER: device_id, LIFECYCLE_HEADER: text}
+
+    def headers_for(self, path):
+        """The headers of one request: the usual ones, plus the lifecycle pair."""
+        headers = self.headers
+        for name, value in self.lifecycle_headers(path).items():
+            headers[name] = value
+        return headers
 
     def diag_header(self):
         """The diagnostics header value for this request, or None.
@@ -482,7 +589,7 @@ class StatusClient(object):
             path = path if path is not None else self.path
             if not path.startswith("/"):
                 path = "/" + path
-            headers = self.headers
+            headers = self.headers_for(path)
             if any(char in str(value) for value in (self.host, self.token, path)
                    for char in ("\r", "\n")):
                 raise StatusError("invalid connection settings")

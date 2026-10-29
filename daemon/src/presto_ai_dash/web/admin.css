@@ -213,3 +213,14 @@ main > .panel { min-width: 0; }
 .copy-row code { font-size: 1.02rem; letter-spacing: .06em; background: #0c1526;
   border: 1px solid #2a3b53; border-radius: 8px; padding: 8px 12px; word-break: break-all; }
 .copy-row button { min-height: 40px; }
+
+/* Presto devices: one expandable row each, attention called out. */
+.device-list { display: flex; flex-direction: column; gap: 10px; }
+.device { background: #0c1526; border: 1px solid #2a3b53; border-radius: 10px; padding: 12px 14px; }
+.device.needs-attention { border-color: #ac8a62; }
+.device summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.device summary .note { margin: 0; }
+.device[open] summary { margin-bottom: 10px; }
+.device .facts { margin: 0 0 10px; }
+.commands { margin: 6px 0 0; padding-left: 20px; font-family: ui-monospace, monospace; font-size: .85rem; }
+.commands li { margin: 2px 0; }

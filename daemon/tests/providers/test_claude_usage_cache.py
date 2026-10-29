@@ -440,13 +440,14 @@ class ValidationTests(CacheBase):
 
     def test_a_bad_window_field_names_its_path_and_type_but_never_its_value(self):
         document = cache_document()
-        document["cachedUsageUtilization"]["utilization"]["five_hour"]["utilization"] = "12"
+        bad_value = "not-a-number-sensitive-test-value"
+        document["cachedUsageUtilization"]["utilization"]["five_hour"]["utilization"] = bad_value
         self.write(document)
         result = self.refresh()
         self.assertIn("cachedUsageUtilization.utilization.five_hour.utilization",
                       result["message"])
         self.assertIn("string", result["message"])
-        self.assertNotIn("12", result["message"])
+        self.assertNotIn(bad_value, result["message"])
 
     def test_both_windows_bad_makes_the_whole_read_unavailable(self):
         document = cache_document()

@@ -68,6 +68,42 @@ Content-Type: application/json
 The remote reports route. It is off by default and answers `404` while it is
 off. See [Remote reports](../concepts/remote-reports.md).
 
+### The two optional objects in the answer
+
+A request that carries a valid device identifier and lifecycle report gets two
+extra top-level objects. Both are optional: an older daemon, a legacy client or
+a payload with no room for them simply has neither, and the device keeps its
+normal quota rendering.
+
+`device_lifecycle` describes **only the requesting device**: its identity, the
+revision it reported, the revision this daemon's own bundle expects, how the
+two compare (`equal`, `different`, `incomparable` or `unknown`), and the derived
+update state (`current`, `pending`, `updating`, `failed`, `manual_action`,
+`unconfirmed` or `unknown`). It never carries another device's state, name,
+address or retry command.
+
+Revisions have no order: two hashes are equal or different, and a different one
+is not "older". The **legacy** scheme is the aggregate of the current fixed-path
+install and the **slot** scheme is a future per-slot hash; the two are never
+compared with each other.
+
+Operational updates are disabled in this build, so `ota_enabled` is false,
+`command` and `confirm_attempt_id` are null, and a known mismatch is
+`manual_action` with `usb_update_required` rather than a pending update that can
+never start. `needs_attention` is true for `failed`, `manual_action` and
+`unconfirmed`, and stays true for an earlier unresolved warning until a
+supported recovery confirms the app.
+
+`daemon_release` is the cached result of the separate question "has a newer
+**daemon** been published", from the registry this installation uses. It is
+`disabled` until a release checker exists; it is never reported as `current` on
+the strength of not having looked. The device never contacts a registry itself.
+
+Both objects are bounded (2 KiB and 1 KiB) and the whole answer stays inside the
+device's 64 KiB limit. If an extension would push the answer past it, the
+extensions are omitted and the quota data is kept: a device with no room is told
+nothing new.
+
 ### The status codes
 
 | Code | Meaning |
@@ -95,19 +131,36 @@ keep the daemon from answering the Presto:
 
 ### The headers a client may send
 
-A request to the status port may carry three extra headers. They say who is
+A request to the status port may carry five extra headers. They say who is
 asking and how the device is doing. They change nothing about the answer: the
-status payload is the same with or without them.
+status payload is the same with or without them, apart from the optional
+`device_lifecycle` and `daemon_release` objects described below.
 
 | Header | What it carries |
 | --- | --- |
 | `X-Presto-Client` | The client's name, at most 32 printable ASCII characters |
 | `X-Presto-Revision` | The app revision the client runs |
 | `X-Presto-Diag` | The client's own diagnostics, at most 120 characters |
+| `X-Presto-Device-ID` | The persistent device identifier: exactly 32 lowercase hexadecimal characters. Status requests only |
+| `X-Presto-Lifecycle` | One compact JSON object, at most 1,024 bytes, schema `v: 1`. Status requests only |
 
 A header value that is not printable ASCII, or that is too long, is dropped
-rather than partly trusted. Nothing about a client is stored: the daemon keeps
-all three in memory only, and forgets them when it restarts.
+rather than partly trusted. The first three are kept in memory only, and the
+daemon forgets them when it restarts.
+
+The last two are different: a device that sends a valid identifier and a valid
+lifecycle report gets a **durable record**. That record holds the device's name,
+its installed scheme and revision, its capabilities, its last report counters
+and its update state, so an unresolved problem survives a daemon or container
+restart. It holds no diagnostics, address, provider data or credential. A
+repeated header, a wrong type, an unknown key or version, or an invalid
+cross-field combination refuses the lifecycle report whole: the poll still
+answers with the normal quota data and the record is left as it was.
+
+A client without a device identifier is legacy telemetry: a bare 12- or
+64-character revision is compared with the expected **legacy** aggregate only,
+and is never stored. A repeated poll whose `(boot, seq)` is not higher than the
+stored one is `stale` and changes nothing.
 
 `X-Presto-Diag` is a list of `key=value` pairs, separated by `;`:
 
@@ -189,6 +242,11 @@ Any other method than the ones below is answered `501`.
 | GET | `/api/admin/sources/{id}/alerts` | One service's alert settings and the resolved values |
 | PUT | `/api/admin/sources/{id}/alerts` | Save one service's alert settings |
 | GET | `/api/admin/status` | The Status tab. Read-only |
+| GET | `/api/admin/devices` | Every Presto the daemon keeps a durable record for, with the count that needs attention. Read-only |
+| GET | `/api/admin/devices/{id}` | One device: identity, reported and expected revision, update state, and its newest attempts. Read-only |
+| POST | `/api/admin/devices/{id}/retry` | Authorize a fresh bounded update budget. Answers `409 ota_not_enabled` while the updater is not enabled |
+| POST | `/api/admin/devices/{id}/confirm-recovery` | Ask for a fresh confirmed check-in after a manual repair. Answers `409 ota_not_enabled` while the updater is not enabled |
+| GET | `/api/admin/releases` | The cached daemon-release result and this installation's own update commands. It contacts no registry. Read-only |
 | GET | `/api/admin/logs` | The daemon's recent log lines, newest first, for the Status tab: `limit` (up to 2,000), `level` and `q` filters. Read-only |
 | GET | `/api/admin/config` | The effective configuration and where each value came from. Read-only |
 | POST | `/api/admin/session` | Exchange the admin token for a seven-day browser session |

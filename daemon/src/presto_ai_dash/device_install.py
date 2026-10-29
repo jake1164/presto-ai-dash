@@ -35,6 +35,12 @@ DEFAULT_RECEIPT = Path.home() / ".presto-ai-dash" / "device-sync.json"
 REVISION_TARGET = "/ai_dash_files/revision.txt"
 REVISION_CHARS = 12
 APP_FOLDER = "presto_app"
+# The scheme of the revision this install layout produces: the aggregate of the
+# current fixed-path files, launcher included. Stated explicitly so a report is
+# only ever compared with an expectation of the same layout.
+REVISION_SCHEME = "legacy-v1"
+# The current layout has no boot manager, so it requires no bootstrap version.
+MIN_BOOTSTRAP = None
 
 MARKER = "PRESTO_SYNC:"
 LAUNCH = ("import sys, os; sys.path.insert(0, '/ai_dash_files'); "
@@ -290,7 +296,8 @@ def bundled_snapshot(folder=None):
     code_revision = hashlib.sha256(encoded).hexdigest()
     if files[REVISION_TARGET] != (code_revision[:REVISION_CHARS] + "\n").encode("ascii"):
         raise NoBundledApp("The bundled Presto app files do not match their revision; reinstall the wheel.")
-    return {"revision": code_revision, "hashes": hashes, "files": files}
+    return {"revision": code_revision, "scheme": REVISION_SCHEME,
+            "min_bootstrap": MIN_BOOTSTRAP, "hashes": hashes, "files": files}
 
 
 def checkout_root(start=None):

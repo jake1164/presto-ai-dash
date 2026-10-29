@@ -17,6 +17,14 @@ RECEIPT = ROOT / ".preview" / "device-sync.json"
 REVISION_TARGET = "/ai_dash_files/revision.txt"
 REVISION_CHARS = 12
 
+# The scheme this inventory describes: the aggregate of the current fixed-path
+# install, including the launcher. It is stated explicitly so a report can
+# never be compared with a hash of a different layout, and so a future A/B
+# slot layout (``slot-v1``) can be added without reinterpreting an old value.
+REVISION_SCHEME = "legacy-v1"
+# This layout has no boot manager, so nothing may require a bootstrap version.
+MIN_BOOTSTRAP = None
+
 
 _MODULE_NAME = re.compile(r"^[A-Za-z0-9_]+\.py$")
 
@@ -68,7 +76,8 @@ def snapshot(root=ROOT):
     # The device reports the revision it runs, so it is written with the app.
     files[REVISION_TARGET] = (code_revision[:REVISION_CHARS] + "\n").encode("ascii")
     hashes[REVISION_TARGET] = hashlib.sha256(files[REVISION_TARGET]).hexdigest()
-    return {"revision": code_revision, "hashes": hashes, "files": files}
+    return {"revision": code_revision, "scheme": REVISION_SCHEME,
+            "min_bootstrap": MIN_BOOTSTRAP, "hashes": hashes, "files": files}
 
 
 def sync_status(code_revision, receipt=RECEIPT):

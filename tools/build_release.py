@@ -28,6 +28,32 @@ STAGE = DAEMON / "src" / "presto_ai_dash" / "presto_app"
 PRIVATE = re.compile(r"(^|/)(dash\.toml|dash\.db[^/]*|[^/]*\.key|\.env[^/]*)$", re.IGNORECASE)
 # Inside the device app, a config or secrets file (or a copy) is private too.
 PRIVATE_APP = re.compile(r"(^|/)[^/]*(secret|config)[^/]*$", re.IGNORECASE)
+# The revision scheme the device app declares for itself.
+DEVICE_SCHEME = re.compile(r'^SCHEME\s*=\s*"([^"]+)"', re.MULTILINE)
+# The schemes the protocol defines; a bundle must name one of them.
+KNOWN_SCHEMES = ("legacy-v1", "slot-v1")
+
+
+def check_bundle_identity(bundle):
+    """The staged app and the daemon bundle must name the same revision scheme.
+
+    A device reporting ``slot-v1`` against a ``legacy-v1`` daemon, or the
+    reverse, can never be compared: every device would read as ``unknown``.
+    The two declarations are checked at release time rather than discovered as
+    a fleet-wide problem afterwards.
+    """
+    scheme = bundle.get("scheme")
+    if scheme not in KNOWN_SCHEMES:
+        raise ValueError("the app bundle does not declare a known revision scheme")
+    if bundle.get("min_bootstrap") is not None:
+        raise ValueError("the legacy install layout must not require a bootstrap version")
+    source = bundle["files"].get("/ai_dash_files/lifecycle.py")
+    if source is None:
+        raise ValueError("missing from the app: /ai_dash_files/lifecycle.py")
+    match = DEVICE_SCHEME.search(source.decode("utf-8"))
+    if not match or match.group(1) != scheme:
+        raise ValueError("the device app declares a different revision scheme")
+    return scheme
 
 
 def stage(root=ROOT, destination=STAGE):
@@ -119,7 +145,8 @@ def main(argv=None):
         if args.tag:
             print("Tag %s matches version %s" % (args.tag, check_tag(args.tag)))
         bundle = stage()
-        print("Staged the Presto app, revision " + bundle["revision"][:12])
+        print("Staged the Presto app, revision " + bundle["revision"][:12] +
+              " (" + check_bundle_identity(bundle) + ")")
         if args.stage_only:
             return 0
         dist = ROOT / "dist"

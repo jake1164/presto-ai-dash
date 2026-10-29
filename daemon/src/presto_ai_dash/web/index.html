@@ -76,6 +76,17 @@
       <p class="note">Everything here is read-only. It refreshes every 10 seconds while this tab is open and the browser tab is in the foreground.</p>
       <h3>Daemon</h3>
       <dl id="status-daemon" class="facts"></dl>
+      <h3>Presto devices</h3>
+      <p class="note">Every Presto the daemon keeps a durable record for, by the device ID its
+        setup created. The installed revision is what the device says about itself; it is not a
+        USB hash check, and a mismatch here asks for a USB update. A device that only sends a
+        client name and a revision appears under Clients below instead.</p>
+      <div id="status-devices"></div>
+      <h3>Daemon release</h3>
+      <p class="note">Whether a newer published daemon exists, from the registry this installation
+        uses. It is read from a cached result: opening this page contacts no registry, and nothing
+        here upgrades anything.</p>
+      <div id="status-release"></div>
       <h3>Clients</h3>
       <p class="note">Every device that fetches the status endpoint. Clients behind NAT, a reverse proxy or Docker Desktop can share one address, so two clients with the same name and address cannot be told apart. Nothing about a client is stored.</p>
       <div id="status-clients"></div>

@@ -23,10 +23,12 @@ and brings ``requests`` and ``jsonschema`` with it. The checks here need a
 bounded, validated client, so this module uses the standard library only.
 """
 
+import http.client
 import json
 import re
 import socket
 import ssl
+import threading
 import time
 from email.utils import parsedate_to_datetime
 import urllib.error
@@ -92,7 +94,86 @@ class _NoRedirects(urllib.request.HTTPRedirectHandler):
         return None
 
 
-_OPENER = urllib.request.build_opener(_NoRedirects())
+class _Deadline(object):
+    """A hard stop for one request: at the deadline, its sockets are shut down.
+
+    A socket timeout applies to each read, so a server that sends its status
+    line, headers or TLS handshake a byte at a time could hold a request far
+    past its budget. Shutting the socket down from a timer unblocks the read
+    whatever phase it is in. Only DNS resolution and the TCP connect itself
+    run before a socket exists; those are bounded by the socket timeout.
+    """
+
+    def __init__(self, seconds):
+        self.fired = False
+        self._connections = []
+        self._lock = threading.Lock()
+        self._timer = threading.Timer(max(0.0, seconds), self._expire)
+        self._timer.daemon = True
+
+    def track(self, connection):
+        with self._lock:
+            self._connections.append(connection)
+            fired = self.fired
+        if fired:
+            raise socket.timeout("request deadline passed")
+
+    def _expire(self):
+        with self._lock:
+            self.fired = True
+            connections = list(self._connections)
+        for connection in connections:
+            sock = getattr(connection, "sock", None)
+            if sock is None:
+                continue
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+
+    def __enter__(self):
+        self._timer.start()
+        return self
+
+    def __exit__(self, *exc):
+        self._timer.cancel()
+        return False
+
+
+def _tracked(base, deadline):
+    """A connection class that registers itself with ``deadline`` on connect."""
+
+    class Connection(base):
+        def connect(self):
+            deadline.track(self)
+            super().connect()
+
+    return Connection
+
+
+class _HttpHandler(urllib.request.HTTPHandler):
+    def __init__(self, deadline):
+        super().__init__()
+        self._deadline = deadline
+
+    def http_open(self, request):
+        return self.do_open(_tracked(http.client.HTTPConnection, self._deadline), request)
+
+
+class _HttpsHandler(urllib.request.HTTPSHandler):
+    def __init__(self, deadline):
+        super().__init__()
+        self._deadline = deadline
+
+    def https_open(self, request):
+        return self.do_open(_tracked(http.client.HTTPSConnection, self._deadline), request,
+                            context=self._context)
+
+
+def _opener(deadline):
+    # urllib's proxy handling (HTTPS_PROXY, NO_PROXY) still applies.
+    return urllib.request.build_opener(_NoRedirects(), _HttpHandler(deadline),
+                                       _HttpsHandler(deadline))
 
 
 def retry_after_seconds(value, now=None):
@@ -149,28 +230,38 @@ def fetch(url, headers, timeout, max_bytes):
     for key, value in headers.items():
         request.add_header(key, value)
     started = time.monotonic()
-    try:
-        # ``timeout`` bounds the whole request, body included: a server that
-        # trickles bytes just inside the socket timeout cannot hold the check.
-        with _OPENER.open(request, timeout=min(timeout, READ_STALL_S)) as response:
-            raw = _read_bounded(response, max_bytes, started, timeout)
-            status = getattr(response, "status", None) or response.getcode()
-            received = dict(response.headers.items())
-    except urllib.error.HTTPError as exc:
+    # ``timeout`` bounds the whole request: the TLS handshake, the status line
+    # and headers (by the deadline timer) and the body (by the chunked read).
+    with _Deadline(timeout) as deadline:
         try:
-            raw = _read_bounded(exc, max_bytes, started, timeout)
-            received = dict(exc.headers.items()) if exc.headers else {}
-        finally:
-            exc.close()
-        status = exc.code
-    except (socket.timeout, TimeoutError):
-        raise RegistryError("timeout")
-    except urllib.error.URLError as exc:
-        if isinstance(exc.reason, (socket.timeout, TimeoutError)):
+            with _opener(deadline).open(request,
+                                        timeout=min(timeout, READ_STALL_S)) as response:
+                raw = _read_bounded(response, max_bytes, started, timeout)
+                status = getattr(response, "status", None) or response.getcode()
+                received = dict(response.headers.items())
+        except urllib.error.HTTPError as exc:
+            try:
+                raw = _read_bounded(exc, max_bytes, started, timeout)
+                received = dict(exc.headers.items()) if exc.headers else {}
+            except (OSError, http.client.HTTPException):
+                raise RegistryError("timeout" if deadline.fired else "network_error")
+            finally:
+                exc.close()
+            status = exc.code
+        except RegistryError:
+            raise
+        except (socket.timeout, TimeoutError):
             raise RegistryError("timeout")
-        raise RegistryError("network_error")
-    except (OSError, ssl.SSLError, ValueError):
-        raise RegistryError("network_error")
+        except urllib.error.URLError as exc:
+            if deadline.fired or isinstance(exc.reason, (socket.timeout, TimeoutError)):
+                raise RegistryError("timeout")
+            raise RegistryError("network_error")
+        except (OSError, ssl.SSLError, ValueError, http.client.HTTPException):
+            # A socket shut down by the deadline surfaces as a reset, an
+            # incomplete read or a malformed status line: it was the clock.
+            raise RegistryError("timeout" if deadline.fired else "network_error")
+    if deadline.fired or time.monotonic() - started > timeout:
+        raise RegistryError("timeout")
     if len(raw) > max_bytes:
         raise RegistryError("invalid_metadata")
     return Response(status, received, raw)

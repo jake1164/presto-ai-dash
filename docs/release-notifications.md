@@ -80,8 +80,10 @@ Docker images are unambiguous: they embed the exact tag.
 
 `release_registry.py` uses the standard library: https only, fixed host list,
 no redirect to an unlisted host (PyPI: at most two same-host redirects with no
-credentials), a per-request time budget that covers the whole body (read in chunks, so a trickling
-server is cut off) inside a 30 s overall deadline, 2 MiB/256 KiB/16 KiB
+credentials), a hard per-request time budget inside a 30 s overall deadline: a timer shuts the
+connection's socket down at the deadline, which bounds a slow TLS handshake, status line
+or headers, and the body is read in chunks against the same clock (DNS resolution and
+the TCP connect run before a socket exists and are bounded by the socket timeout), 2 MiB/256 KiB/16 KiB
 body limits, at most 20 pages and 5,000 tags, a validated challenge (Bearer, realm
 exactly `https://ghcr.io/token`, service `ghcr.io`, scope exactly the pull scope; the
 token URL is built locally, not copied), a real RFC 8288 `Link` parser (`rel` may follow other parameters; an unreadable header is
@@ -192,3 +194,8 @@ transport returned whole responses instantly. All five were corrected with regre
 tests: the request budget now covers body reads (trickle tests went from 24 s to 0.3 s);
 `Link` is parsed properly; a registry's delay survives restarts and blocks manual checks;
 HTTP-date `Retry-After` is read; an ambiguous wheel gets explicit guidance.
+
+A second review found the request budget still did not cover a server that streams its
+status line or headers slowly (a 150 ms budget blocked for over a second). A deadline
+timer now shuts the socket down; the same server held the old code for 14.4 s and is
+now stopped at 0.2 s.

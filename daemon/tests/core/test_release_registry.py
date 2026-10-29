@@ -469,6 +469,23 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         if mode == "slow":
             threading.Event().wait(2)
             return
+        if mode in ("slowstatus", "slowheaders"):
+            # The status line or the headers a byte at a time, each byte well
+            # inside any socket timeout.
+            head = b"HTTP/1.1 200 OK\r\n" if mode == "slowheaders" else b""
+            slow = (b"HTTP/1.1 200 OK\r\n" if mode == "slowstatus" else b"") + \
+                b"X-Pad: " + b"a" * 200 + b"\r\nContent-Length: 2\r\n\r\n{}"
+            try:
+                self.wfile.write(head)
+                self.wfile.flush()
+                for byte in slow:
+                    self.wfile.write(bytes((byte,)))
+                    self.wfile.flush()
+                    threading.Event().wait(0.05)
+            except OSError:
+                pass
+            self.close_connection = True
+            return
         if mode == "trickle":
             self.send_response(200)
             self.send_header("Content-Length", "400")
@@ -536,6 +553,31 @@ class RealFetchTests(unittest.TestCase):
             registry.fetch(self.base + "/trickle", {}, 0.3, 1000)
         self.assertEqual(caught.exception.code, "timeout")
         self.assertLess(time.monotonic() - started, 1.5)
+
+    def test_slowly_streamed_headers_are_cut_off_by_the_deadline(self):
+        # The reviewer's case: a 150 ms budget must not stay blocked for over a
+        # second while the server dribbles out its headers.
+        for mode in ("slowstatus", "slowheaders"):
+            with self.subTest(mode=mode):
+                started = time.monotonic()
+                with self.assertRaises(RegistryError) as caught:
+                    registry.fetch(self.base + "/" + mode, {}, 0.15, 1000)
+                self.assertEqual(caught.exception.code, "timeout")
+                self.assertLess(time.monotonic() - started, 0.6)
+
+    def test_the_deadline_timer_does_not_outlive_a_normal_request(self):
+        before = threading.active_count()
+        for _ in range(5):
+            self.assertEqual(registry.fetch(self.base + "/ok", {}, 3, 1000).status, 200)
+        time.sleep(0.05)
+        self.assertLessEqual(threading.active_count(), before + 1)
+
+    def test_a_deadline_that_has_already_passed_never_connects(self):
+        deadline = registry._Deadline(0)
+        with deadline:
+            time.sleep(0.05)
+            with self.assertRaises(socket.timeout):
+                deadline.track(object())
 
     def test_the_overall_deadline_bounds_a_trickling_listing(self):
         adapter = PypiAdapter("presto-ai-dash")

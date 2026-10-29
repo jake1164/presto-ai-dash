@@ -79,9 +79,10 @@ readable in the database file, which is your own file on your own machine.
 
 ## What leaves your machine
 
-**Nothing is sent to the project, its author or any third party.** There is
-no telemetry, no analytics, no crash reporting, no counter and no license
-check. The daemon never contacts a server that is not one of the services you
+**The app sends nothing to the project, its author or any third party.** There
+is no telemetry, no analytics, no crash reporting, no counter and no license
+check. (The documentation website is a separate matter; see
+[The documentation site](#the-documentation-site).) The daemon never contacts a server that is not one of the services you
 configured. It does not follow a redirect to another host, and a saved key is
 never sent to a new address: changing a source's URL asks for the key again.
 
@@ -89,13 +90,36 @@ The only traffic is the traffic you set up: requests from the daemon to the
 providers you added, which carry the key you gave for that provider (OpenCode
 Go, Ollama Cloud and LiteLLM are the ones that use a key), and requests from
 the Presto, the admin page and any remote collector to your own daemon. The
-documentation site you are reading asks no other host for anything: no web
-fonts, no scripts, no analytics, and the repository link in the header is a
-plain link that fetches nothing. The one exception is a browser too old to have
-`ResizeObserver` (before about 2020): the theme then fetches a small polyfill
-from `unpkg.com`. The site is static files on GitHub Pages, so GitHub, which
-hosts them, sees the visits as any web host does. The build checks all of this
-on the finished site each time it runs.
+documentation site you are reading is covered below.
+
+## The documentation site
+
+The site is static files on GitHub Pages, so GitHub, which hosts them, sees the
+visits as any web host does. On top of that, **the site uses Google Analytics 4**
+(Google's `googletagmanager.com` script) to count visits.
+
+- **What it collects:** the standard page-view and visit data Google Analytics
+  gathers: which page was read, roughly when, the browser and device type, an
+  approximate location, and where the visitor came from. It sets cookies in
+  your browser to tell visits apart.
+- **Why:** only to see which help pages are read and which are ignored, so
+  low-value pages can be trimmed or rewritten. There is no advertising and the
+  data is not sold.
+- **What it does not do:** Google Signals and ads personalization are turned
+  off, so the data is not joined to advertising profiles.
+- **Opting out:** a content blocker, or Google's
+  [browser add-on](https://tools.google.com/dlpage/gaoptout), stops it. The
+  application itself never loads this script, and nothing on this site is
+  needed to run the daemon or the Presto.
+- **Google's policy:** [policies.google.com/privacy](https://policies.google.com/privacy).
+
+Nothing else is requested from another host: no web fonts, no other scripts,
+and the repository link in the header is a plain link that fetches nothing.
+The one exception is a browser too old to have `ResizeObserver` (before about
+2020): the theme then fetches a small polyfill from `unpkg.com`. The build
+checks all of this on the finished site each time it runs, and fails if any
+other host appears or if a page loads Google Analytics without the footer notice
+that links this page.
 
 ## The one write the Presto can make
 

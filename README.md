@@ -67,7 +67,7 @@ Presto AI Dash is designed to grow. Request a new provider, subscription, or loc
 
 For Claude and Codex with a Docker daemon, run a [remote collector](https://jake1164.github.io/presto-ai-dash/guides/remote-collectors/) on the computer where you use them.
 
-For configuration, troubleshooting, security, and detailed limitations, see the [documentation](https://jake1164.github.io/presto-ai-dash/) and [privacy notes](https://jake1164.github.io/presto-ai-dash/privacy/).
+For configuration, troubleshooting, security, and detailed limitations, see the [documentation](https://jake1164.github.io/presto-ai-dash/) and [privacy notes](https://jake1164.github.io/presto-ai-dash/privacy/). The app itself sends nothing anywhere; only the documentation website counts page views, with Google Analytics, as the privacy notes explain.
 
 ## Support development
 

@@ -227,9 +227,10 @@ reverse proxy with TLS or use a private network such as Tailscale.
 
 The site you are reading is published on GitHub Pages at
 <https://jake1164.github.io/presto-ai-dash/>. It is static files built from
-Markdown. In a current browser it asks no other host for anything, sends no
-analytics, and knows nothing about your installation. [Privacy](../privacy/index.md)
-has the one old-browser exception.
+Markdown. It uses Google Analytics to count page views, asks no other host for
+anything in a current browser, and knows nothing about your installation.
+[Privacy](../privacy/index.md#the-documentation-site) has the details and the
+one old-browser exception.
 
 ## See also
 

@@ -4,9 +4,11 @@
 # docs/ (the plan, the readiness notes, the milestones) stays in the
 # repository and is never published.
 #
-# Privacy: this site loads nothing from a third party in a current browser.
-# There is no analytics, no external script and no CDN asset. Three things in
-# the Material theme would break that, and each is switched off:
+# Privacy: this site loads one third-party script in a current browser, Google
+# Analytics 4 (extra.analytics below), to see which help pages are read. It is
+# disclosed on the privacy page, linked from the footer. Nothing else is
+# loaded: no external font, no CDN asset. Three things in the Material theme
+# would add to it, and each is switched off:
 #   - Google Fonts, with `font: false`, so the page uses the reader's own fonts;
 #   - Mermaid, by not enabling it: Material loads the library from a CDN;
 #   - the repository widget, which asks api.github.com for stars and releases
@@ -15,7 +17,7 @@
 # One thing remains and cannot be switched off: a browser too old to have
 # ResizeObserver (before about 2020) fetches a polyfill from unpkg.com. The
 # privacy page says so. tools/check_docs_site.py checks the built site for all
-# of this in CI.
+# of this in CI, and lets only Google Analytics' own hosts through.
 
 site_name: Presto AI Dash
 site_description: >-
@@ -75,6 +77,11 @@ markdown_extensions:
 
 plugins:
   - search
+
+extra:
+  analytics:
+    provider: google
+    property: G-82FD55P3RH
 
 extra_css:
   - demo/demo.css

@@ -91,9 +91,9 @@ anything.
 
 ## What it deliberately does not do
 
-- **No analytics.** There is no telemetry, no counter and no crash reporting.
-  The documentation site you are reading asks no other host for anything
-  either, in any current browser; see [Privacy](../privacy/index.md).
+- **No analytics in the app.** There is no telemetry, no counter and no crash
+  reporting. Only the documentation website you are reading counts page views,
+  with Google Analytics; see [Privacy](../privacy/index.md#the-documentation-site).
 - **No cloud service.** There is no account to create and no vendor to sign
   up with.
 - **No request history for services that do not keep one.** Ollama exposes

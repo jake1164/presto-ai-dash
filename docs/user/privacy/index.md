@@ -105,8 +105,8 @@ visits as any web host does. On top of that, **the site uses Google Analytics 4*
 - **Why:** only to see which help pages are read and which are ignored, so
   low-value pages can be trimmed or rewritten. There is no advertising and the
   data is not sold.
-- **What it does not do:** Google Signals and ads personalization are turned
-  off, so the data is not joined to advertising profiles.
+- **What it does not do:** Google Signals is turned off, so the data is not
+  joined to the Google accounts of signed-in visitors.
 - **Opting out:** a content blocker, or Google's
   [browser add-on](https://tools.google.com/dlpage/gaoptout), stops it. The
   application itself never loads this script, and nothing on this site is

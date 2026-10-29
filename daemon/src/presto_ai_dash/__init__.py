@@ -7,6 +7,6 @@ Real Ollama and LiteLLM sources are future milestones.
 See ``docs/architecture.md`` for the shape of the system.
 """
 
-__version__ = "0.50.0"
+__version__ = "0.50.0rc4"
 
 APP_NAME = "presto-ai-dash"

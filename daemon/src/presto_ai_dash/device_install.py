@@ -215,6 +215,9 @@ def _operate(action, port, bundle, remote, receipt):
                 preflight = HELPERS + (
                     "\nprint('PRESTO_SYNC:' + json.dumps({'config': "
                     "exists('/ai_dash_files/config.py')}))\n")
+                # The preflight's soft reset stops AI Dash, so relaunch it
+                # afterwards whatever the preflight finds.
+                attempted = True
                 state = parse_state(remote(port, ["soft-reset", "exec", preflight]))
                 if not state.get("config"):
                     raise RuntimeError(CONFIG_MISSING)
@@ -222,7 +225,6 @@ def _operate(action, port, bundle, remote, receipt):
                     local = folder / (str(index) + ".py")
                     local.write_bytes(data)
                     arguments += ["fs", "cp", str(local), ":" + target + ".presto-new", "+"]
-                attempted = True
             arguments += ["run", str(script)]
             attempted = True
             actual = parse_hashes(remote(port, arguments), bundle["hashes"])

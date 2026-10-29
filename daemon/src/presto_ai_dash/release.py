@@ -1,11 +1,11 @@
 """The identity of the release artifact that is actually running.
 
-The package version in ``pyproject.toml`` cannot tell two builds of the same
-version apart: the release workflow builds ``v0.50.0-rc3`` from a tree whose
-package version is still ``0.50.0``. A container image therefore records the
-tag it was built from in ``DASH_RELEASE_VERSION``, and that is the identity the
-admin page shows and the setup handoff carries. A wheel installed from PyPI has
-no such override, so it reports its package version.
+A container image records the tag it was built from in
+``DASH_RELEASE_VERSION`` (``0.50.0-rc4``), and that is the identity the admin
+page shows and the setup handoff carries. A wheel has no such override, so it
+reports its package version, which names the same release in PEP 440 form
+(``0.50.0rc4``): the release workflow refuses a tag that does not match it.
+Releases up to ``v0.50.0-rc3`` were built with the package version ``0.50.0``.
 
 An unusable override is ignored rather than trusted: it is only shown, never
 used to decide behaviour, but a value with spaces or control characters has no

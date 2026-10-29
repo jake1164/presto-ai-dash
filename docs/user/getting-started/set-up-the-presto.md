@@ -253,7 +253,9 @@ presto-ai-dash check-presto --port COM3          # compares only, writes nothing
 Run these on the computer the Presto is plugged into by USB. If the daemon runs
 in Docker or on a server, that is usually a different computer: the container
 never touches USB. Install the same version as the image, for example
-`pipx install "presto-ai-dash[device]==0.50.0"` for the `0.50.0` image.
+`pipx install "presto-ai-dash[device]==0.50.0"` for the `0.50.0` image. A
+release candidate image such as `0.50.0-rc4` matches the package version
+`0.50.0rc4`.
 
 On macOS or Linux the port looks like `/dev/ttyACM0`. After an upgrade of the
 daemon (`pipx upgrade presto-ai-dash`), run `install-presto` again. It does the same verified, rolled-back copy

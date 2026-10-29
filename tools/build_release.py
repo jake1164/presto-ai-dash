@@ -53,16 +53,28 @@ def declared_versions():
     return first.group(1), second.group(1)
 
 
-def check_tag(tag):
-    """The tag (``v0.50.0`` or ``v0.50.0-rc1``) must name the packaged version."""
-    match = re.fullmatch(r"v(\d+\.\d+\.\d+)(-[0-9A-Za-z.]+)?", tag)
+def tag_version(tag):
+    """The PEP 440 package version a tag names.
+
+    ``v0.50.0`` is ``0.50.0`` and ``v0.50.0-rc4`` is ``0.50.0rc4``. Each
+    pre-release therefore builds its own version: PyPI and TestPyPI refuse a
+    version twice, and pip can only order and upgrade distinct versions.
+    """
+    match = re.fullmatch(r"v(\d+\.\d+\.\d+)(?:-(a|b|rc)(\d+))?", tag)
     if not match:
-        raise ValueError("tag %r is not vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-suffix" % tag)
+        raise ValueError("tag %r is not vMAJOR.MINOR.PATCH or vMAJOR.MINOR.PATCH-rcN" % tag)
+    base, kind, number = match.groups()
+    return base if kind is None else "%s%s%d" % (base, kind, int(number))
+
+
+def check_tag(tag):
+    """The tag (``v0.50.0`` or ``v0.50.0-rc4``) must name the packaged version."""
+    wanted = tag_version(tag)
     project, package = declared_versions()
     if project != package:
         raise ValueError("pyproject version %s and __version__ %s differ" % (project, package))
-    if match.group(1) != project:
-        raise ValueError("tag %s does not match the package version %s" % (tag, project))
+    if wanted != project:
+        raise ValueError("tag %s needs the package version %s, not %s" % (tag, wanted, project))
     return project
 
 

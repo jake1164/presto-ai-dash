@@ -54,9 +54,10 @@ release wheel and the container image both carry `presto_ai_dash/presto_app/`
 staged through `tools/presto_bundle.py` (`tools/build_release.py` and
 `docker/stage_app.py`), and a source checkout falls back to the same inventory
 plus `presto/`. `release.release_version()` reports the running artifact's
-identity: `DASH_RELEASE_VERSION` when the image was built from a tag (so an RC
-such as `0.50.0-rc3` is not reported as `0.50.0`), otherwise the package
-version.
+identity: `DASH_RELEASE_VERSION` when the image was built from a tag
+(`0.50.0-rc4`), otherwise the package version, which names the same release in
+PEP 440 form (`0.50.0rc4`); the release workflow refuses a tag whose version
+does not match.
 
 The layout on the device is unchanged: `/ai_dash.py`, the modules in
 `/ai_dash_files/`, the generated `revision.txt`, and the private

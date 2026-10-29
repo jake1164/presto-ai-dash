@@ -1,7 +1,8 @@
 name: Release
 
-# Runs when a version tag is pushed: v0.50.0 is a release; v0.50.0-rc1 is a
-# pre-release. The tag must match the version in daemon/pyproject.toml.
+# Runs when a version tag is pushed: v0.50.0 is a release; v0.50.0-rc4 is a
+# pre-release. The tag must match the version in daemon/pyproject.toml, in its
+# PEP 440 form: v0.50.0 needs 0.50.0 and v0.50.0-rc4 needs 0.50.0rc4.
 #
 # One job builds everything in order, so nothing is published unless the
 # tests, the tag check and the wheel check all pass:
@@ -90,10 +91,10 @@ jobs:
           # a machine without a checkout can follow the Docker guide.
           gh release create "$TAG" dist/* compose.yaml .env.example --title "$TAG" $FLAGS
 
-  # A pre-release (v0.50.0-rc1) goes to TestPyPI, a rehearsal of the real
-  # publish below. It builds the same wheel version as the release it leads up
-  # to, and TestPyPI also refuses a version twice, so only the first rc of a
-  # version uploads; later ones skip the files already there. TestPyPI trusts
+  # A pre-release (v0.50.0-rc4) goes to TestPyPI, a rehearsal of the real
+  # publish below. Each tag builds its own version (0.50.0rc4; the tag check
+  # enforces it), so every candidate uploads and pip can upgrade between them.
+  # skip-existing only lets a re-run of the same tag succeed. TestPyPI trusts
   # this workflow and the "testpypi" environment (set up once on test.pypi.org).
   publish-test:
     needs: release
@@ -122,9 +123,8 @@ jobs:
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
 
-  # PyPI never accepts a version twice, and a pre-release builds the same wheel
-  # version as the release it leads up to (v0.50.0-rc1 builds 0.50.0). So only a
-  # tag without a "-" ever reaches PyPI. It publishes through PyPI's trusted
+  # Only a tag without a "-" (a full release, package version 0.50.0) reaches
+  # PyPI; candidates stop at TestPyPI above. It publishes through PyPI's trusted
   # publishing: no token is stored; PyPI trusts this workflow, this repository
   # and the "pypi" environment (set up once on pypi.org).
   publish:

@@ -26,12 +26,31 @@ class TagTests(unittest.TestCase):
         self.version = project
         self.assertEqual(project, package, "pyproject.toml and __version__ must agree")
 
-    def test_release_and_prerelease_tags_match_the_version(self):
-        self.assertEqual(build_release.check_tag("v" + self.version), self.version)
-        self.assertEqual(build_release.check_tag("v%s-rc1" % self.version), self.version)
+    def test_the_checked_in_version_has_a_tag(self):
+        base = self.version.split("rc")[0]
+        tag = "v" + base if base == self.version else "v%s-rc%s" % (base, self.version.split("rc")[1])
+        self.assertEqual(build_release.check_tag(tag), self.version)
+
+    def test_a_tag_names_one_pep_440_version(self):
+        self.assertEqual(build_release.tag_version("v0.50.0"), "0.50.0")
+        self.assertEqual(build_release.tag_version("v0.50.0-rc4"), "0.50.0rc4")
+        self.assertEqual(build_release.tag_version("v0.50.0-rc04"), "0.50.0rc4")
+        self.assertEqual(build_release.tag_version("v1.2.3-b2"), "1.2.3b2")
+
+    def test_a_release_and_its_candidates_need_their_own_versions(self):
+        with patch.object(build_release, "declared_versions", return_value=("0.50.0rc4",) * 2):
+            self.assertEqual(build_release.check_tag("v0.50.0-rc4"), "0.50.0rc4")
+            for tag in ("v0.50.0", "v0.50.0-rc3", "v0.50.1-rc4"):
+                with self.assertRaises(ValueError, msg=tag):
+                    build_release.check_tag(tag)
+        with patch.object(build_release, "declared_versions", return_value=("0.50.0",) * 2):
+            self.assertEqual(build_release.check_tag("v0.50.0"), "0.50.0")
+            with self.assertRaises(ValueError):
+                build_release.check_tag("v0.50.0-rc4")
 
     def test_other_tags_are_refused(self):
-        for tag in ("v9.9.9", self.version, "v1.2", "latest", "v%s;rm" % self.version):
+        for tag in ("v9.9.9", self.version, "v1.2", "latest", "v%s;rm" % self.version,
+                    "v0.50.0-test", "v0.50.0-rc", "v0.50.0-rc1.post1"):
             with self.assertRaises(ValueError, msg=tag):
                 build_release.check_tag(tag)
 

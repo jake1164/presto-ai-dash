@@ -247,6 +247,15 @@ class SetupServiceTests(unittest.TestCase):
         self.assertEqual(state["downloads"], {"script": "presto_setup.py",
                                               "handoff": "presto-setup.enc"})
 
+    def test_a_short_shared_token_is_refused_with_what_to_change(self):
+        with self.assertRaises(device_setup.SetupUnavailable) as caught:
+            self.service(token="x" * 15).create("192.168.1.50", 8787)
+        message = str(caught.exception)
+        self.assertIn("shorter than 16 characters", message)
+        self.assertIn("daemon.shared_token", message)
+        self.assertNotIn("x" * 15, message)
+        self.assertEqual(self.service(token="x" * 16).create("192.168.1.50", 8787)["v"], 1)
+
     def test_a_container_bind_address_is_never_suggested(self):
         state = self.service().state("127.0.0.1:8788")
         self.assertNotIn("0.0.0.0", state["daemon"]["suggested"])

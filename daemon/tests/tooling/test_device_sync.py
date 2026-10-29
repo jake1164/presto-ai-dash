@@ -233,6 +233,16 @@ class DeviceSyncTests(unittest.TestCase):
         self.assertFalse(any("cp" in arguments for arguments in calls))
         self.assertEqual(bundle.sync_status(self.bundle["revision"], self.receipt)["status"], "unverified")
 
+    def test_a_failed_settings_preflight_still_relaunches_the_app(self):
+        calls = []
+        def remote(port, arguments):
+            calls.append(arguments)
+            return ""  # no marker: the device's answer cannot be read
+        with self.assertRaisesRegex(RuntimeError, "unambiguous"):
+            device.operate("sync", "TESTPORT", self.bundle, remote, self.receipt)
+        self.assertFalse(any("cp" in arguments for arguments in calls))
+        self.assertIn("--no-follow", calls[-1])
+
     def test_failed_sync_does_not_record_a_success_and_attempts_app_relaunch(self):
         calls = []
         def remote(port, arguments):

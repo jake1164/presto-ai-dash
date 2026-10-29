@@ -4,6 +4,118 @@ The Presto ships with MicroPython and a launcher already on it. You add one
 app to it, tell the app where your daemon is, and give it your Wi-Fi
 credentials.
 
+## The guided setup
+
+This is the normal route, and it needs **no copy of this repository**. The
+daemon's admin page prepares the exact app its running build expects, so a
+Presto installed this way matches the daemon from the first poll.
+
+You need:
+
+- the daemon installed and running, from PyPI/pipx or Docker, anywhere on your
+  network;
+- the Presto, plugged into a Windows, macOS or Linux computer by a
+  **data-capable** USB cable;
+- Python 3 on that computer. The setup script explains how to add the two
+  packages it needs (`cryptography` and `mpremote`) if they are missing.
+
+### 1. Open the admin page and choose Set up a Presto
+
+Open the daemon's admin page and unlock it with the admin token. On the
+**Settings** tab, open **Set up a Presto**.
+
+### 2. Confirm the address the Presto can reach
+
+The page suggests addresses it knows about. Use the daemon computer's LAN
+address, such as `192.168.1.50`, and the daemon's device port (8787 by
+default).
+
+- **Never `localhost` or `127.0.0.1`:** that is the Presto's own address, not
+  the daemon's.
+- **Docker:** do not use a container-internal address. Use the host's LAN
+  address and the port the Compose file publishes.
+- **A container on a remote server:** the Presto contacts the server over your
+  network. Nothing about the container is involved in the USB setup.
+
+Press **Prepare download**. The page then shows:
+
+- a **setup unlock code** with a **Copy** button;
+- **`presto_setup.py`**, the standalone installer with this build's app files;
+- **`presto-setup.enc`**, the encrypted configuration for this handoff.
+
+The code is deliberately **not** inside either file. It is shown once; if you
+lose it, prepare a new download. The encrypted file holds the daemon address,
+the app revision and the persistent shared device token, so treat it as
+sensitive and delete it when setup is done.
+
+### 3. Run the setup script on the USB computer
+
+Put both files in one folder on the computer the Presto is plugged into, open a
+terminal there, and run:
+
+```bash
+python presto_setup.py
+```
+
+On macOS or Linux, use `python3` if that is how Python 3 is named. The script:
+
+1. asks for the unlock code, with the input hidden, and decrypts the setup file
+   **in memory**. Nothing is written to the device, and no temporary plaintext
+   file is created on the computer;
+2. lists the USB serial devices and asks you to choose one. It never picks a
+   board by itself;
+3. checks that the chosen device is a Pimoroni Presto **before** writing
+   anything, and stops if it is not;
+4. asks for your Wi-Fi network name and password locally (hidden), and tells
+   you what will change. It only goes to the Presto's own `/secrets.py`;
+5. shows a summary, then installs the app, verifies every file by SHA-256, and
+   puts the previous app back if a write fails;
+6. starts AI Dash and checks from the device that it can reach the daemon.
+
+On success it deletes `presto-setup.enc` and says so. On any failure it keeps
+the file, explains what to check, and lets you run the same command again.
+
+### 4. What it keeps
+
+- **Firmware and Pimoroni's stock launcher** are never touched.
+- **Existing device settings are kept** unless you answer yes to replacing
+  them. Replacing `/ai_dash_files/config.py` keeps the device's existing random
+  device identifier; a new device gets one.
+- **Other files on the device** are left alone. On a device that already runs
+  AI Dash, app modules from an older build are retired.
+
+### If something goes wrong
+
+| What you see | What to do |
+| --- | --- |
+| `needs two Python packages` | Run the `pip install` line the script prints, then run it again. |
+| `No USB serial device was found` | Use a data cable, not a charge-only one. Press **RESET** on the Presto. List ports with `python -m mpremote connect list`. |
+| `not a Pimoroni Presto` | The chosen port is another board. Run the script again and choose the Presto. |
+| `unlock code did not open` | Copy the code again from the admin page (all 32 letters and digits), or prepare a new download. |
+| `different Presto app build` | The daemon was upgraded between the two downloads. Prepare both files again. |
+| `could not join the Wi-Fi network` | The Presto's radio is 2.4 GHz only. Check the network name and password. |
+| `reached the daemon, but the daemon refused the device token` | Set `daemon.shared_token` to a fixed value, restart the daemon, and prepare a new download. |
+| `could not reach the daemon` | Check the address and port, and that the daemon is running and reachable from the Presto's network. |
+
+Deleting the encrypted file, losing the code or preparing another handoff does
+**not** revoke the shared device token. To revoke it, change
+`daemon.shared_token`, restart the daemon, and set the same value on every
+device that uses it.
+
+### A note on updates
+
+This one-time setup installs the app of the build that served it. Upgrading
+the daemon does **not** change the app on a Presto that is already installed;
+run **Set up a Presto** again (or the repository's sync tool, below) to move a
+device to the new build. Unattended Wi-Fi updates and a two-slot launcher are
+future work and are not part of this setup.
+
+## The manual route
+
+The rest of this page is the manual path, for a development checkout or for
+understanding exactly which files go where. It does the same thing the guided
+setup does, one file at a time.
+
 ## 1. Flash the firmware (only if you need to)
 
 If the Presto already shows its launcher carousel when you press **RESET**,
@@ -85,9 +197,9 @@ The Presto's radio is 2.4 GHz only. A 5 GHz-only network will not work.
 
 ### Copying the private files
 
-These two files go on the device first. The app install in step 4 stops with an
-error until `/ai_dash_files/config.py` exists, because it never creates your
-settings for you.
+These two files go on the device first. `install-presto` refuses a device that
+has no `/ai_dash_files/config.py`, because it never creates your settings (or
+chooses a Wi-Fi network) for you: it points at **Set up a Presto** instead.
 
 **With a checkout of the repository.** The files are `presto/config.py` and
 `presto/secrets.py`. From the repository root, with `mpremote` installed:

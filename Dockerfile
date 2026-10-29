@@ -28,7 +28,13 @@ COPY presto ./presto
 COPY tools/presto_bundle.py ./tools/presto_bundle.py
 COPY tools/presto_preview ./tools/presto_preview
 COPY docker/collect_preview.py ./docker/collect_preview.py
+COPY docker/stage_app.py ./docker/stage_app.py
 RUN python docker/collect_preview.py /build /opt/presto-preview
+
+# The same public app bundle the wheel carries is staged into the package the
+# image installs, so `install-presto` and the admin page's setup download can
+# never describe a different build from the one running.
+RUN python docker/stage_app.py /build
 
 # The pinned dependencies and then the daemon, into a virtual environment the
 # final image copies. A wheel exists for this platform, so no compiler is
@@ -47,12 +53,18 @@ LABEL org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.title="Presto AI Dash" \
       org.opencontainers.image.source="https://github.com/jake1164/presto-ai-dash"
 
+# The exact release this image was built from, RC suffix included. The release
+# workflow passes it; a local build leaves it empty and the daemon reports the
+# package version instead. It is a display identity, never a registry choice.
+ARG DASH_RELEASE_VERSION=""
+
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:$PATH" \
     DASH_DATABASE=/data/dash.db \
     DASH_HOST=0.0.0.0 \
-    DASH_IN_CONTAINER=1
+    DASH_IN_CONTAINER=1 \
+    DASH_RELEASE_VERSION=${DASH_RELEASE_VERSION}
 
 # A non-root user owns the data directory. The daemon never needs to be root.
 # The base image's own pip is removed too: nothing installs packages here.

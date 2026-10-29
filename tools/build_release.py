@@ -80,6 +80,22 @@ def check_wheel(wheel, bundle):
                 raise ValueError("missing from the wheel: " + inside)
             if hashlib.sha256(archive.read(inside)).digest() != hashlib.sha256(data).digest():
                 raise ValueError("differs from presto/: " + inside)
+        check_setup_template(archive)
+
+
+def check_setup_template(archive):
+    """The standalone installer template the admin page renders is present.
+
+    It is not an app file (it is not installed on the Presto), but without it
+    the admin page's **Set up a Presto** has nothing to serve, so a release
+    missing it is not shippable.
+    """
+    name = "presto_ai_dash/setup/presto_setup_template.py"
+    if name not in archive.namelist():
+        raise ValueError("missing from the wheel: " + name)
+    text = archive.read(name).decode("utf-8")
+    if "BUNDLE = {}" not in text or "def main(" not in text:
+        raise ValueError("the setup installer template is incomplete: " + name)
 
 
 def main(argv=None):

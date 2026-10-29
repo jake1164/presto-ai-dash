@@ -133,6 +133,59 @@
         </div>
       </details>
 
+      <details class="setting" id="presto-setup-setting">
+        <summary><span class="setting-title">Set up a Presto</span>
+          <span class="scope-badge">Applies to one device</span></summary>
+        <div class="setting-body">
+          <p class="guide-slot" data-help="set-up-presto" data-help-label="Set up a Presto guide"></p>
+          <p class="note">Install the dashboard on a Presto plugged into a computer by USB.
+            You need no copy of this project: this page gives you the exact app this daemon
+            serves, plus a one-time encrypted setup file with the daemon address and device
+            token. Do this once for each Presto. The setup script asks for Wi-Fi locally, so
+            a Wi-Fi password is never typed into this page.</p>
+          <p id="setup-unavailable" class="warning" hidden>This daemon has no Presto app files
+            to install. Use a release wheel or the container image; a source-only install
+            without the <code>presto/</code> folder cannot prepare a download.</p>
+          <p id="setup-temporary-token" class="warning" hidden>This daemon generated a new
+            device token at startup, so the Presto will lose access when the daemon restarts.
+            Set <code>daemon.shared_token</code> in the configuration first, then prepare a new
+            download.</p>
+          <label for="setup-host">Daemon address the Presto can reach</label>
+          <input id="setup-host" maxlength="253" autocomplete="off" spellcheck="false"
+                 placeholder="192.168.1.50">
+          <p class="note" id="setup-host-note">Use the daemon computer's LAN address, not
+            localhost and not a container's internal address.</p>
+          <label for="setup-port">Daemon device port</label>
+          <input id="setup-port" type="number" min="1" max="65535" step="1" inputmode="numeric"
+                 value="8787">
+          <label for="setup-name">Name this Presto reports (optional)</label>
+          <input id="setup-name" maxlength="32" autocomplete="off" spellcheck="false"
+                 placeholder="presto">
+          <div class="actions">
+            <button type="button" id="prepare-presto-setup">Prepare download</button>
+          </div>
+          <div id="setup-downloads" hidden>
+            <h4>Setup unlock code</h4>
+            <p class="note">Type this code into the setup script on the USB computer. It is
+              not inside either download, and it is shown only once. If it is lost, prepare a
+              new download; the device token is not changed either way.</p>
+            <div class="copy-row">
+              <code id="setup-unlock-code"></code>
+              <button type="button" id="copy-setup-code">Copy</button>
+            </div>
+            <ol class="note">
+              <li>Download <a id="download-setup-script" href="#" download="presto_setup.py">presto_setup.py</a>
+                and <a id="download-setup-handoff" href="#" download="presto-setup.enc">presto-setup.enc</a>.</li>
+              <li>Put both files in one folder on the computer the Presto is plugged into.</li>
+              <li>Run <code>python presto_setup.py</code> there and type the code when asked.
+                The script installs the app, keeps or replaces the device's own settings, and
+                deletes the encrypted file when setup succeeds.</li>
+            </ol>
+            <p class="note" id="setup-summary"></p>
+          </div>
+        </div>
+      </details>
+
       <details class="setting" id="remote-setting">
         <summary><span class="setting-title">Remote reports</span>
           <span class="scope-badge">Applies to all services</span></summary>

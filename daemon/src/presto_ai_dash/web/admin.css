@@ -207,3 +207,9 @@ main > .panel { min-width: 0; }
 .remote-status .note { margin: 0 0 6px; }
 .remote-link { color: #7ce6da; }
 #collector-info .note { margin: 10px 0 0; }
+
+/* Set up a Presto: the one-time unlock code, beside its Copy button. */
+.copy-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0 14px; }
+.copy-row code { font-size: 1.02rem; letter-spacing: .06em; background: #0c1526;
+  border: 1px solid #2a3b53; border-radius: 8px; padding: 8px 12px; word-break: break-all; }
+.copy-row button { min-height: 40px; }

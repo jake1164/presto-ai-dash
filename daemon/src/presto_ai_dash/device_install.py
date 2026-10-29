@@ -4,10 +4,17 @@
     presto-ai-dash check-presto --port COM3
 
 The app files travel inside the release wheel (``presto_app/``), so the device
-always gets the version that matches this daemon. Neither command reads or
-writes the device's config, secrets, provider data or firmware launcher. The
-repository's ``tools/presto_device.py`` is a thin wrapper over this module, so
-the checkout and the wheel share one USB engine.
+always gets the version that matches this daemon. A daemon running from a
+source checkout has no staged copy, so it reads the same inventory from
+``tools/presto_bundle.py`` instead; there is still one list of public files.
+Neither command reads or writes the device's config, secrets, provider data or
+firmware launcher. The repository's ``tools/presto_device.py`` is a thin
+wrapper over this module, so the checkout and the wheel share one USB engine.
+
+First-time provisioning needs settings as well as app files, so it is a
+different command: the standalone ``presto_setup.py`` the admin page serves
+(see ``presto_ai_dash.device_setup``) collects Wi-Fi locally, keeps or writes
+the private files and then uses the same staged, verified, rolled-back copy.
 """
 
 import argparse
@@ -32,6 +39,11 @@ APP_FOLDER = "presto_app"
 MARKER = "PRESTO_SYNC:"
 LAUNCH = ("import sys, os; sys.path.insert(0, '/ai_dash_files'); "
           "os.chdir('/ai_dash_files'); from ai_dash_app import main; main()")
+CONFIG_PATH = "/ai_dash_files/config.py"
+CONFIG_MISSING = (
+    "This Presto has no " + CONFIG_PATH + " yet. Use 'Set up a Presto' in the "
+    "daemon's admin page to install and configure it the first time; that "
+    "download also collects the Wi-Fi settings and the device identifier.")
 
 HELPERS = '''import os, sys, json, hashlib, binascii
 if sys.implementation.name != 'micropython' or 'Presto' not in os.uname().machine:
@@ -197,13 +209,20 @@ def _operate(action, port, bundle, remote, receipt):
                               commit_script(bundle["hashes"]), encoding="utf-8")
             arguments = ["soft-reset"]
             if action == "sync":
-                # Check configuration exists without opening it; never provision secrets here.
-                preflight = HELPERS + "\nos.stat('/ai_dash_files/config.py')\n"
-                arguments += ["exec", preflight]
+                # Check the settings exist without opening them: installing the
+                # app alone leaves a device that cannot reach the daemon, so a
+                # first-time device is sent to the setup utility instead.
+                preflight = HELPERS + (
+                    "\nprint('PRESTO_SYNC:' + json.dumps({'config': "
+                    "exists('/ai_dash_files/config.py')}))\n")
+                state = parse_state(remote(port, ["soft-reset", "exec", preflight]))
+                if not state.get("config"):
+                    raise RuntimeError(CONFIG_MISSING)
                 for index, (target, data) in enumerate(bundle["files"].items()):
                     local = folder / (str(index) + ".py")
                     local.write_bytes(data)
                     arguments += ["fs", "cp", str(local), ":" + target + ".presto-new", "+"]
+                attempted = True
             arguments += ["run", str(script)]
             attempted = True
             actual = parse_hashes(remote(port, arguments), bundle["hashes"])
@@ -222,6 +241,16 @@ def _operate(action, port, bundle, remote, receipt):
                     raise RuntimeError("Could not relaunch AI Dash. Reconnect USB and use Sync Presto again.") from None
                 print("Could not relaunch AI Dash. Reconnect USB and use Sync Presto again.", file=sys.stderr)
 
+
+def parse_state(output):
+    """The single marker object a preflight script printed."""
+    lines = [line[len(MARKER):] for line in output.splitlines() if line.startswith(MARKER)]
+    if len(lines) != 1:
+        raise RuntimeError("USB check did not return an unambiguous device state")
+    state = json.loads(lines[0])
+    if not isinstance(state, dict):
+        raise RuntimeError("USB check returned an unexpected device state")
+    return state
 
 
 class NoBundledApp(RuntimeError):
@@ -260,6 +289,53 @@ def bundled_snapshot(folder=None):
     if files[REVISION_TARGET] != (code_revision[:REVISION_CHARS] + "\n").encode("ascii"):
         raise NoBundledApp("The bundled Presto app files do not match their revision; reinstall the wheel.")
     return {"revision": code_revision, "hashes": hashes, "files": files}
+
+
+def checkout_root(start=None):
+    """The repository root of a source checkout, or None.
+
+    A daemon started from ``daemon/src`` (an editable install, or the tests)
+    has no ``presto_app/`` folder, because that is staged only at release
+    time. The same public-file inventory in ``tools/presto_bundle.py`` still
+    describes the app beside it, so a developer's admin page can serve the
+    build that is actually running. A PyPI install has no such folder and
+    says so.
+    """
+    here = Path(start or __file__).resolve()
+    for candidate in here.parents:
+        if ((candidate / "tools" / "presto_bundle.py").is_file() and
+                (candidate / "presto" / "main.py").is_file()):
+            return candidate
+    return None
+
+
+def source_snapshot(root=None):
+    """The bundle of a checkout, through the one authoritative inventory."""
+    root = Path(root) if root is not None else checkout_root()
+    if root is None:
+        raise NoBundledApp(
+            "This install does not include the Presto app files. Install a release "
+            "wheel from GitHub, or use tools/presto_device.py from a checkout.")
+    spec = importlib.util.spec_from_file_location(
+        "_presto_bundle_checkout", root / "tools" / "presto_bundle.py")
+    if spec is None or spec.loader is None:  # pragma: no cover - defensive
+        raise NoBundledApp("The checkout's Presto bundle inventory could not be read.")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.snapshot(root)
+
+
+def app_snapshot(folder=None, root=None):
+    """The app files this daemon build should install on a device.
+
+    Release builds use the bundle inside the wheel (``presto_app/``). A source
+    checkout falls back to ``tools/presto_bundle.py`` plus ``presto/`` so the
+    admin page and the USB checks describe the code that is running.
+    """
+    try:
+        return bundled_snapshot(folder)
+    except NoBundledApp:
+        return source_snapshot(root)
 
 
 def run(action, port, snapshot, receipt=DEFAULT_RECEIPT, out=None, err=None):

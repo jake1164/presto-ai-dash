@@ -76,18 +76,27 @@ class WheelCheckTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.bundle = build_release.stage(ROOT, Path(self.temp.name) / "stage")
 
-    def wheel(self, extra=(), drop=None):
+    def wheel(self, extra=(), drop=None, drop_template=False):
         path = Path(self.temp.name) / "x.whl"
         with zipfile.ZipFile(path, "w") as archive:
             for target, data in self.bundle["files"].items():
                 if target != drop:
                     archive.writestr("presto_ai_dash/presto_app" + target, data)
+            if not drop_template:
+                template = (ROOT / "daemon" / "src" / "presto_ai_dash" / "setup"
+                            / "presto_setup_template.py")
+                archive.writestr("presto_ai_dash/setup/presto_setup_template.py",
+                                 template.read_bytes())
             for name in extra:
                 archive.writestr(name, b"x")
         return path
 
     def test_a_complete_clean_wheel_passes(self):
         build_release.check_wheel(self.wheel(extra=["presto_ai_dash/config.py"]), self.bundle)
+
+    def test_a_wheel_without_the_setup_template_fails(self):
+        with self.assertRaisesRegex(ValueError, "presto_setup_template"):
+            build_release.check_wheel(self.wheel(drop_template=True), self.bundle)
 
     def test_a_missing_app_file_fails(self):
         with self.assertRaises(ValueError):

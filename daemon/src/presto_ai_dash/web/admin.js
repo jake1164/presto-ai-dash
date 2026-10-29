@@ -30,6 +30,8 @@
   let busy = false;
   let dragging = null;
   let ingestState = null, tokenReveal = null, displayState = null, demoState = null;
+  // What the Set up a Presto section may offer for this daemon build.
+  let setupState = null, setupPrepared = null;
   let demoReadVersion = 0;
   let alertsState = null;
   // The master switch: alerts on or off for every service. It is kept apart
@@ -68,6 +70,7 @@
     "status": {page: "guides/admin-page.md", anchor: "status"},
     "settings-panel": {page: "guides/admin-page.md", anchor: "settings"},
     "home-display": {page: "guides/home-display.md", anchor: "the-setting"},
+    "set-up-presto": {page: "getting-started/set-up-the-presto.md", anchor: "the-guided-setup"},
     "remote-reports": {page: "concepts/remote-reports.md", anchor: "turning-it-on"},
     "demo-mode": {page: "guides/admin-page.md", anchor: "demo-mode"},
     "remote-token": {page: "guides/remote-collectors.md", anchor: "rotating-and-revoking"},
@@ -320,7 +323,7 @@
       catch (_) { window.location.hash = TAB_HASHES[tab]; }
     }
     if (tab === "status") refreshStatus();
-    if (tab === "settings") { refreshConfig(); loadAlerts(); }
+    if (tab === "settings") { refreshConfig(); loadAlerts(); loadPrestoSetup(); }
   }
   function moveTabFocus(from, step) {
     const index = TABS.indexOf(from);
@@ -409,6 +412,65 @@
     element("overflow-rows").disabled = !!displayState?.locked_by_environment;
     element("display-lock").hidden = !displayState?.locked_by_environment;
     element("display-hint").hidden = !!displayState?.locked_by_environment;
+  }
+
+  // -- Set up a Presto -------------------------------------------------------
+
+  async function loadPrestoSetup() {
+    // A separate call, so the section reflects this running build without a reload.
+    try {
+      setupState = await request("/api/admin/presto-setup");
+      renderPrestoSetup();
+    } catch (_) { /* keep the last known state */ }
+  }
+
+  function renderPrestoSetup() {
+    const available = !!setupState?.available;
+    // Only claim the build has no app files when the daemon actually said so;
+    // a read that has not succeeded yet must not look like a broken build.
+    element("setup-unavailable").hidden = !(setupState && !available);
+    element("setup-temporary-token").hidden = !setupState?.token_temporary;
+    element("prepare-presto-setup").disabled = !available;
+    for (const id of ["setup-host", "setup-port", "setup-name"]) element(id).disabled = !available;
+    if (!setupState?.daemon) return;
+    if (!element("setup-host").value) element("setup-host").value = setupState.daemon.host || "";
+    if (!element("setup-port").value) element("setup-port").value = String(setupState.daemon.port || 8787);
+    const suggested = (setupState.daemon.suggested || []).join(", ");
+    element("setup-host-note").textContent = suggested
+      ? "Suggested for this daemon: " + suggested + ". Use the address the Presto can reach; never localhost or a container's internal address."
+      : "Use the daemon computer's LAN address, not localhost and not a container's internal address.";
+  }
+
+  async function preparePrestoSetup() {
+    if (busy) return;
+    busy = true; element("prepare-presto-setup").disabled = true;
+    try {
+      const data = { host: element("setup-host").value.trim(), port: Number(element("setup-port").value) };
+      const name = element("setup-name").value.trim();
+      if (name) data.name = name;
+      const result = await request("/api/admin/presto-setup", "POST", data);
+      setupPrepared = result;
+      element("setup-unlock-code").textContent = result.unlock_code;
+      element("download-setup-script").href = result.downloads.script;
+      element("download-setup-handoff").href = result.downloads.handoff;
+      element("setup-summary").textContent = "Presto AI Dash " + result.release
+        + ", app revision " + result.label + ", for daemon " + result.daemon.host
+        + ":" + result.daemon.port + ".";
+      element("setup-downloads").hidden = false;
+      message("Setup download ready. Copy the unlock code now: it is shown once.");
+    } catch (error) { message(error.message, true); }
+    finally { busy = false; renderPrestoSetup(); }
+  }
+
+  async function copySetupCode() {
+    const text = element("setup-unlock-code").textContent || "";
+    if (!text) return;
+    try {
+      await navigator.clipboard.writeText(text);
+      message("Setup unlock code copied.");
+    } catch (_) {
+      message("Select the code and copy it.", true);
+    }
   }
   // The reason the reader sees in words when the master switch is off.
   // It is text, not only a colour, so it is never missed.
@@ -1803,6 +1865,13 @@
     ingestState = null; tokenReveal = null; displayState = null;
     demoState = null;
     ++demoReadVersion;
+    // A setup unlock code must not survive a locked page.
+    setupState = null; setupPrepared = null;
+    element("setup-downloads").hidden = true; element("setup-unlock-code").textContent = "";
+    element("setup-host").value = ""; element("setup-name").value = "";
+    for (const id of ["download-setup-script", "download-setup-handoff"]) {
+      element(id).removeAttribute("href");
+    }
     alertsState = null; masterOn = true; lastMasterOn = null;
     serviceAlertStates.clear(); serviceAlertDrafts.clear(); serviceAlertLoading.clear();
     statusState = null; configState = null; expanded.clear();
@@ -1820,6 +1889,7 @@
     await loadDemo();
     await loadDisplay();
     await loadAlerts();
+    await loadPrestoSetup();
     element("source-type").replaceChildren(...catalog.map((type) => {
         const option = document.createElement("option"); option.value = type.id;
         option.textContent = type.name; return option;
@@ -1918,6 +1988,8 @@
   element("demo-enabled").addEventListener("change", () => setDemoEnabled(element("demo-enabled").checked));
   element("demo-callout-button").addEventListener("click", () => setDemoEnabled(true));
   element("demo-banner-off").addEventListener("click", () => setDemoEnabled(false));
+  element("prepare-presto-setup").addEventListener("click", preparePrestoSetup);
+  element("copy-setup-code").addEventListener("click", copySetupCode);
   element("overflow-rows").addEventListener("change", async () => {
     if (busy) { renderDisplay(); return; }
     busy = true;

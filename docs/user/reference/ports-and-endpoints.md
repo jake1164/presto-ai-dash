@@ -195,6 +195,11 @@ Any other method than the ones below is answered `501`.
 | GET | `/api/admin/session` | Restore a valid cookie session and get the CSRF token |
 | DELETE | `/api/admin/session` | Revoke the current session |
 | DELETE | `/api/admin/sessions` | Revoke every browser session |
+| GET | `/api/admin/presto-setup` | What **Set up a Presto** may offer: the bundled app revision, the release, and suggested daemon addresses |
+| POST | `/api/admin/presto-setup` | Prepare the two setup downloads and a fresh unlock code. The code is in the answer, once |
+| GET | `/api/admin/presto-setup/{id}/script` | Download `presto_setup.py` for one prepared handoff |
+| GET | `/api/admin/presto-setup/{id}/handoff` | Download `presto-setup.enc`, the encrypted configuration |
+| DELETE | `/api/admin/presto-setup/{id}` | Forget a prepared handoff. A copy already downloaded stays valid until it is used |
 
 Except for the page's own files, a request needs the admin bearer token or a
 valid browser session. A cookie-authenticated change also needs the exact page
@@ -203,6 +208,23 @@ valid browser session. A cookie-authenticated change also needs the exact page
 The actions that touch a provider account run only from this page, when you
 press the button: installing and removing the Claude export, and the Codex
 sign-in and sign-out. Polling and the Presto never call them.
+
+### The setup downloads
+
+**Set up a Presto** serves two files for the build that is actually running:
+`presto_setup.py`, a standalone installer carrying the public Presto app
+files and their SHA-256 hashes, and `presto-setup.enc`, that build's daemon
+address, expected app revision and persistent shared device token. The
+encrypted file uses a versioned envelope (HKDF-SHA256 into AES-256-GCM) with a
+fresh salt and nonce. The **setup unlock code** is generated from 160 random
+bits for each handoff, returned once in the `POST` answer, and is in neither
+download. The admin token is never included.
+
+These routes need the admin token or a browser session, and every response is
+`Cache-Control: no-store`. Deleting the encrypted file, losing the code or
+preparing another handoff does **not** revoke the shared device token: rotate
+`daemon.shared_token` and update every device to do that. Unlock codes are
+never part of the fixture payloads in this documentation.
 
 ## The tokens
 

@@ -12,6 +12,7 @@ from .api import ApiServer, BoundedRequestHandler, parse_length
 from .collectors import COLLECTOR_FILE, collector_bytes
 from .admin_sessions import AdminSessions, SESSION_SECONDS, token_binding
 from .codex_login import CodexLoginError
+from .device_setup import HANDOFF_NAME, SCRIPT_NAME, SetupError, SetupUnavailable
 from .sources._codex_rpc import CodexReportingError
 from .storage import ConfigurationConflict
 
@@ -19,6 +20,11 @@ log = logging.getLogger(__name__)
 MAX_BODY = 65536
 INGEST_TOKEN_PATH = r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/ingest-token"
 SERVICE_ALERTS_PATH = r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/alerts"
+SETUP_PATH = "/api/admin/presto-setup"
+SETUP_SCRIPT_PATH = r"/api/admin/presto-setup/([A-Za-z0-9_-]{1,80})/script"
+SETUP_HANDOFF_FILE_PATH = r"/api/admin/presto-setup/([A-Za-z0-9_-]{1,80})/handoff"
+SETUP_HANDOFF_PATH = r"/api/admin/presto-setup/([A-Za-z0-9_-]{1,80})"
+SETUP_BODY_LIMIT = 1024
 ASSETS = {"/": ("index.html", "text/html; charset=utf-8"),
           "/admin.js": ("admin.js", "text/javascript; charset=utf-8"),
           "/admin.css": ("admin.css", "text/css; charset=utf-8")}
@@ -105,7 +111,7 @@ def origin_is_allowed(origin, host_header, server_port, allowed_hosts=()):
 
 
 def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
-                       secure_cookie=False):
+                       secure_cookie=False, setup=None):
     if not token:
         raise ValueError("admin API requires a token")
     # A session is bound to the token that made it: change a configured token and
@@ -246,6 +252,26 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
                         "text/x-python; charset=utf-8",
                         headers={"Content-Disposition":
                                  'attachment; filename="%s"' % COLLECTOR_FILE})
+                return
+            if path == SETUP_PATH:
+                # Read-only: what the page needs before preparing a download.
+                if self._authorized():
+                    if setup is None:
+                        self._send(200, {"v": 1, "available": False,
+                                         "reason": "bundle_unavailable"})
+                    else:
+                        try:
+                            self._send(200, setup.state(self.headers.get("Host", "")))
+                        except Exception:
+                            log.error("presto setup state failed")
+                            self._send(500, {"error": "setup state could not be read"})
+                return
+            setup_script = re.fullmatch(SETUP_SCRIPT_PATH, path)
+            setup_handoff_file = re.fullmatch(SETUP_HANDOFF_FILE_PATH, path)
+            if setup_script or setup_handoff_file:
+                match = setup_script or setup_handoff_file
+                self._setup_download(setup, match[1],
+                                     "script" if setup_script else "handoff")
                 return
             if path == "/api/admin/ingest":
                 if self._authorized():
@@ -417,6 +443,100 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
                 log.error("admin ingest token operation failed")
                 self._send(500, {"error": "ingest token could not be saved"})
 
+        def _setup_download(self, setup, handoff_id, kind):
+            """One of the two files a prepared handoff offers.
+
+            Both are authenticated and uncached. The unlock code is in neither:
+            it is shown once in the page and typed into the script by hand.
+            """
+            if not self._authorized():
+                return
+            if setup is None:
+                self._send(409, {"error": "Presto setup is not available in this build"})
+                return
+            try:
+                if kind == "script":
+                    body = setup.script(handoff_id)
+                    name, content_type = SCRIPT_NAME, "text/x-python; charset=utf-8"
+                else:
+                    body = setup.handoff(handoff_id)
+                    name, content_type = HANDOFF_NAME, "application/octet-stream"
+            except KeyError:
+                self._send(404, {"error": "setup download not found; prepare it again"})
+                return
+            except SetupError as exc:
+                self._send(409, {"error": str(exc)})
+                return
+            except Exception:
+                log.error("presto setup download failed")
+                self._send(500, {"error": "setup download could not be prepared"})
+                return
+            self._send(200, body, content_type,
+                       headers={"Content-Disposition": 'attachment; filename="%s"' % name})
+
+        def create_setup(self, method):
+            """Prepare a handoff (POST) or forget one (DELETE)."""
+            if not self._authorized():
+                return
+            path = urlsplit(self.path).path
+            if method == "DELETE":
+                handoff = re.fullmatch(SETUP_HANDOFF_PATH, path)
+                if not handoff:
+                    self._send(404, {"error": "not found"})
+                    return
+                try:
+                    removed = setup.discard(handoff[1]) if setup is not None else False
+                except Exception:
+                    log.error("presto setup discard failed")
+                    self._send(500, {"error": "setup download could not be discarded"})
+                    return
+                if not removed:
+                    self._send(404, {"error": "setup download not found"})
+                    return
+                self._send(200, {"discarded": True})
+                return
+            if path != SETUP_PATH:
+                self._send(404, {"error": "not found"})
+                return
+            if (self.headers.get("Content-Type", "").split(";")[0].strip()
+                    != "application/json" or self.headers.get("Transfer-Encoding")):
+                self._send(415, {"error": "send an application/json body"})
+                return
+            try:
+                length = parse_length(self.headers.get("Content-Length"), "0")
+            except ValueError:
+                self._send(400, {"error": "invalid body length"})
+                return
+            if not 2 <= length <= SETUP_BODY_LIMIT:
+                self._send(413, {"error": "invalid or oversized request body"})
+                return
+            try:
+                data = json.loads(self.rfile.read(length))
+            except (ValueError, UnicodeError, RecursionError):
+                self._send(400, {"error": "invalid JSON"})
+                return
+            if (not isinstance(data, dict) or set(data) - {"host", "port", "name"} or
+                    not {"host", "port"} <= set(data)):
+                self._send(400, {"error": "send the daemon host and port"})
+                return
+            if setup is None:
+                self._send(409, {"error": "Presto setup is not available in this build"})
+                return
+            try:
+                result = setup.create(data["host"], data["port"],
+                                      device_name=data.get("name", "presto"))
+            except SetupUnavailable as exc:
+                self._send(409, {"error": str(exc)})
+                return
+            except SetupError as exc:
+                self._send(400, {"error": str(exc)})
+                return
+            except Exception:
+                log.error("presto setup download could not be prepared")
+                self._send(500, {"error": "setup download could not be prepared"})
+                return
+            self._send(201, result)
+
         def do_POST(self):
             if urlsplit(self.path).path == "/api/admin/session":
                 if self._authorized(bearer_only=True):
@@ -433,6 +553,10 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
             codex_login = re.fullmatch(r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/codex-login", path)
             codex_logout = re.fullmatch(r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/codex-logout", path)
             token_create = re.fullmatch(INGEST_TOKEN_PATH, path)
+            if path == SETUP_PATH:
+                # Prepare the two setup downloads and the one-time unlock code.
+                self.create_setup("POST")
+                return
             if token_create:
                 self._ingest_token("POST", token_create[1])
                 return
@@ -499,6 +623,11 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
                     log.warning("every admin browser session was ended (%d)", count)
                     self._send(200, {"signed_out": count}, cookie=self._session_cookie())
                 return
+            if re.fullmatch(SETUP_HANDOFF_PATH, urlsplit(self.path).path):
+                # Forget a prepared handoff; the files already downloaded stay
+                # valid until they are used.
+                self.create_setup("DELETE")
+                return
             token_revoke = re.fullmatch(INGEST_TOKEN_PATH, urlsplit(self.path).path)
             if token_revoke:
                 self._ingest_token("DELETE", token_revoke[1])
@@ -510,7 +639,8 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
 
 class AdminServer(ApiServer):
     def __init__(self, port, manager, token, host="127.0.0.1", allowed_hosts=(),
-                 token_generated=False, secure_cookie=False):
+                 token_generated=False, secure_cookie=False, setup=None):
         super().__init__(host, port, manager.storage, token,
                          handler_class=make_admin_handler(manager, token, allowed_hosts,
-                                                          token_generated, secure_cookie))
+                                                          token_generated, secure_cookie,
+                                                          setup))

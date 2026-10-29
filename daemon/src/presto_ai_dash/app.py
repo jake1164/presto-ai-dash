@@ -17,11 +17,14 @@ from .clients import ClientRegistry
 from .config import (ConfigError, admin_bind_error, configure_logging,
                      demo_enabled, ingest_enabled, load_config, resolve_shared_token,
                      resolve_admin_token)
+from .device_install import app_snapshot
+from .device_setup import SetupService
 from .management import SourceConfiguration, ManagedCollector
 from .models import now_utc
 from .preview_host import start_preview
 from .problems import ProblemBuffer
-from .sources import build_sources
+from .release import release_version
+from .sources import build_sources, in_container
 from .storage import Storage
 
 log = logging.getLogger(__name__)
@@ -72,6 +75,7 @@ class Daemon:
         self.api = None
         self.admin = None
         self.preview = None
+        self.presto_setup = None
         self.source_configuration = None
         self.maintenance_thread = None
         self.clients = None
@@ -164,12 +168,24 @@ class Daemon:
                                                      if managed else None))
             if self.config["admin"]["enabled"]:
                 token = resolve_admin_token(self.config, self.shared_token)
+                # The setup downloads carry this running build's public app
+                # files, its shared device token and its release identity. The
+                # admin token is never part of them.
+                self.presto_setup = SetupService(
+                    bundle_provider=app_snapshot,
+                    shared_token=self.shared_token,
+                    host=self.config["daemon"]["host"],
+                    port=self.config["daemon"]["port"],
+                    release=release_version(),
+                    token_temporary=bool(self.config["daemon"].get("shared_token_generated")),
+                    container=in_container())
                 self.admin = AdminServer(self.config["admin"]["port"],
                                          self.source_configuration, token,
                                          host=self.config["admin"]["host"],
                                          allowed_hosts=self.config["admin"]["allowed_hosts"],
                                          token_generated=bool(self.config["admin"].get("token_generated")),
-                                         secure_cookie=bool(self.config["admin"].get("secure_cookie")))
+                                         secure_cookie=bool(self.config["admin"].get("secure_cookie")),
+                                         setup=self.presto_setup)
             return self
         except Exception:
             self.stop()

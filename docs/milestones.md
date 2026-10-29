@@ -38,6 +38,28 @@ the collector run alone in an empty folder; not yet on a second real computer.
 whitelist and keeps it in memory only, and the admin page's Status tab shows
 each client's last error, failure count, free memory, signal and uptime.
 
+**Built since (2026-10-28):** first-time Presto setup (Part 1 of the
+[device lifecycle plan](../.ai_docs/presto-ai-dash-device-lifecycle-plan.md)).
+The authenticated admin page's Settings tab offers **Set up a Presto**: it
+prepares `presto_setup.py` (the public app of the running build, rendered from
+the one shared inventory) and `presto-setup.enc` (a versioned AES-256-GCM
+envelope with the daemon address, the expected revision and the persistent
+shared device token), and shows a one-time 160-bit unlock code that is in
+neither file. The standalone installer opens the file in memory, lists and
+requires an explicit USB port, refuses a board that is not a Pimoroni Presto,
+collects Wi-Fi locally, keeps existing settings and a stable random device ID
+unless explicitly replaced, installs with the existing staged/verified/
+rolled-back engine, starts the app, checks device-to-daemon reachability, and
+removes the handoff only on success. The container image now stages the same
+bundle the wheel carries, and tagged image builds record the exact release
+identity (`DASH_RELEASE_VERSION`, RC suffix included). Automated tests cover
+the crypto, tampering, packaging parity, board/port refusal, preservation,
+interruption/retry and secret-free errors; the admin flow was inspected in a
+browser. **Not yet proven:** a first-time install on real hardware followed by
+a real power cycle and user launch. The installation layout and the 12-character
+`legacy-v1` revision are unchanged; the A/B launcher is still the gated future
+work in Parts 2–4.
+
 **Open:** Phase 8 (OpenTelemetry;
 researched, decision gate pending), several Presto devices, M8 acceptance
 (real expired-login recovery, a second

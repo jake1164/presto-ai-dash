@@ -11,8 +11,9 @@ name: Release
 #   4. the container image, pushed to ghcr.io (a "latest" tag moves only for a
 #      full release)
 #   5. a GitHub Release with the files and their SHA-256 sums
-#   6. a full release only: the same wheel and source archive, as attached to
-#      that Release, go to PyPI (the "publish" job below)
+#   6. the same wheel and source archive, as attached to that Release, go to
+#      PyPI for a full release (the "publish" job below) or to TestPyPI for a
+#      pre-release (the "publish-test" job)
 #
 # The release job uses only the GitHub CLI and Docker that the runner already
 # has. Every action it and the publish job use is pinned to a commit, as in the
@@ -71,7 +72,7 @@ jobs:
           IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
           VERSION="${TAG#v}"
           echo "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          docker build -t "$IMAGE:$VERSION" .
+          docker build --build-arg DASH_RELEASE_VERSION="$VERSION" -t "$IMAGE:$VERSION" .
           docker push "$IMAGE:$VERSION"
           # "latest" is the stable tag users pull. A pre-release never moves it.
           if [[ "$VERSION" != *-* ]]; then
@@ -88,6 +89,38 @@ jobs:
           # The compose file and its .env template travel with the release, so
           # a machine without a checkout can follow the Docker guide.
           gh release create "$TAG" dist/* compose.yaml .env.example --title "$TAG" $FLAGS
+
+  # A pre-release (v0.50.0-rc1) goes to TestPyPI, a rehearsal of the real
+  # publish below. It builds the same wheel version as the release it leads up
+  # to, and TestPyPI also refuses a version twice, so only the first rc of a
+  # version uploads; later ones skip the files already there. TestPyPI trusts
+  # this workflow and the "testpypi" environment (set up once on test.pypi.org).
+  publish-test:
+    needs: release
+    if: ${{ contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: testpypi
+    permissions:
+      contents: read     # download the files from the GitHub Release
+      id-token: write    # trusted publishing to TestPyPI
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Download the wheel and the source archive from the Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir dist
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir dist --pattern '*.whl' --pattern '*.tar.gz'
+          ls -l dist
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
 
   # PyPI never accepts a version twice, and a pre-release builds the same wheel
   # version as the release it leads up to (v0.50.0-rc1 builds 0.50.0). So only a

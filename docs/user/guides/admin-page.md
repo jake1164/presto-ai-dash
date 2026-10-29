@@ -129,17 +129,24 @@ full history use `docker logs`.
 ### Settings
 
 What applies to every service, in collapsible sections. The first one is
-open, the rest are folded away. Every section is headed *Applies to all
-services*.
+open, the rest are folded away. A section that applies to one device rather
+than to the daemon says so in its badge.
 
 | Section | What is in it |
 | --- | --- |
 | Home display | The overflow strip setting |
+| Set up a Presto | The one-time USB setup download: the daemon address, the unlock code, `presto_setup.py` and `presto-setup.enc`. See [Set up the Presto](../getting-started/set-up-the-presto.md#the-guided-setup) |
 | Remote reports | The ingest switch, the collector download and its SHA-256, the remote tokens, the collector trail and version, the plain-HTTP warning |
 | Demo mode | The sample-data switch, and what it does and does not touch |
 | Alerts | The master switch, the thresholds, the sound switch (off until you turn it on), quiet hours, pop to top, the mute length |
 | Effective daemon configuration | Read-only: every value and where it came from |
 | About and help | What the sources are, the order note, where the logs and the diagnostics commands are |
+
+**Set up a Presto** prepares both files for *this running build*, so a device
+installed from it carries the same app revision the daemon expects. The unlock
+code it shows once is not in either download, and the encrypted file holds the
+persistent shared device token, never the admin token. Losing the code or the
+file costs a new download; it does not revoke the device token.
 
 The effective configuration names the origin of every value:
 `environment`, `dash.toml`, `database`, or `default`. Those values need a

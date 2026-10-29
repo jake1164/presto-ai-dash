@@ -85,7 +85,10 @@ def extension(name):
     if name == "usb-required":
         return device_lifecycle("manual_action", "usb_update_required", True), None
     if name == "retry-pending":
-        return device_lifecycle("pending", None, False, attempts=1,
+        # A scheduled retry after a failure: the state is quiet progress, but
+        # the unresolved warning stays latched until a supported recovery, so
+        # the indicator keeps warning while the retry waits.
+        return device_lifecycle("pending", None, True, attempts=1,
                                 next_attempt_at="2026-10-29T09:01:00Z"), None
     if name == "retry-exhausted":
         return device_lifecycle("failed", "retry_exhausted", True, attempts=3), None

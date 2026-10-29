@@ -68,6 +68,31 @@ ALERT_HOLD_MS = 20000
 ALERT_MESSAGE_MS = 4000
 # The messages are drawn in the detail line's font, which fits 34 characters.
 ALERT_MESSAGE_MAX = 34
+
+# Set by the bootstrap (``presto/bootstrap/boot.py``) when this app runs from an
+# A/B slot: the durable journal and this start's context. It stays None for the
+# legacy launcher, which has neither a slot nor a journal, so an old install
+# never claims a slot it does not have.
+BOOT_CONTEXT = None
+
+
+def _reboot():
+    """Restart the board so the bootstrap enters the staged slot.
+
+    The bootstrap owns the choice of slot; the app only records the candidate
+    in the journal first, so a power cut here still leaves a recoverable state.
+    """
+    try:
+        import machine
+        if BOOT_CONTEXT is not None:
+            import psram
+            psram.mkramfs()
+            with open('/ramfs/launch.txt', 'w') as handle:
+                handle.write('ai_dash_boot.py')
+        time.sleep_ms(50)
+        machine.reset()
+    except Exception:
+        pass
 SAVE_FAILED_MESSAGE = "COULD NOT SAVE - DAEMON OFFLINE"
 ALERTS_OFF_MESSAGE = "ALERTS OFF FOR ALL - SEE ADMIN"
 
@@ -131,9 +156,45 @@ class App(object):
         # A device without a generated identity sends none of it, and the
         # daemon keeps its legacy name-and-revision view.
         self.device_id = current_device_id()
-        self.boot = (lifecycle.bump_boot(getattr(config, "BOOT_COUNTER_FILE", None))
-                     if self.device_id else 1)
         self.seq = 0
+        context = BOOT_CONTEXT if isinstance(BOOT_CONTEXT, dict) else None
+        self.journal = None
+        self._activation = None
+        self._store = None
+        # No verified TLS transport or trust root is provisioned in this build,
+        # so no updater is created and no transfer can start. The path below
+        # exists, is unit-tested with injected seams, and stays inert until the
+        # deployment gate in the lifecycle plan is passed.
+        self.ota = None
+        self._watchdog = context.get("watchdog") if context else None
+        self._confirmation_started = _now_ms() if self._watchdog is not None else 0
+        self._transfer = None
+        self._ota_slot = None
+        self._ota_reset = None
+        self.slot = None
+        self.bootstrap = None
+        self.boot_confirmed = True
+        self.app_scheme = lifecycle.SCHEME
+        if context is not None and isinstance(context.get("context"), dict):
+            # Running from a slot: the bootstrap owns the durable boot count,
+            # so this app must not keep a second one.
+            self.journal = context.get("journal")
+            self.slot = context["context"].get("slot")
+            self.bootstrap = context["context"].get("bootstrap")
+            self.boot_confirmed = bool(context["context"].get("boot_confirmed"))
+            self.boot = int(context["context"].get("boot") or 1)
+            self.app_scheme = lifecycle.SCHEME_SLOT
+            try:
+                import activation
+                self._activation = activation
+                self._store = activation.FileStore()
+            except Exception:
+                # A missing journal module costs the slot report, never the
+                # dashboard: the daemon then just sees an ordinary revision.
+                self._activation = None
+        else:
+            self.boot = (lifecycle.bump_boot(getattr(config, "BOOT_COUNTER_FILE", None))
+                         if self.device_id else 1)
         self.client.lifecycle_provider = self._lifecycle_headers
 
         self.gestures = GestureRecogniser(
@@ -250,6 +311,11 @@ class App(object):
         # a daemon release, both, or nothing. An absent or unusable extension
         # means nothing, so an older daemon costs the screen nothing.
         self.lifecycle_notice = lifecycle.notice(payload)
+        if error is None:
+            # A complete answer is the only evidence of health this app has;
+            # it is what turns a staged slot into the confirmed one.
+            self._maybe_confirm(payload)
+            self._ota_offer(payload)
         if self.lifecycle_open and self.lifecycle_notice is None:
             # The condition cleared while the view was open: go back to the
             # card the user was on.
@@ -539,10 +605,163 @@ class App(object):
             return None
         self.seq += 1
         text = lifecycle.build(self.device_id, self.boot, self.seq,
-                               current_revision_hex())
+                               current_revision_hex(),
+                               bootstrap=self.bootstrap, slot=self.slot,
+                               boot_confirmed=self.boot_confirmed,
+                               caps=["ota-v1"] if self.ota is not None and self.ota.readiness() is None else [],
+                               scheme=self.app_scheme,
+                               update=self._update_block())
         if text is None:
             return None
         return (self.device_id, text)
+
+    def _update_block(self):
+        """What this device is doing to its own app, from the durable journal.
+
+        With no journal there is no updater, so the block is idle. A retained
+        terminal attempt keeps reporting until the daemon settles it, because a
+        reboot must not turn a failure into a clean idle report.
+        """
+        if self._activation is not None and self.journal is not None:
+            try:
+                return self._activation.update_block(self.journal)
+            except Exception:
+                return None
+        return None
+
+    def _ota_offer(self, payload):
+        """Stage a permitted update, if there is an updater to do it with.
+
+        ``self.ota`` is only created by ``updater.make_updater`` with a
+        verified TLS transport, a provisioned trust root and the measured
+        firmware capabilities. This build has none of them, so this returns
+        immediately. When it does run it only starts a transfer: the bytes are
+        verified by hash before anything becomes a candidate.
+        """
+        if self.ota is None or self._transfer is not None or self.journal is None:
+            return
+        device = payload.get("device_lifecycle") if isinstance(payload, dict) else None
+        command = device.get("command") if isinstance(device, dict) else None
+        if not isinstance(command, dict) or command.get("kind") != "start_update":
+            return
+        if command.get("manifest_path") != "/api/v1/device-app/manifest":
+            return
+        for name in ("transfer", "pending", "failure", "success"):
+            recorded = self.journal.get(name)
+            if recorded and recorded.get("attempt") == command.get("attempt"):
+                return
+        if self.journal.get("pending") is not None:
+            return
+        try:
+            import updater
+            error = self.ota.readiness()
+            if error:
+                self._ota_failed(command, error, blocked=True)
+                return
+            manifest_text = self.ota.transport.manifest(command.get("manifest_path"))
+            self.ota.journal = self.journal
+            transfer, error = self.ota.prepare(command, manifest_text, self.slot)
+            if error:
+                self._ota_failed(command, error, blocked=True)
+                return
+            if transfer.manifest["revision"] == current_revision_hex():
+                return
+            self._ota_slot = "b" if self.slot == "a" else "a"
+            accepted = self._activation.begin_transfer(self.journal, self._ota_slot,
+                transfer.manifest["revision"], command["generation"], command["attempt"], command["id"])
+            self._activation.save(self._store, accepted)
+            self.journal = accepted
+            self._transfer = transfer
+        except Exception as exc:
+            print("AI Dash: update could not be staged (%s)" % type(exc).__name__)
+            self._transfer = None
+
+    def _ota_failed(self, command, error, blocked=False):
+        try:
+            value = self._activation.record_failure(self.journal,
+                "blocked" if blocked else "failed", error, command["target_revision"],
+                command["generation"], command["attempt"])
+            self._activation.save(self._store, value)
+            self.journal = value
+        except Exception:
+            pass
+
+    def _ota_tick(self):
+        """Advance a staged transfer by a few bounded chunks per frame.
+
+        The display keeps updating between steps: one step is at most one
+        1024-byte read and write, which is what the measured build can do
+        without stalling the touch/render loop. A finished transfer is
+        activated by the journal and the board restarts into the candidate.
+        """
+        if self._transfer is None:
+            return
+        try:
+            for _ in range(8):
+                if self._transfer.done:
+                    break
+                self._transfer.step()
+            if not self._transfer.done:
+                if self._transfer._finalizing is not None and self.journal["transfer"]["phase"] != "verifying":
+                    verifying = dict(self.journal)
+                    verifying["transfer"] = dict(self.journal["transfer"], phase="verifying")
+                    self._activation.save(self._store, verifying)
+                    self.journal = verifying
+                return
+            transfer, self._transfer = self._transfer, None
+            if transfer.error is not None:
+                print("AI Dash: update staging stopped (%s)" % transfer.error)
+                accepted = self.journal.get("transfer")
+                if accepted:
+                    self._ota_failed({"target_revision": accepted["target"],
+                        "generation": accepted["generation"], "attempt": accepted["attempt"]}, transfer.error)
+                return
+            if self._activation is None:
+                return
+            accepted = self.journal["transfer"]
+            candidate = self._activation.begin_candidate(self.journal, self._ota_slot,
+                transfer.manifest["revision"], accepted["generation"], accepted["attempt"], accepted["command"])
+            self._activation.save(self._store, candidate)
+            self.journal = candidate
+            print("AI Dash: update staged in slot " + self._ota_slot)
+            reset = self._ota_reset or _reboot
+            reset()
+        except Exception as exc:
+            print("AI Dash: update step failed (%s)" % type(exc).__name__)
+            self._transfer = None
+
+    def _maybe_confirm(self, payload):
+        """Write the durable healthy marker once this app has proved itself.
+
+        Two paths reach here. A daemon-issued attempt needs the acknowledgment
+        that only arrives with a complete, validated status answer; a local
+        activation (a USB install) has no attempt and confirms on its first
+        successful poll. Writing the marker is what makes a reboot keep the
+        new slot instead of rolling back to the old one.
+        """
+        if self._activation is None or self.journal is None:
+            return
+        pending = self.journal.get("pending")
+        if not pending or pending.get("slot") != self.slot:
+            return
+        revision = current_revision_hex()
+        if not revision or pending["target"] != revision:
+            # This is not the app the activation staged, so it must not confirm
+            # it: the target is the exact revision, not a prefix or a label.
+            return
+        if pending.get("attempt") is not None:
+            device = payload.get("device_lifecycle") if isinstance(payload, dict) else None
+            ack = device.get("confirm_attempt_id") if isinstance(device, dict) else None
+            if ack != pending["attempt"]:
+                return
+        try:
+            confirmed = self._activation.confirm(self.journal, pending.get("target"))
+            self._activation.save(self._store, confirmed)
+            self.journal = confirmed
+            self.boot_confirmed = True
+            print("AI Dash: slot %s confirmed" % self.slot)
+        except Exception as exc:
+            print("AI Dash: slot confirmation could not be stored (%s)" % type(exc).__name__)
 
     def _diag_state(self):
         """Everything the device knows about itself, in one dict.
@@ -974,6 +1193,11 @@ class App(object):
         self._poll_failed("Connecting...", "Joining Wi-Fi")
         asyncio.run(self._run_live())
 
+    def _service_watchdog(self):
+        if self._watchdog is not None:
+            if self.boot_confirmed or _ticks_diff(_now_ms(), self._confirmation_started) < 180000:
+                self._watchdog.feed()
+
     def _tick(self):
         """One pass of the main loop: touch, timers, and a redraw if needed.
 
@@ -982,6 +1206,8 @@ class App(object):
         pass instead of a copy of it.
         """
         try:
+            self._service_watchdog()
+            self._ota_tick()
             self._handle_gestures(self._poll_touch())
             self._poll_popup()
             if self._expire_alerts():

@@ -23,6 +23,7 @@ diagnostics, no addresses, no credentials.
 import hashlib
 import json
 import logging
+import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -30,8 +31,10 @@ from datetime import datetime, timezone
 from . import device_protocol as protocol
 from .clients import sanitize_header
 from .device_install import app_snapshot
+from .device_updater import OtaUpdater, stamp as _updater_stamp, parse_stamp as _updater_parse
 from .release import release_channel, release_version
 from .sources import in_container
+from .storage import ConfigurationConflict
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +62,8 @@ PROGRESS_PHASES = ("downloading", "verifying", "activating", "confirming")
 
 # The most attempt rows the device detail returns, and the most retained.
 ATTEMPT_DETAIL_LIMIT = 32
+# An attempt in one of these states is still outstanding for its device.
+OUTSTANDING_ATTEMPT = ("queued", "started", "confirming", "unconfirmed")
 
 
 class AdminRequestError(Exception):
@@ -146,7 +151,14 @@ class DeviceLifecycle(object):
         self._expected_provider = expected_provider or app_snapshot
         self._clock = clock or time.time
         self.ota_enabled = bool(ota_enabled)
-        self.updater = updater or DisabledUpdater()
+        if updater is not None:
+            self.updater = updater
+        elif self.ota_enabled:
+            # Operational OTA exists, but only a configuration that passed the
+            # deployment gate turns it on. The shipped default is off.
+            self.updater = OtaUpdater(self._clock)
+        else:
+            self.updater = DisabledUpdater()
         self.running_version = running_version or release_version()
         self.channel = channel or release_channel_name()
         self._lock = threading.Lock()
@@ -158,30 +170,57 @@ class DeviceLifecycle(object):
         self._tuples = {}
         # Live last-seen times are separate from the throttled DB checkpoints.
         self._seen = {}
-        self._expected_cache = None
-        self._expected_failed = False
+        self._identities_cache = None
 
     # -- the expected bundle ----------------------------------------------
 
+    def _identities(self):
+        """The identities of this daemon's own bundle: legacy and slot.
+
+        Both are read from the running build and cached for the process. A
+        bundle without a slot layout yields no slot identity, and then a
+        slot-reporting device is ``incomparable`` rather than guessed at.
+        """
+        with self._lock:
+            if self._identities_cache is not None:
+                return self._identities_cache
+        values = {"legacy": None, "slot": None, "bootstrap": None}
+        try:
+            bundle = self._expected_provider()
+            values["legacy"] = protocol.bundle_identity(bundle)
+            values["slot"] = protocol.slot_identity(bundle)
+            values["bootstrap"] = protocol.bootstrap_version(bundle)
+        except Exception:
+            log.debug("the Presto app bundle identity could not be read", exc_info=True)
+        with self._lock:
+            self._identities_cache = values
+        return values
+
     def expected(self):
-        """The verified identity of this daemon's own app bundle, or None.
+        """The identity a legacy report is compared with, or None.
 
         Read from the running build, never from device input, a stored previous
         value, or the newest registry release. A bundle that cannot be read is
         reported as unavailable, and no update command follows from it.
         """
-        with self._lock:
-            if self._expected_cache is not None or self._expected_failed:
-                return self._expected_cache
-        identity = None
-        try:
-            identity = protocol.bundle_identity(self._expected_provider())
-        except Exception:
-            log.debug("the Presto app bundle identity could not be read", exc_info=True)
-        with self._lock:
-            self._expected_cache = identity
-            self._expected_failed = identity is None
-        return identity
+        values = self._identities()
+        return values["legacy"] or values["slot"]
+
+    def slot_expected(self):
+        """The ``slot-v1`` identity this daemon can install, or None."""
+        return self._identities()["slot"]
+
+    def expected_for(self, scheme):
+        """The expectation that belongs to a reported revision scheme.
+
+        A legacy report is only ever compared with a legacy aggregate, and a
+        slot report only with a slot hash. Passing the other scheme yields
+        ``incomparable`` in ``protocol.compare``, which is the honest answer.
+        """
+        values = self._identities()
+        if scheme == protocol.SCHEME_SLOT:
+            return values["slot"] or values["legacy"]
+        return values["legacy"] or values["slot"]
 
     # -- one status request ------------------------------------------------
 
@@ -281,6 +320,7 @@ class DeviceLifecycle(object):
 
     def _accepted(self, device_id, headers, report, identity):
         """A well-formed report: compare it, settle the tuple, persist."""
+        identity = self.expected_for(report["scheme"]) or identity
         stored = self._read_device(device_id)
         if stored is None and self._device_count() >= protocol.MAX_DEVICES:
             return self._extension(
@@ -303,13 +343,75 @@ class DeviceLifecycle(object):
 
         comparison = protocol.compare(
             {"scheme": report["scheme"], "revision": report["revision"]}, identity)
-        state, reason, attention = self._state_for(comparison, report["update"], identity)
+        budget = None
+        attempt = None
+        command = None
+        confirmation = None
+        force = False
+        extra_budgets = []
+        extra_attempts = []
         name = sanitize_header(headers.get(NAME_HEADER))
+        overrides = None
+        expired = None
+        cancelled = None
+        if self.ota_enabled and stored is not None:
+            # A queued admin reconciliation is settled before any new permit,
+            # so a fresh healthy report cannot be overtaken by another update.
+            overrides, cancelled = self.settle_recovery(stored, report, comparison)
+            if overrides is not None and "update_state" not in overrides:
+                # An expired request clears the check, not the warning.
+                expired, overrides = overrides, None
+        if self.ota_enabled and overrides is None:
+            budget = self._current_budget(device_id, identity)
+            attempt = self._outstanding_attempt(stored)
+            if attempt is not None:
+                # The attempt's own generation is the row that must be
+                # superseded if the daemon's target has moved on.
+                budget = self._budget_for(device_id, attempt["generation_id"]) or budget
+            # A first report still gets a permit: the device row is written in
+            # the same transaction as the command, so nothing is issued before
+            # it can be persisted.
+            device = stored if stored is not None else {"device_id": device_id}
+            outcome = self.updater.advance(device, report, identity, budget, attempt)
+            state, reason, attention = outcome.state, outcome.reason, outcome.attention
+            budget, attempt = outcome.budget, outcome.attempt
+            command, confirmation = outcome.command, outcome.confirm_attempt_id
+            extra_budgets = outcome.extra_budgets
+            extra_attempts = outcome.extra_attempts
+            force = outcome.changed
+        elif overrides is None:
+            state, reason, attention = self._state_for(comparison, report["update"],
+                                                       identity)
+        else:
+            state, reason, attention = "current", None, False
+        generation = budget["generation_id"] if budget else None
+        active_attempt = (attempt["attempt_id"]
+                          if attempt is not None and attempt["status"] in OUTSTANDING_ATTEMPT
+                          else None)
         try:
             row = self._merge(stored, device_id, name, report, text, state,
-                              reason, attention)
+                              reason, attention, generation, active_attempt,
+                              force=force or overrides is not None
+                              or expired is not None)
+            if row is not None and overrides is not None:
+                row = dict(row, **overrides)
+                row["state_revision"] = int(row["state_revision"]) + 1
+            if row is not None and expired is not None:
+                row = dict(row, **expired)
+                row["state_revision"] = int(row["state_revision"]) + 1
             if row is not None:
-                self.storage.save_device(row)
+                budgets = list(extra_budgets) + ([budget] if budget is not None else [])
+                attempts = (list(extra_attempts)
+                            + ([attempt] if attempt is not None else []))
+                if cancelled is not None:
+                    attempts.append(cancelled)
+                if budgets or attempts:
+                    # The permit and the rows it names move together, so a
+                    # restart never finds a command with no attempt.
+                    self.storage.save_device_report(row, budgets or None,
+                                                    attempts or None)
+                else:
+                    self.storage.save_device(row)
         except Exception:
             log.exception("the device record could not be written")
             return self._unavailable_extension(device_id)
@@ -320,7 +422,21 @@ class DeviceLifecycle(object):
             device_id, protocol.REPORT_ACCEPTED,
             protocol.reported_shape(report["scheme"], report["revision"],
                                     report["bootstrap"]),
-            identity, comparison, state, reason, attention, settled)
+            identity, comparison, state, reason, attention, settled,
+            command=command, confirm_attempt_id=confirmation)
+
+    def _outstanding_attempt(self, stored):
+        """The device's one attempt, when it is still open."""
+        if stored is None or not stored.get("active_attempt_id"):
+            return None
+        try:
+            attempt = self.storage.device_attempt(stored["active_attempt_id"])
+        except Exception:
+            log.debug("the device attempt could not be read", exc_info=True)
+            return None
+        if attempt is None or attempt["status"] not in OUTSTANDING_ATTEMPT:
+            return None
+        return attempt
 
     def _read_device(self, device_id):
         try:
@@ -383,7 +499,8 @@ class DeviceLifecycle(object):
             return "manual_action", "usb_update_required", True
         return "unknown", "revision_uncomparable", False
 
-    def _merge(self, stored, device_id, name, report, text, state, reason, attention):
+    def _merge(self, stored, device_id, name, report, text, state, reason, attention,
+               generation_id=None, attempt_id=None, force=False):
         """The device row for this report, keeping what a bad report cannot say."""
         now = self._clock()
         stamp = _stamp(now)
@@ -398,6 +515,10 @@ class DeviceLifecycle(object):
         previous_name = stored["name"] if stored else None
         if name == "unknown" and previous_name:
             name = previous_name
+        if generation_id is None and stored is not None:
+            generation_id = stored["active_generation_id"]
+        if attempt_id is None and stored is not None and force is False:
+            attempt_id = stored["active_attempt_id"]
         meaningful = (
             stored is None or
             stored["scheme"] != report["scheme"] or
@@ -409,7 +530,9 @@ class DeviceLifecycle(object):
             stored["update_state"] != state or
             stored["reason"] != reason or
             bool(stored["attention_latched"]) != latched or
-            stored["name"] != name)
+            stored["name"] != name or
+            stored["active_generation_id"] != generation_id or
+            stored["active_attempt_id"] != attempt_id)
         checkpoint_due = (
             stored is None or
             now - (_parse_stamp(stored["last_seen_at"]) or 0) >= protocol.CHECKPOINT_SECONDS)
@@ -433,8 +556,8 @@ class DeviceLifecycle(object):
             "update_state": state,
             "reason": reason,
             "attention_latched": 1 if latched else 0,
-            "active_generation_id": stored["active_generation_id"] if stored else None,
-            "active_attempt_id": stored["active_attempt_id"] if stored else None,
+            "active_generation_id": generation_id,
+            "active_attempt_id": attempt_id,
             "state_revision": revision,
             "recovery_request_id": stored["recovery_request_id"] if stored else None,
             "recovery_requested_at": stored["recovery_requested_at"] if stored else None,
@@ -445,7 +568,7 @@ class DeviceLifecycle(object):
             "last_recovery_at": stored["last_recovery_at"] if stored else None,
             "last_recovery_kind": stored["last_recovery_kind"] if stored else None,
         }
-        if stored is not None and not meaningful and not checkpoint_due:
+        if stored is not None and not meaningful and not checkpoint_due and not force:
             # Nothing changed and the checkpoint is not due: write nothing.
             return None
         return row
@@ -453,15 +576,17 @@ class DeviceLifecycle(object):
     # -- the extension -----------------------------------------------------
 
     def _extension(self, device_id, report_status, reported, identity, comparison,
-                   state, reason, attention, row):
+                   state, reason, attention, row, command=None,
+                   confirm_attempt_id=None):
         """The ``device_lifecycle`` object for one request.
 
-        It describes only the requesting device. It never carries another
-        device's state, and it never carries a command while OTA is off.
+        It describes only the requesting device. A command is present only when
+        an enabled updater issued one for this device and persisted it first;
+        with OTA off it is always null.
         """
         attempts_started = 0
         if row is not None:
-            budget = self._active_budget(device_id)
+            budget = self._current_budget(device_id, identity)
             attempts_started = int(budget["attempts_started"]) if budget else 0
         needs_attention = bool(attention)
         if row is not None and row.get("attention_latched"):
@@ -486,8 +611,8 @@ class DeviceLifecycle(object):
                 "attempt_deadline": None,
                 "confirmation_deadline": None,
             },
-            "command": None,
-            "confirm_attempt_id": None,
+            "command": command,
+            "confirm_attempt_id": confirm_attempt_id,
         }
 
     def _active_budget(self, device_id):
@@ -496,6 +621,41 @@ class DeviceLifecycle(object):
         except Exception:
             log.debug("the device budget could not be read", exc_info=True)
             return None
+
+    def _budget_for(self, device_id, generation_id):
+        """The retained budget with this generation, or None."""
+        try:
+            rows = self.storage.device_budgets(device_id)
+        except Exception:
+            log.debug("the device budgets could not be read", exc_info=True)
+            return None
+        for row in rows:
+            if row["generation_id"] == generation_id:
+                return row
+        return None
+
+    def _current_budget(self, device_id, identity):
+        """The newest budget for the current target, whatever its status.
+
+        An exhausted or superseded budget must be remembered for its target:
+        forgetting it would recreate the same automatic budget on the next
+        poll, which is exactly the retry loop the policy forbids. A budget for
+        a different target is history, not a reason to refuse the new one.
+        """
+        if identity is None:
+            return None
+        try:
+            rows = self.storage.device_budgets(device_id)
+        except Exception:
+            log.debug("the device budgets could not be read", exc_info=True)
+            return None
+        if not rows:
+            return None
+        newest = rows[0]
+        if (newest["target_scheme"] == identity["scheme"]
+                and newest["target_revision"] == identity["revision"]):
+            return newest
+        return None
 
     # -- the release notice ------------------------------------------------
 
@@ -586,11 +746,14 @@ class DeviceLifecycle(object):
         now = self._clock()
         checkpoint = live_seen is None
         capabilities = json.loads(row["capabilities_json"] or "[]")
-        identity = self.expected()
+        identity = self.expected_for(row["scheme"])
         comparison = protocol.compare(
             {"scheme": row["scheme"], "revision": row["revision"]}, identity)
         needs_attention = bool(row["attention_latched"]) or \
             row["update_state"] in protocol.ATTENTION_STATES
+        budget = self._current_budget(row["device_id"], identity)
+        attempt = self._latest_attempt(row["device_id"])
+        outstanding = self._outstanding_attempt(row)
         return {
             "device_id": row["device_id"],
             "name": row["name"],
@@ -611,19 +774,24 @@ class DeviceLifecycle(object):
                 "ota_enabled": self.ota_enabled,
                 "generation": row["active_generation_id"],
                 "attempt": row["active_attempt_id"],
-                "attempts_started": self._attempts_started(row["device_id"]),
+                "attempts_started": int(budget["attempts_started"]) if budget else 0,
                 "attempt_limit": protocol.ATTEMPT_LIMIT,
-                "next_attempt_at": None,
-                "attempt_deadline": None,
-                "confirmation_deadline": None,
-                "last_error": row["reason"],
-                "issued_at": None,
-                "started_at": None,
-                "finished_at": None,
-                "command_status": "none",
+                "next_attempt_at": budget["next_attempt_at"] if budget else None,
+                "attempt_deadline": attempt["attempt_deadline"] if attempt else None,
+                "confirmation_deadline": attempt["confirmation_deadline"] if attempt else None,
+                "last_error": (attempt["error_code"] if attempt and attempt["error_code"]
+                               else row["reason"]),
+                "issued_at": attempt["issued_at"] if attempt else None,
+                "started_at": attempt["started_at"] if attempt else None,
+                "finished_at": attempt["finished_at"] if attempt else None,
+                "command_status": _command_status(attempt),
                 # Never a device-supplied value, and never true while the
                 # updater is absent.
-                "can_retry": False,
+                "can_retry": bool(self.ota_enabled
+                                  and (outstanding is None
+                                       or outstanding["status"] == "unconfirmed")
+                                  and row["update_state"] in ("failed", "unconfirmed")
+                                  and self.slot_expected() is not None),
                 "recovery_pending": bool(row["recovery_request_id"]),
                 "recovery_expires_at": self._recovery_expiry(row),
                 "last_recovery_at": row["last_recovery_at"],
@@ -635,8 +803,16 @@ class DeviceLifecycle(object):
             "usb_observation": None,
         }
 
+    def _latest_attempt(self, device_id):
+        try:
+            rows = self.storage.device_attempts(device_id, 1)
+        except Exception:
+            log.debug("the newest device attempt could not be read", exc_info=True)
+            return None
+        return rows[0] if rows else None
+
     def _attempts_started(self, device_id):
-        budget = self._active_budget(device_id)
+        budget = self._current_budget(device_id, self.expected())
         return int(budget["attempts_started"]) if budget else 0
 
     def _recovery_expiry(self, row):
@@ -666,7 +842,7 @@ class DeviceLifecycle(object):
             "recovery": attempt["recovery"],
         }
 
-    # -- the disabled mutation routes --------------------------------------
+    # -- authenticated admin mutations -------------------------------------
 
     def refuse_mutation(self, device_id, kind):
         """Answer a retry or recovery request while the updater is absent.
@@ -683,6 +859,181 @@ class DeviceLifecycle(object):
         log.info("device %s %s refused: the updater is not enabled",
                  device_id, kind)
         raise AdminRequestError(409, "ota_not_enabled")
+
+    def authorize_retry(self, device_id, body, idempotency_key):
+        """Authorize a fresh bounded budget for the current target.
+
+        Nothing is sent to the device: the permit travels in its next status
+        response, and the device still has to pass every gate itself.
+        """
+        if not self.ota_enabled:
+            self.refuse_mutation(device_id, "retry")
+        return self._mutate(device_id, "retry", body, idempotency_key)
+
+    def queue_recovery(self, device_id, body, idempotency_key):
+        """Queue a reconciliation check; it clears nothing by itself."""
+        if not self.ota_enabled:
+            self.refuse_mutation(device_id, "confirm-recovery")
+        return self._mutate(device_id, "confirm-recovery", body, idempotency_key)
+
+    def _mutate(self, device_id, kind, body, idempotency_key):
+        with self._observation_lock:
+            return self._mutate_locked(device_id, kind, body, idempotency_key)
+
+    def _mutate_locked(self, device_id, kind, body, idempotency_key):
+        if not protocol.valid_id(device_id):
+            raise AdminRequestError(404, "not_found")
+        row = self._read_device(device_id)
+        if row is None:
+            raise AdminRequestError(404, "not_found")
+        if not protocol.valid_id(idempotency_key):
+            raise AdminRequestError(400, "invalid_idempotency_key")
+        wanted = _validated_mutation_body(body)
+        if wanted is None:
+            raise AdminRequestError(400, "invalid_request")
+        path = "/api/admin/devices/%s/%s" % (
+            device_id, "retry" if kind == "retry" else "confirm-recovery")
+        digest = request_hash("POST", path, wanted)
+        saved = self._saved_request(device_id, idempotency_key)
+        if saved is not None:
+            if saved["body_sha256"] != digest:
+                raise AdminRequestError(409, "idempotency_conflict")
+            return json.loads(saved["response_json"])
+        if int(row["state_revision"]) != wanted["state_revision"]:
+            raise AdminRequestError(409, "state_changed")
+        identity = self.slot_expected()
+        if identity is None:
+            raise AdminRequestError(409, "ota_not_enabled")
+        if (wanted["target_scheme"] != identity["scheme"]
+                or wanted["target_revision"] != identity["revision"]):
+            raise AdminRequestError(409, "target_changed")
+        attempt = self._outstanding_attempt(row)
+        if attempt is not None and attempt["status"] != "unconfirmed":
+            raise AdminRequestError(409, "attempt_unresolved")
+        if kind == "retry":
+            if row["update_state"] == "manual_action" and \
+                    row["reason"] != "usb_update_required":
+                # A gate is not something a retry can override.
+                raise AdminRequestError(409, "manual_action_required")
+            updated, budgets, result = self._grant_budget(row, identity, wanted)
+        else:
+            if row["update_state"] not in ("failed", "manual_action", "unconfirmed"):
+                raise AdminRequestError(409, "state_changed")
+            updated, budgets, result = self._queue_recovery(row, identity)
+        record = {"device_id": device_id, "request_key": idempotency_key,
+                  "body_sha256": digest, "response_json": json.dumps(result),
+                  "created_at": _updater_stamp(self._clock())}
+        try:
+            self.storage.save_device_report(updated, budgets, None,
+                admin_request=record, expected_revision=wanted["state_revision"])
+        except ConfigurationConflict:
+            raise AdminRequestError(409, "state_changed") from None
+        except Exception:
+            log.exception("the device admin transition could not be committed")
+            raise AdminRequestError(500, "state_unavailable") from None
+        return result
+
+    def _grant_budget(self, row, identity, wanted):
+        """Replace any budget with a fresh bounded one, atomically."""
+        device_id = row["device_id"]
+        now = self._clock()
+        stamp = _updater_stamp(now)
+        generation = _new_generation(device_id, identity["revision"], stamp)
+        old = self._active_budget(device_id)
+        budgets = [dict(old, status="superseded", updated_at=stamp)] if old else []
+        budget = {"generation_id": generation, "device_id": device_id,
+                  "target_scheme": identity["scheme"],
+                  "target_revision": identity["revision"], "attempts_started": 0,
+                  "status": "active", "next_attempt_at": None,
+                  "created_at": stamp, "updated_at": stamp}
+        updated = dict(row, active_generation_id=generation,
+                       active_attempt_id=None,
+                       state_revision=int(row["state_revision"]) + 1,
+                       recovery_request_id=None, recovery_requested_at=None,
+                       recovery_after_boot=None, recovery_after_seq=None,
+                       recovery_target_scheme=None, recovery_target_revision=None)
+        return updated, budgets + [budget], {"queued": True, "generation": generation,
+                                             "state_revision": updated["state_revision"]}
+
+    def _queue_recovery(self, row, identity):
+        """Persist a reconciliation request; it grants no transfer and no reset.
+
+        The target stored is the identity the daemon *expects*, not the
+        revision the broken app last reported: a fresh report must prove the
+        expected app is running, not the same old hash again.
+        """
+        device_id = row["device_id"]
+        now = self._clock()
+        recovery_id = _new_generation(device_id, "recovery", _updater_stamp(now))
+        updated = dict(row, recovery_request_id=recovery_id,
+                       recovery_requested_at=_updater_stamp(now),
+                       recovery_after_boot=int(row["boot"]),
+                       recovery_after_seq=int(row["seq"]),
+                       recovery_target_scheme=identity["scheme"],
+                       recovery_target_revision=identity["revision"],
+                       state_revision=int(row["state_revision"]) + 1)
+        return updated, None, {"queued": True, "recovery_id": recovery_id,
+                               "state_revision": updated["state_revision"]}
+
+    def _saved_request(self, device_id, key):
+        try:
+            return self.storage.device_admin_request(device_id, key)
+        except Exception:
+            log.debug("a saved admin request could not be read", exc_info=True)
+            return None
+
+    # -- recovery reconciliation -------------------------------------------
+
+    def _recovery_state(self, stored, report, comparison):
+        """Whether a queued reconciliation now qualifies, expired, or neither."""
+        if stored is None or not stored.get("recovery_request_id"):
+            return None
+        requested = _parse_stamp(stored["recovery_requested_at"])
+        if requested is None or self._clock() - requested > protocol.RECOVERY_SECONDS:
+            return "expired"
+        after = (stored["recovery_after_boot"], stored["recovery_after_seq"])
+        if after[0] is None or after[1] is None:
+            return "expired"
+        if (report["boot"], report["seq"]) <= after:
+            return None
+        if comparison != protocol.COMPARISON_EQUAL:
+            return None
+        if stored["recovery_target_revision"] != report["revision"]:
+            return None
+        if not report["boot_confirmed"]:
+            return None
+        if report["update"]["phase"] not in ("idle", "succeeded"):
+            return None
+        return "matched"
+
+    def settle_recovery(self, stored, report, comparison):
+        """Apply a queued reconciliation to one accepted report.
+
+        Returns ``(overrides, attempt)``: the row fields that change, and an
+        attempt that must be cancelled if one is still open. A qualified report
+        cancels a superseded stuck attempt with the ``admin_app_reconciled``
+        label and clears the active warning, keeping its history.
+        """
+        verdict = self._recovery_state(stored, report, comparison)
+        if verdict is None:
+            return None, None
+        stamp = _updater_stamp(self._clock())
+        cleared = {"recovery_request_id": None, "recovery_requested_at": None,
+                   "recovery_after_boot": None, "recovery_after_seq": None,
+                   "recovery_target_scheme": None, "recovery_target_revision": None}
+        if verdict == "expired":
+            # An expired request cancels the check, not the warning.
+            return cleared, None
+        attempt = None
+        row = self._outstanding_attempt(stored)
+        if row is not None:
+            attempt = dict(row, status="cancelled", finished_at=stamp,
+                           recovery="admin_app_reconciled")
+        cleared.update({"update_state": "current", "reason": None,
+                        "attention_latched": 0, "active_attempt_id": None,
+                        "last_recovery_at": stamp,
+                        "last_recovery_kind": "admin_app_reconciled"})
+        return cleared, attempt
 
 
 def release_instructions(channel):
@@ -728,3 +1079,47 @@ def request_hash(method, path, body):
     canonical = json.dumps({"method": method, "path": path, "body": body},
                            sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _validated_mutation_body(body):
+    """A retry or recovery body with exactly the agreed keys, or None.
+
+    ``state_revision`` is the optimistic-concurrency value the device detail
+    returned; the target must be a full slot hash, because a legacy prefix or
+    a display label is not a target this daemon can install.
+    """
+    if not isinstance(body, dict):
+        return None
+    if set(body) != {"state_revision", "target_scheme", "target_revision"}:
+        return None
+    revision_number = body["state_revision"]
+    if type(revision_number) is not int or revision_number < 1:
+        return None
+    scheme = body["target_scheme"]
+    revision = body["target_revision"]
+    if scheme not in protocol.SCHEMES:
+        return None
+    if not protocol.valid_revision(scheme, revision):
+        return None
+    if len(revision) != protocol.SLOT_REVISION_CHARS:
+        return None
+    return {"state_revision": revision_number, "target_scheme": scheme,
+            "target_revision": revision}
+
+
+def _new_generation(device_id, target, stamp):
+    """A fresh 32-character identifier for a budget or a recovery request."""
+    seed = "%s|%s|%s|%s" % (device_id, target, stamp, os.urandom(8).hex())
+    return hashlib.sha256(seed.encode("utf-8")).hexdigest()[:32]
+
+
+def _command_status(attempt):
+    """The persisted command's state, derived from its attempt row."""
+    if attempt is None:
+        return "none"
+    status = attempt["status"]
+    if status == "queued":
+        return "queued"
+    if status == "cancelled":
+        return "cancelled"
+    return "acknowledged"

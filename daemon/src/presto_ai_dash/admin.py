@@ -618,7 +618,11 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
                 self._send(400, {"error": "invalid request"})
                 return
             try:
-                manager.refuse_device_mutation(device_id, kind)
+                # With the updater disabled this raises 409 ota_not_enabled;
+                # with it enabled the coordinator validates the body shape,
+                # the idempotency key, the optimistic concurrency value and
+                # every gate before it queues anything.
+                result = manager.device_mutation(device_id, kind, data, key)
             except AdminRequestError as exc:
                 self._send(exc.status, {"error": exc.code})
                 return
@@ -626,9 +630,7 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
                 log.error("admin device mutation failed")
                 self._send(500, {"error": "device request could not be processed"})
                 return
-            # Not reached while the updater is absent; kept so a future
-            # implementation cannot fall through without answering.
-            self._send(409, {"error": "ota_not_enabled"})
+            self._send(202, result)
 
         def do_POST(self):
             if urlsplit(self.path).path == "/api/admin/session":

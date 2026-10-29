@@ -101,6 +101,12 @@ class WheelCheckTests(unittest.TestCase):
             for target, data in self.bundle["files"].items():
                 if target != drop:
                     archive.writestr("presto_ai_dash/presto_app" + target, data)
+            # The same wheel carries the slot and bootstrap layouts.
+            for folder, part in (("presto_app_slot", self.bundle.get("slot")),
+                                 ("presto_app_boot", self.bundle.get("bootstrap"))):
+                for target, data in (part or {"files": {}})["files"].items():
+                    archive.writestr("presto_ai_dash/%s/%s" % (folder, target.lstrip("/")),
+                                     data)
             if not drop_template:
                 template = (ROOT / "daemon" / "src" / "presto_ai_dash" / "setup"
                             / "presto_setup_template.py")

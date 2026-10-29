@@ -81,6 +81,53 @@ revision and the A/B gating are unchanged. **Not proven:** any of the OTA,
 retry, confirmation or release-notice paths on hardware, because none of them
 exists yet.
 
+**Built since (2026-10-29):** safe Presto application updates (Part 2 of the
+[device lifecycle plan](../.ai_docs/presto-ai-dash-device-lifecycle-plan.md)),
+with operational OTA still **off**. One shared inventory now publishes three
+artifacts: the unchanged `legacy-v1` app, a `slot-v1` dashboard (SHA-256 over
+canonical slot-relative names, generated revision files excluded) and a
+bootstrap of compatibility version 1. A small stable carousel entry
+(`/ai_dash_boot.py`) chooses slot A or B from a durable journal in
+`/ai_dash_state`, keeping identity, settings, boot counter and recovery
+metadata outside both slots and leaving the stock launcher and firmware alone.
+The journal is written through a temporary file and a rename with a backup, and
+every interrupted state is tested. A candidate gets one clean entry, re-arms
+the stock handoff, and rolls back on the next entry; a crashed candidate is
+recorded and a crashed confirmed slot is raised rather than reset in a loop.
+`tools/presto_device.py migrate` is the one deliberate USB migration; routine
+`sync`/`check` work on both layouts and never migrate by themselves. The
+daemon serves **only its own** bundle through two authenticated routes
+(`/api/v1/device-app/manifest` and `/api/v1/device-app/file/<name>`), and the
+device validates the manifest whole, fails closed without verified TLS, an
+explicit hostname and usable time, checks firmware, storage and bootstrap
+requirements, and stages the inactive slot through a resumable chunked
+transfer. The daemon's updater persists a permit before returning it, keeps one
+attempt per device, spends it once, retries 1 and 5 minutes later, stops on a
+gate or a first-boot crash, reports `unconfirmed` at a deadline rather than a
+failure, and settles a candidate only after the two-poll handshake; the admin
+**Retry** and **Confirm recovery** routes validate body, idempotency,
+concurrency and target, and retry never clears the warning. `presto_ota_enabled`
+defaults to false, so a mismatch still asks for a USB update. **Not proven:**
+any of it on hardware — no migration, no staged full-app transfer, no physical
+power cut during a production journal write, no real confirmation handshake,
+no near-full-flash test and no supported-firmware matrix. The device remains on
+the legacy layout.
+
+**Part 2 review fixes (2026-10-29):** migration now prepares directories before
+uploads, preserves the public boot epoch, and retires only inventoried public
+legacy files. Device hashing uses the MicroPython JSON API. Staging validates
+the actual different target and current preflight gates, persists the permit
+before file writes, verifies the complete inactive slot and generated revision
+metadata, and carries its attempt through confirmation. Corrupt/incompatible
+journals and failed entry commits require recovery; a later app crash cannot
+overwrite a durable confirmation. Candidate entry requires a firmware watchdog
+and feeding stops at the local confirmation deadline. Retry accounting includes
+failures received after lost progress polls, and admin mutations commit their
+idempotency response in the same transaction. These changes have automated
+regressions; watchdog timing, real migration, full-app A/B staging, power cuts,
+trust provisioning, and the other production hardware gates still require
+physical acceptance. Routine USB sync remains legacy and OTA remains disabled.
+
 **Open:** Phase 8 (OpenTelemetry;
 researched, decision gate pending), several Presto devices, M8 acceptance
 (real expired-login recovery, a second
@@ -90,6 +137,10 @@ live list is the backlog in [the remote ingest plan](remote-ingest-plan.md).
 The daemon suite has **2032 tests** (8 skipped) as of 2026-10-25. The sections
 below are the historical record; dated corrections mark statements that are
 no longer true.
+
+> **Correction, 2026-10-29.** The required suite now runs **2,576 tests with 9
+> skipped** and passes with the repository `.venv`. The 2026-10-25 figure above
+> is history.
 
 ## Milestones
 

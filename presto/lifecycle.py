@@ -27,6 +27,9 @@ import os
 PROTOCOL_VERSION = 1
 # The revision scheme of the current fixed-path installation.
 SCHEME = "legacy-v1"
+# The scheme a dashboard running from an A/B slot reports. The two hash
+# different file sets, so a report never reuses one as the other.
+SCHEME_SLOT = "slot-v1"
 
 # The two headers, on status GETs only.
 DEVICE_ID_HEADER = "X-Presto-Device-ID"
@@ -97,6 +100,13 @@ RELEASE_LINES = (
     "Open daemon admin for",
     "instructions.")
 
+# A latched warning with no current reason still needs attention: a scheduled
+# retry after a failure is quiet progress, but the unresolved problem has not
+# gone away. The text is fixed here, never taken from the payload.
+ATTENTION_LINES = (
+    "Presto app needs attention.",
+    "See daemon admin.")
+
 
 def _is_id(value):
     """Whether a value is 32 lowercase hexadecimal characters."""
@@ -134,17 +144,17 @@ def _json_string(value):
 
 
 def build(device_id, boot, seq, revision, bootstrap=None, slot=None,
-          boot_confirmed=True, caps=None):
+          boot_confirmed=True, caps=None, scheme=None, update=None):
     """The ``X-Presto-Lifecycle`` header value, or None when it is unusable.
 
     A malformed value is never sent: the daemon would refuse the whole report,
     and ordinary quota polling would then look worse than it is. ``revision``
-    is the 12-character legacy label this install writes, or None when it is
-    not known.
+    is the 12-character legacy label this install writes, the full slot hash
+    when the app runs from a slot, or None when it is not known.
 
-    The update block is always ``idle``. This device has no updater, so it has
-    no attempt to report; claiming a phase it cannot complete would be the one
-    thing the daemon must never believe.
+    ``update`` is the block ``activation.update_block`` produced. It is idle
+    unless this device has a permit it is acting on, because a phase without a
+    permit is the one thing the daemon must never believe.
     """
     if not _is_id(device_id):
         return None
@@ -152,16 +162,21 @@ def build(device_id, boot, seq, revision, bootstrap=None, slot=None,
         return None
     if type(seq) is not int or not 1 <= seq <= MAX_COUNTER:
         return None
-    scheme = "null"
+    scheme_value = scheme or SCHEME
+    if scheme_value not in (SCHEME, SCHEME_SLOT):
+        return None
+    scheme_text = "null"
     if revision is not None:
         if not isinstance(revision, str) or not revision:
             return None
         if len(revision) not in (12, 64):
             return None
+        if scheme_value == SCHEME_SLOT and len(revision) != 64:
+            return None
         for char in revision:
             if char not in HEX:
                 return None
-        scheme = _json_string(SCHEME)
+        scheme_text = _json_string(scheme_value)
         revision = _json_string(revision)
     else:
         revision = "null"
@@ -174,31 +189,61 @@ def build(device_id, boot, seq, revision, bootstrap=None, slot=None,
         '"v":%d' % PROTOCOL_VERSION,
         '"boot":%d' % boot,
         '"seq":%d' % seq,
-        '"scheme":%s' % scheme,
+        '"scheme":%s' % scheme_text,
         '"revision":%s' % revision,
         '"bootstrap":%s' % ("null" if bootstrap is None else "%d" % int(bootstrap)),
         '"slot":%s' % _json_string(slot),
         '"boot_confirmed":%s' % ("true" if boot_confirmed else "false"),
         '"caps":[%s]' % ",".join(_json_string(name) for name in names[:4]),
-        '"update":%s' % _update_json(None),
+        '"update":%s' % _update_json(update),
     ]))
 
 
 def _update_json(update):
-    """The update block: always idle, which is the only phase this app has.
+    """The update block, from ``activation.update_block`` or idle.
 
-    ``update`` is accepted so a caller can pass the state it holds, but a
-    non-idle phase is never emitted: an attempt needs a permit, a target and a
-    deadline the daemon issued, and this device has none of them.
+    A block that names an attempt needs a target, a generation and an attempt
+    the daemon issued; one that does not is reported as idle here, so a local
+    activation can never produce a report the daemon has to refuse.
     """
-    del update
+    if not isinstance(update, dict):
+        update = None
+    if update is None:
+        update = {"phase": "idle"}
+    phase = update.get("phase")
+    if phase not in ("idle", "downloading", "verifying", "activating",
+                     "confirming", "succeeded", "rolled_back", "failed",
+                     "blocked"):
+        update = {"phase": "idle"}
+    target = update.get("target")
+    generation = update.get("generation")
+    attempt = update.get("attempt")
+    command_ack = update.get("command_ack")
+    error = update.get("error")
+    if update.get("phase") == "idle" or target is None or generation is None \
+            or attempt is None:
+        return ("{" + ",".join([
+            '"target":null', '"generation":null', '"attempt":null',
+            '"command_ack":%s' % _json_string(command_ack),
+            '"phase":"idle"', '"error":null']) + "}")
+    if error is not None and error not in ("transfer_timeout", "connection_lost",
+                                           "http_error", "storage_insufficient",
+                                           "firmware_unsupported",
+                                           "bootstrap_incompatible",
+                                           "transport_untrusted", "manifest_invalid",
+                                           "signature_invalid", "hash_mismatch",
+                                           "boot_crash", "rollback_failed",
+                                           "local_state_invalid", "unknown_error"):
+        return ("{" + ",".join([
+            '"target":null', '"generation":null', '"attempt":null',
+            '"command_ack":null', '"phase":"idle"', '"error":null']) + "}")
     return ("{" + ",".join([
-        '"target":null',
-        '"generation":null',
-        '"attempt":null',
-        '"command_ack":null',
-        '"phase":"idle"',
-        '"error":null',
+        '"target":%s' % _json_string(target),
+        '"generation":%s' % _json_string(generation),
+        '"attempt":%s' % _json_string(attempt),
+        '"command_ack":%s' % _json_string(command_ack),
+        '"phase":%s' % _json_string(update.get("phase")),
+        '"error":%s' % _json_string(error),
     ]) + "}")
 
 
@@ -282,6 +327,10 @@ def _device_lines(lifecycle):
     if update.get("needs_attention") is not True:
         return None
     reason = update.get("reason")
+    if reason is None:
+        # Latched attention without a current reason: say that plainly instead
+        # of showing nothing. An unknown code still has no text at all.
+        return ATTENTION_LINES
     if not isinstance(reason, str):
         return None
     return REASON_TEXT.get(reason)

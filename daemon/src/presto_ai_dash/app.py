@@ -19,6 +19,7 @@ from .config import (ConfigError, admin_bind_error, configure_logging,
                      demo_enabled, ingest_enabled, load_config, resolve_shared_token,
                      resolve_admin_token)
 from .device_install import app_snapshot
+from .device_app import DeviceApp
 from .device_lifecycle import DeviceLifecycle
 from .device_setup import SetupService
 from .management import SourceConfiguration, ManagedCollector
@@ -148,6 +149,12 @@ class Daemon:
             self.lifecycle = (self.source_configuration.lifecycle
                               if self.source_configuration is not None
                               else DeviceLifecycle(self.storage))
+            # The exact slot bundle this running daemon may serve to a device.
+            # It is the same bundle the USB tool installs, so there is still
+            # only one inventory of what this release ships.
+            self.device_app = (self.source_configuration.device_app
+                               if self.source_configuration is not None
+                               else DeviceApp())
             self._attach_problems()
             self._check_private_files()
             self.api = ApiServer(self.config["daemon"]["host"], self.config["daemon"]["port"],
@@ -177,7 +184,10 @@ class Daemon:
                                                      if managed else None),
                                  # Durable device identity, revision comparison
                                  # and the release notice, per request.
-                                 device_lifecycle=self.lifecycle)
+                                 device_lifecycle=self.lifecycle,
+                                 # The narrow, authenticated download routes a
+                                 # device uses for an update it was permitted.
+                                 device_app=self.device_app)
             if self.config["admin"]["enabled"]:
                 token = resolve_admin_token(self.config, self.shared_token)
                 # The setup downloads carry this running build's public app

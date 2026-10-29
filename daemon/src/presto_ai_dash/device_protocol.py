@@ -452,6 +452,44 @@ def expected_shape(identity):
             "min_bootstrap": identity["min_bootstrap"]}
 
 
+def slot_identity(bundle):
+    """The ``slot-v1`` identity of the running daemon's bundle, or None.
+
+    A wheel built before Part 2 carries no slot layout, and then no device can
+    be compared against a slot revision or offered an update. That is
+    reported as unavailable rather than inferred from the legacy aggregate:
+    the two schemes hash different file sets.
+    """
+    if not isinstance(bundle, dict):
+        return None
+    slot = bundle.get("slot")
+    if not isinstance(slot, dict):
+        return None
+    if slot.get("scheme") != SCHEME_SLOT:
+        return None
+    revision = slot.get("revision")
+    if not valid_revision(SCHEME_SLOT, revision):
+        return None
+    min_bootstrap = slot.get("min_bootstrap")
+    if _counter(min_bootstrap) is None:
+        # The slot layout always requires a positive bootstrap version; a slot
+        # bundle without one could not be installed by anything.
+        return None
+    return {"scheme": SCHEME_SLOT, "revision": revision,
+            "min_bootstrap": min_bootstrap}
+
+
+def bootstrap_version(bundle):
+    """The bootstrap compatibility version this bundle ships, or None."""
+    if not isinstance(bundle, dict):
+        return None
+    bootstrap = bundle.get("bootstrap")
+    if not isinstance(bootstrap, dict):
+        return None
+    version = bootstrap.get("version")
+    return _counter(version)
+
+
 def reported_shape(scheme, revision, bootstrap):
     """The ``reported`` block of a status response."""
     return {"scheme": scheme, "revision": revision, "bootstrap": bootstrap}

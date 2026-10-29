@@ -1079,23 +1079,46 @@ class Storage:
                 self._conn.rollback()
                 raise
 
-    def save_device_report(self, device_record, budget=None, attempt=None):
-        """Write a device and its active budget/attempt in one transaction.
+    def save_device_report(self, device_record, budget=None, attempt=None,
+                           admin_request=None, expected_revision=None):
+        """Write a device and its budget/attempt rows in one transaction.
 
-        The active-ID pointers and the rows they name move together, so a
-        restart never finds a pointer to a row that was never committed.
+        ``budget`` may be one row or a list. A list is written in order, which
+        matters when an exhausted budget is superseded and its replacement is
+        created in the same report: the unique active-budget index is checked
+        per statement.
         """
+        budgets = budget if isinstance(budget, list) else [budget]
+        attempts = attempt if isinstance(attempt, list) else [attempt]
         with self._lock:
             try:
+                if expected_revision is not None:
+                    self._conn.execute("BEGIN IMMEDIATE")
+                    current = self._conn.execute(
+                        "SELECT state_revision FROM devices WHERE device_id = ?",
+                        (device_record["device_id"],)).fetchone()
+                    if current is None or current[0] != expected_revision:
+                        raise ConfigurationConflict("device state changed")
                 self._conn.execute(
                     self._write_row("devices", ("device_id",), device_record),
                     [device_record[name] for name in device_record])
-                for table, key, row in (("device_update_budgets", ("generation_id",), budget),
-                                        ("device_update_attempts", ("attempt_id",), attempt)):
+                for row in budgets:
                     if row is None:
                         continue
-                    self._conn.execute(self._write_row(table, key, row),
-                                       [row[name] for name in row])
+                    self._conn.execute(
+                        self._write_row("device_update_budgets", ("generation_id",), row),
+                        [row[name] for name in row])
+                for row in attempts:
+                    if row is None:
+                        continue
+                    self._conn.execute(
+                        self._write_row("device_update_attempts", ("attempt_id",), row),
+                        [row[name] for name in row])
+                if admin_request is not None:
+                    names = ("device_id", "request_key", "body_sha256", "response_json", "created_at")
+                    self._conn.execute(
+                        "INSERT INTO device_admin_requests (" + ",".join(names) +
+                        ") VALUES (?,?,?,?,?)", tuple(admin_request[name] for name in names))
                 self._conn.commit()
             except Exception:
                 self._conn.rollback()
@@ -1114,7 +1137,7 @@ class Storage:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT * FROM device_update_budgets WHERE device_id = ? "
-                "ORDER BY created_at DESC", (device_id,)).fetchall()
+                "ORDER BY created_at DESC, rowid DESC", (device_id,)).fetchall()
         return [dict(row) for row in rows]
 
     def device_attempts(self, device_id, limit=32):
@@ -1123,7 +1146,7 @@ class Storage:
             rows = self._conn.execute(
                 "SELECT a.* FROM device_update_attempts a "
                 "JOIN device_update_budgets b ON b.generation_id = a.generation_id "
-                "WHERE b.device_id = ? ORDER BY a.issued_at DESC, a.attempt_no DESC LIMIT ?",
+                "WHERE b.device_id = ? ORDER BY a.issued_at DESC, a.rowid DESC LIMIT ?",
                 (device_id, int(limit))).fetchall()
         return [dict(row) for row in rows]
 

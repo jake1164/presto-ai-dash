@@ -22,6 +22,7 @@ from .config import (ALERT_KEYS, DEFAULTS, alert_base_settings, alert_settings,
                      demo_enabled, ingest_enabled, overflow_rows)
 from .credentials import load_cipher
 from .dashboard import build_card_details, build_instance_payload, device_view, lazy_cards
+from .device_app import DeviceApp
 from .device_lifecycle import DeviceLifecycle, release_instructions
 from .effective import effective_settings, uptime_label, uptime_seconds
 from .http_client import origin_of
@@ -198,10 +199,16 @@ class SourceConfiguration:
             if record["credential"] is not None:
                 self.cipher.decrypt(record["id"], record["credential"])
         self.codex_logins = CodexLoginManager(self)
-        # Durable device identity and update state. Operational OTA is off in
-        # this stage: the coordinator issues no command and acknowledges no
-        # confirmation, so a known mismatch asks for a USB update instead.
-        self.lifecycle = DeviceLifecycle(storage)
+        # Durable device identity and update state. The updater exists, but
+        # operational OTA stays off unless this daemon was explicitly built
+        # with the deployment gate passed: the default configuration issues no
+        # command and acknowledges no confirmation, so a known mismatch asks
+        # for a USB update instead.
+        self.lifecycle = DeviceLifecycle(
+            storage, ota_enabled=bool(self.config["daemon"].get(
+                "presto_ota_enabled", False)))
+        # The exact slot bundle this running daemon serves to a device.
+        self.device_app = DeviceApp()
     def list_sources(self):
         records = self.storage.source_instances()
         snapshots = self.storage.latest_snapshots()
@@ -776,6 +783,20 @@ class SourceConfiguration:
         warning; a warning clears only on a supported recovery.
         """
         self.lifecycle.refuse_mutation(device_id, kind)
+
+    def device_mutation(self, device_id, kind, body, idempotency_key):
+        """Authorize a retry, or queue a recovery check, when OTA is enabled.
+
+        With the updater absent this raises the same ``409 ota_not_enabled``
+        the route has always answered. Neither branch contacts the device.
+        """
+        if self.lifecycle.ota_enabled:
+            if kind == "retry":
+                return self.lifecycle.authorize_retry(device_id, body,
+                                                      idempotency_key)
+            return self.lifecycle.queue_recovery(device_id, body, idempotency_key)
+        self.lifecycle.refuse_mutation(device_id, kind)
+        raise AssertionError("refuse_mutation always raises")
 
     def release_view(self):
         """The cached daemon-release result, with this install's own commands.

@@ -33,9 +33,12 @@ REVISION_OVERRIDE = None
 DEVICE_ID_OVERRIDE = None
 
 # The deployment writes the app revision next to the app files, so the device
-# reports the build it actually runs.
+# can report the build it actually runs. A slot layout also writes the full
+# hash, because a slot report must be 64 characters and a display label is not.
 REVISION_FILE = "revision.txt"
+REVISION_HASH_FILE = "revision.sha256"
 REVISION_FILES = (REVISION_FILE, "/ai_dash_files/revision.txt")
+REVISION_HASH_FILES = (REVISION_HASH_FILE, "/ai_dash_slots/revision.sha256")
 MAX_LABEL = 32
 
 # The path the lifecycle extension belongs to. The two headers go on the
@@ -327,7 +330,9 @@ def current_revision_hex():
     configured = device_setting("DEVICE_REVISION", None)
     if configured:
         return _hex_revision(configured)
-    for candidate in REVISION_FILES:
+    # A slot install writes its full hash beside the label; prefer it, because
+    # a 12-character label is not a valid slot-v1 report.
+    for candidate in REVISION_HASH_FILES + REVISION_FILES:
         try:
             with open(candidate, "r") as handle:
                 text = handle.read(65)

@@ -25,6 +25,8 @@ from presto_bundle import snapshot  # noqa: E402
 
 DAEMON = ROOT / "daemon"
 STAGE = DAEMON / "src" / "presto_ai_dash" / "presto_app"
+STAGE_SLOT = DAEMON / "src" / "presto_ai_dash" / "presto_app_slot"
+STAGE_BOOT = DAEMON / "src" / "presto_ai_dash" / "presto_app_boot"
 PRIVATE = re.compile(r"(^|/)(dash\.toml|dash\.db[^/]*|[^/]*\.key|\.env[^/]*)$", re.IGNORECASE)
 # Inside the device app, a config or secrets file (or a copy) is private too.
 PRIVATE_APP = re.compile(r"(^|/)[^/]*(secret|config)[^/]*$", re.IGNORECASE)
@@ -32,6 +34,7 @@ PRIVATE_APP = re.compile(r"(^|/)[^/]*(secret|config)[^/]*$", re.IGNORECASE)
 DEVICE_SCHEME = re.compile(r'^SCHEME\s*=\s*"([^"]+)"', re.MULTILINE)
 # The schemes the protocol defines; a bundle must name one of them.
 KNOWN_SCHEMES = ("legacy-v1", "slot-v1")
+SLOT_REVISION_CHARS = 64
 
 
 def check_bundle_identity(bundle):
@@ -53,18 +56,74 @@ def check_bundle_identity(bundle):
     match = DEVICE_SCHEME.search(source.decode("utf-8"))
     if not match or match.group(1) != scheme:
         raise ValueError("the device app declares a different revision scheme")
+    check_slot_identity(bundle.get("slot"), bundle.get("bootstrap"))
     return scheme
 
 
-def stage(root=ROOT, destination=STAGE):
-    """Copy the app's public files into the package; return the snapshot."""
+def check_slot_identity(slot, bootstrap):
+    """The slot layout, when the sources ship one, must describe itself.
+
+    A release that carries a slot bundle must carry a matching bootstrap:
+    a slot nobody can boot is not an artifact. The reverse is allowed while
+    the bootstrap is being developed, because a device can stay on USB.
+    """
+    if slot is None:
+        if bootstrap is not None:
+            raise ValueError("a bootstrap without a slot bundle cannot run a dashboard")
+        return None
+    if slot.get("scheme") != "slot-v1":
+        raise ValueError("the slot bundle does not declare slot-v1")
+    revision = slot.get("revision")
+    if not isinstance(revision, str) or len(revision) != SLOT_REVISION_CHARS:
+        raise ValueError("the slot bundle does not carry a full revision")
+    if slot.get("min_bootstrap") != 1:
+        raise ValueError("the slot bundle must declare its bootstrap requirement")
+    names = {name.lstrip("/") for name in slot.get("files", {})}
+    if not names:
+        raise ValueError("the slot bundle is empty")
+    if "ai_dash_app.py" not in names:
+        raise ValueError("the slot bundle has no entry module")
+    if bootstrap is None:
+        return slot
+    if bootstrap.get("version") != 1:
+        raise ValueError("the bootstrap does not declare version 1")
+    targets = set(bootstrap.get("files", {}))
+    if "/ai_dash_boot.py" not in targets or "/ai_dash_boot_files/boot.py" not in targets:
+        raise ValueError("the bootstrap bundle is incomplete")
+    return slot
+
+
+def stage(root=ROOT, destination=STAGE, slot_destination=None,
+          boot_destination=None):
+    """Copy the app's public files into the package; return the snapshot.
+
+    The slot and bootstrap bundles are staged beside the legacy one, so a test
+    that stages into a temporary folder never touches the checkout.
+    """
     bundle = snapshot(root)
+    destination = Path(destination)
+    slot_destination = (Path(slot_destination) if slot_destination is not None
+                        else destination.parent / "presto_app_slot")
+    boot_destination = (Path(boot_destination) if boot_destination is not None
+                        else destination.parent / "presto_app_boot")
     if destination.exists():
         shutil.rmtree(destination)
     for target, data in bundle["files"].items():
         path = destination / target.lstrip("/")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
+    # The slot and bootstrap bundles are installed at absolute device paths,
+    # so the wheel stores them relative to their own folders.
+    for folder, part in ((slot_destination, bundle.get("slot")),
+                         (boot_destination, bundle.get("bootstrap"))):
+        if folder.exists():
+            shutil.rmtree(folder)
+        if part is None:
+            continue
+        for target, data in part["files"].items():
+            path = folder / target.lstrip("/")
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
     return bundle
 
 
@@ -109,15 +168,27 @@ def check_wheel(wheel, bundle):
     with zipfile.ZipFile(wheel) as archive:
         names = archive.namelist()
         for name in names:
-            if PRIVATE.search(name) or (name.startswith("presto_ai_dash/presto_app/")
-                                        and PRIVATE_APP.search(name)):
+            if PRIVATE.search(name):
                 raise ValueError("private-looking file in the wheel: " + name)
+            for folder in ("presto_app/", "presto_app_slot/", "presto_app_boot/"):
+                if name.startswith("presto_ai_dash/" + folder) and PRIVATE_APP.search(name):
+                    raise ValueError("private-looking file in the wheel: " + name)
         for target, data in bundle["files"].items():
             inside = "presto_ai_dash/presto_app" + target
             if inside not in names:
                 raise ValueError("missing from the wheel: " + inside)
             if hashlib.sha256(archive.read(inside)).digest() != hashlib.sha256(data).digest():
                 raise ValueError("differs from presto/: " + inside)
+        for folder, part in (("presto_app_slot", bundle.get("slot")),
+                             ("presto_app_boot", bundle.get("bootstrap"))):
+            if part is None:
+                continue
+            for target, data in part["files"].items():
+                inside = "presto_ai_dash/" + folder + "/" + target.lstrip("/")
+                if inside not in names:
+                    raise ValueError("missing from the wheel: " + inside)
+                if hashlib.sha256(archive.read(inside)).digest() != hashlib.sha256(data).digest():
+                    raise ValueError("differs from presto/: " + inside)
         check_setup_template(archive)
 
 

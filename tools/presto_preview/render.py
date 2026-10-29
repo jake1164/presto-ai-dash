@@ -107,6 +107,10 @@ def _load_app_modules(real_sleep=False):
     net.CLIENT_NAME_OVERRIDE = "psl"
     net.REVISION_OVERRIDE = bundle["revision"][:12]
     net.DEVICE_ID_OVERRIDE = ""
+    # There is no bootstrap here, so the app runs as the legacy layout: no slot
+    # context, no journal and no confirmation. A slot layout is the same source
+    # files; the simulator deliberately does not pretend to be one.
+    main.BOOT_CONTEXT = None
     return main, net
 
 

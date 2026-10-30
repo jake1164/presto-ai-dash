@@ -332,6 +332,16 @@ class SetupServiceTests(unittest.TestCase):
 
 
 class PackagingParityTests(unittest.TestCase):
+    def test_editable_checkout_ignores_stale_staged_bundle(self):
+        with unittest.mock.patch.object(device_install, 'bundled_snapshot', return_value={'revision': 'stale'}) as staged:
+            self.assertEqual(device_install.app_snapshot()['revision'], presto_bundle.snapshot()['revision'])
+            staged.assert_not_called()
+
+    def test_explicit_staged_folder_is_still_respected(self):
+        with unittest.mock.patch.object(device_install, 'bundled_snapshot', return_value={'revision': 'explicit'}) as staged:
+            self.assertEqual(device_install.app_snapshot(folder='explicit-folder')['revision'], 'explicit')
+            staged.assert_called_once_with('explicit-folder')
+
     def test_the_container_stages_the_same_bundle_as_the_wheel(self):
         script = Path(presto_path.REPO_ROOT) / "docker" / "stage_app.py"
         namespace = {"__name__": "stage_app"}

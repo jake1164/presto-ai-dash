@@ -238,7 +238,10 @@ class TransferTests(unittest.TestCase):
     def run_to_end(self, transfer):
         steps = 0
         while not transfer.done and steps < 1000:
-            transfer.step()
+            if transfer.flash_due:
+                transfer.flash()
+            else:
+                transfer.step()
             steps += 1
         return transfer.error
 
@@ -256,16 +259,61 @@ class TransferTests(unittest.TestCase):
         transfer = self.transfer(fs, Transport(payload=payload), payload=payload)
         steps = 0
         sizes = []
-        while not transfer.done:
-            before = len(fs.files.get("/ai_dash_slots/b/ai_dash_app.py.presto-new", b""))
+        while not transfer.flash_due:
+            before = transfer.metrics["bytes"]
             transfer.step()
-            after = len(fs.files.get("/ai_dash_slots/b/ai_dash_app.py.presto-new", b""))
-            if after > before:
-                sizes.append(after - before)
+            if transfer.metrics["bytes"] > before:
+                sizes.append(transfer.metrics["bytes"] - before)
             steps += 1
+            self.assertLess(steps, 100)
         self.assertIsNone(transfer.error)
         self.assertGreater(steps, 1)
         self.assertTrue(all(size <= updater.CHUNK_BYTES for size in sizes))
+
+    def test_downloading_never_writes_flash_until_flash_is_called(self):
+        # On the measured firmware a flash write hangs while the display
+        # runs, so the app pauses the display only around flash().
+        fs = FakeFs()
+        transfer = self.transfer(fs)
+        while not transfer.flash_due:
+            transfer.step()
+        self.assertTrue(transfer.downloaded)
+        self.assertEqual(fs.files, {})
+        self.assertEqual(fs.opened, [])
+        fed = []
+        self.assertIsNone(transfer.flash(lambda: fed.append(1)))
+        self.assertTrue(transfer.done)
+        self.assertTrue(fed)
+        self.assertEqual(transfer.metrics["flash_windows"], 1)
+        for name, data in FILES.items():
+            self.assertEqual(fs.files["/ai_dash_slots/b/" + name], data)
+
+    def test_verified_files_are_committed_in_bounded_batches(self):
+        fs = FakeFs()
+        payload = {"ai_dash_app.py": b"a" * 3000, "ui.py": b"b" * 3000, "net.py": b"c" * 3000}
+        transfer = self.transfer(fs, Transport(payload=payload), payload=payload)
+        with patch.object(updater, "FLASH_BATCH_BYTES", 5000):
+            while not transfer.flash_due:
+                transfer.step()
+            # Two files are waiting, the third is not downloaded yet.
+            self.assertFalse(transfer.downloaded)
+            self.assertIsNone(transfer.flash())
+            self.assertFalse(transfer.done)
+            self.assertEqual(len([path for path in fs.files if path.endswith(".py")]), 2)
+            self.assertIsNone(self.run_to_end(transfer))
+        self.assertEqual(transfer.metrics["flash_windows"], 2)
+        for name, data in payload.items():
+            self.assertEqual(fs.files["/ai_dash_slots/b/" + name], data)
+
+    def test_a_corrupt_file_is_refused_before_anything_reaches_flash(self):
+        fs = FakeFs()
+        transport = Transport(payload={"ai_dash_app.py": b"print('HELLO')\n"})
+        transfer = self.transfer(fs, transport,
+                                 payload={"ai_dash_app.py": FILES["ai_dash_app.py"]})
+        while not transfer.done and not transfer.flash_due:
+            transfer.step()
+        self.assertEqual(transfer.error, "hash_mismatch")
+        self.assertEqual(fs.opened, [])
 
     def test_corrupt_bytes_are_refused_and_never_become_a_live_file(self):
         fs = FakeFs()

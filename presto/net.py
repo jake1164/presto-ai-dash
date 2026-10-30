@@ -353,6 +353,12 @@ def current_device_id():
     value = DEVICE_ID_OVERRIDE
     if value is None:
         value = device_setting("DEVICE_ID", None)
+        if not value:
+            try:
+                with open("/ai_dash_device_id.txt", "r") as handle:
+                    value = handle.read(33).strip()
+            except OSError:
+                pass
     if not isinstance(value, str) or len(value) != DEVICE_ID_CHARS:
         return None
     for char in value:

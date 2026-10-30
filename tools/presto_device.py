@@ -61,21 +61,21 @@ def slot_check(port, bundle):
     return _engine.slot_check_operation(port, bundle)
 
 
-def slot_sync(port, bundle):
+def slot_sync(port, bundle, maintain_bootstrap=False):
     """Install into the inactive slot and activate it, keeping the other one."""
     _different, active, journal = slot_check(port, bundle)
     stored = activation.parse_journal(json.dumps(journal)) if journal else None
     if stored is None or active not in activation.SLOT_NAMES:
         raise RuntimeError("Activation state unavailable; repair the installation over USB first")
-    if any(path == _engine.BOOT_ENTRY or path.startswith(_engine.BOOT_FOLDER + '/')
-           for path in _different):
-        raise RuntimeError("Bootstrap maintenance is required before syncing this dashboard")
+    if not maintain_bootstrap and any(path == _engine.BOOT_ENTRY or path.startswith(_engine.BOOT_FOLDER + '/')
+                                      for path in _different):
+        raise RuntimeError("Bootstrap maintenance is required: sync over USB with --maintain-bootstrap")
     target = "b" if active == "a" else "a"
     next_state = dict(stored, active=target, confirmed=target, pending=None,
                       failure=None, success=None, transfer=None,
                       boots=int(stored["boots"]))
     _engine.slot_sync_operation(port, bundle, activation.encode_journal(next_state),
-                                target)
+                                target, maintain_bootstrap=maintain_bootstrap)
     return target
 
 
@@ -84,7 +84,11 @@ def main(argv=None):
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("action", choices=("plan", "check", "sync", "migrate"))
     parser.add_argument("--port", help="explicit USB port, e.g. COM3 or /dev/ttyACM0")
+    parser.add_argument("--maintain-bootstrap", action="store_true",
+                        help="explicitly maintain the stable bootstrap during a slot USB sync")
     args = parser.parse_args(argv)
+    if args.maintain_bootstrap and args.action != "sync":
+        parser.error("--maintain-bootstrap is only valid for sync")
     if args.action != "plan" and (not args.port or args.port in ("auto", "list")):
         parser.error("check/sync/migrate require an explicit --port; "
                      "automatic board selection is disabled")
@@ -136,7 +140,7 @@ def main(argv=None):
                 print("Verified: bootstrap and slot %s match %s. AI Dash relaunched."
                       % (active, str(slot.get("revision", bundle["revision"]))[:12]))
                 return 0
-            target = slot_sync(args.port, bundle)
+            target = slot_sync(args.port, bundle, maintain_bootstrap=args.maintain_bootstrap)
             print("Installed into slot %s and activated it. AI Dash relaunched." % target)
             return 0
         if state.get("legacy"):

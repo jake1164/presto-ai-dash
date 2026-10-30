@@ -100,18 +100,23 @@ def main():
         except Exception:
             raise RuntimeError("Boot state could not be committed; USB recovery required")
     watchdog = None
-    if decision["candidate"]:
-        try:
-            # Hardware imports remain in main.py. Only an already available
-            # firmware module may provide the bootstrap's watchdog primitive.
-            runtime = sys.modules.get("machine")
-            watchdog = runtime.WDT(timeout=8000)
-        except Exception:
+    try:
+        runtime = sys.modules.get("machine")
+        if runtime is None:
+            # MicroPython's built-in modules need not appear in sys.modules.
+            # Both candidate entry and a confirmed app's network work need
+            # the watchdog before importing any slot code.
+            import machine as runtime
+            sys.modules["machine"] = runtime
+        watchdog = runtime.WDT(timeout=8000)
+    except Exception:
+        if decision["candidate"]:
             pending = journal["pending"]
             journal = activation.record_failure(journal, "blocked", "firmware_unsupported",
                 pending["target"], pending["generation"], pending["attempt"])
             activation.save(fs, journal)
             raise RuntimeError("Candidate watchdog unavailable; USB recovery required")
+    if decision["candidate"]:
         _rearm()
     slot_folder = SLOT_ROOT + "/" + decision["slot"]
     if SETTINGS_FOLDER not in sys.path:

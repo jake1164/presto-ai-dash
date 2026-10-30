@@ -12,14 +12,16 @@ machine. On the device the seams are the measured primitives from the hardware
 report: ``ssl.SSLContext`` with ``CERT_REQUIRED``, an explicit CA, an explicit
 hostname, ``os.statvfs``, ``os.rename`` and SHA-256.
 
-Normal unattended OTA stays disabled: ``Updater.enabled`` is false unless a
-caller passes otherwise, and the shipped app never does.
+Normal unattended OTA is opt-in: ``Updater.enabled`` is false unless a caller
+passes otherwise, and the app requires an explicit matching-firmware profile.
 """
 
 import binascii
 import hashlib
 import json
 import re
+import time
+import gc
 
 # The wire version of the manifest this module understands.
 MANIFEST_VERSION = 1
@@ -31,6 +33,13 @@ MAX_FILE_BYTES = 131072
 # measured build, so a bigger buffer would not make the attempt shorter, it
 # would only make each stalled read longer.
 CHUNK_BYTES = 1024
+# Verified files wait in RAM and are committed to flash together, so the
+# display is stopped once per batch instead of once per chunk (see
+# ``Transfer.flash``). A whole current bundle fits in one batch; a larger one
+# is committed in several, which bounds the RAM held at once.
+FLASH_BATCH_BYTES = 393216
+# One flash write call, so a caller can feed the watchdog between them.
+FLASH_WRITE_BYTES = 4096
 # A whole attempt bound, from the measured write cost plus the TLS stream, not
 # from the daemon's offline threshold.
 MAX_ATTEMPT_SECONDS = 900
@@ -219,10 +228,15 @@ def command_error(command, manifest):
 class Transfer(object):
     """A resumable, chunk-bounded staging of one manifest into one slot.
 
-    ``step()`` performs **one** bounded read and write and returns None while
+    ``step()`` performs **one** bounded read into RAM and returns None while
     there is more to do, or a terminal fixed error code. That is what lets the
     app advance a transfer between rendered frames instead of freezing the
     display for the whole download, and it is what the tests drive directly.
+
+    ``step()`` never writes flash. On the measured firmware an internal-flash
+    write hangs while the Presto display runs (see ``presto/main.py``), so each
+    file is verified against its hash in RAM, and ``flash()`` commits verified
+    files when ``flash_due`` says so. The caller stops the display around it.
     """
 
     def __init__(self, fs, transport, manifest, slot):
@@ -233,11 +247,22 @@ class Transfer(object):
         self._index = -1
         self._received = 0
         self._digest = None
-        self._handle = None
+        self._buffer = None
         self._chunks = None
+        self._ready = []
+        self._ready_bytes = 0
+        self._downloaded = False
         self._error = None
         self._finished = False
-        self._finalizing = None
+        self._started_ms = self._milliseconds()
+        self.metrics = {"steps": 0, "max_step_ms": 0, "elapsed_ms": 0,
+                        "minimum_free_bytes": None, "bytes": 0,
+                        "flash_windows": 0, "flash_ms": 0, "max_flash_ms": 0}
+
+    @staticmethod
+    def _milliseconds():
+        ticks = getattr(time, "ticks_ms", None)
+        return ticks() if ticks else int(time.monotonic() * 1000)
 
     @property
     def done(self):
@@ -247,62 +272,75 @@ class Transfer(object):
     def error(self):
         return self._error
 
+    @property
+    def downloaded(self):
+        """Every file has arrived and matched its hash in RAM."""
+        return self._downloaded
+
+    @property
+    def flash_due(self):
+        """Whether ``flash()`` must run before the transfer can go on."""
+        return (self._error is None and not self._finished and
+                (self._downloaded or self._ready_bytes >= FLASH_BATCH_BYTES))
+
     def _open(self):
         name, size, sha = self.manifest["files"][self._index]
-        staging = self.folder + "/" + name + ".presto-new"
         try:
-            self._handle = self.fs.open(staging, "wb")
-        except Exception:
+            # The exact size is known, so one allocation holds the whole file.
+            self._buffer = bytearray(size)
+        except MemoryError:
             return "storage_insufficient"
         try:
-            self._chunks = self.transport.stream(name, CHUNK_BYTES)
+            stream = getattr(self.transport, 'stream_async', None) or self.transport.stream
+            self._chunks = stream(name, CHUNK_BYTES)
         except Exception:
-            self._handle.close()
-            self._handle = None
+            self._buffer = None
             return "connection_lost"
         self._received = 0
         self._digest = hashlib.sha256()
         return None
 
     def _close(self):
-        """Verify this file and move it into place."""
+        """Verify this file in RAM and queue it for the next flash commit."""
         name, size, sha = self.manifest["files"][self._index]
-        staging = self.folder + "/" + name + ".presto-new"
-        target = self.folder + "/" + name
-        try:
-            if self._handle is not None:
-                self._handle.close()
-        except Exception:
-            pass
-        self._handle = None
+        data, self._buffer, self._chunks = self._buffer, None, None
         if self._received != size:
             return "transfer_timeout"
         if binascii.hexlify(self._digest.digest()).decode() != sha:
             return "hash_mismatch"
-        try:
-            self.fs.replace(staging, target)
-        except Exception:
-            return "storage_insufficient"
+        self._ready.append((name, data))
+        self._ready_bytes += size
         return None
 
     def step(self):
+        started = self._milliseconds()
+        difference = getattr(time, "ticks_diff", lambda a, b: a - b)
+        if difference(started, self._started_ms) > MAX_ATTEMPT_SECONDS * 1000:
+            return self._fail("transfer_timeout")
+        try:
+            return self._step()
+        finally:
+            now = self._milliseconds()
+            self.metrics["steps"] += 1
+            self.metrics["max_step_ms"] = max(self.metrics["max_step_ms"], difference(now, started))
+            self.metrics["elapsed_ms"] = difference(now, self._started_ms)
+            free = getattr(gc, "mem_free", None)
+            if free:
+                value = free()
+                minimum = self.metrics["minimum_free_bytes"]
+                self.metrics["minimum_free_bytes"] = value if minimum is None else min(value, minimum)
+
+    def _step(self):
         if self._error is not None or self._finished:
             return self._error
-        if self._finalizing is not None:
-            try:
-                next(self._finalizing)
-            except StopIteration:
-                self._finished = True
-            except ManifestError as exc:
-                return self._fail(exc.code)
-            except Exception:
-                return self._fail("storage_insufficient")
+        if self.flash_due:
+            # Nothing to download until the verified files are committed.
             return None
-        if self._handle is None:
+        if self._chunks is None:
             self._index += 1
             if self._index >= len(self.manifest["files"]):
-                self._finalizing = self._finalize_steps()
-                return self.step()
+                self._downloaded = True
+                return None
             error = self._open()
             if error:
                 return self._fail(error)
@@ -316,26 +354,66 @@ class Transfer(object):
             return self._fail("connection_lost")
         if not chunk:
             return None
-        self._received += len(chunk)
+        end = self._received + len(chunk)
+        self.metrics["bytes"] += len(chunk)
         name, size, _sha = self.manifest["files"][self._index]
-        if self._received > size:
+        if end > size:
             return self._fail("manifest_invalid")
         self._digest.update(chunk)
+        self._buffer[self._received:end] = chunk
+        self._received = end
+        return None
+
+    def flash(self, feed=None):
+        """Commit the verified files to the inactive slot; finish after the last.
+
+        The only part of a transfer that writes flash, run by the caller with
+        the display stopped. It is bounded by the batch size, and ``feed`` is
+        called between writes so a watchdog stays fed. Returns None or the
+        terminal fixed error code, like ``step()``.
+        """
+        if self._error is not None or self._finished:
+            return self._error
+        feed = feed or (lambda: None)
+        started = self._milliseconds()
+        difference = getattr(time, "ticks_diff", lambda a, b: a - b)
         try:
-            self._handle.write(chunk)
+            while self._ready:
+                name, data = self._ready.pop(0)
+                staging = self.folder + "/" + name + ".presto-new"
+                view = memoryview(data)
+                handle = self.fs.open(staging, "wb")
+                try:
+                    for start in range(0, len(data), FLASH_WRITE_BYTES):
+                        handle.write(view[start:start + FLASH_WRITE_BYTES])
+                        feed()
+                finally:
+                    handle.close()
+                self.fs.replace(staging, self.folder + "/" + name)
+                self._ready_bytes -= len(data)
+                view = data = None
+                feed()
+            if self._downloaded:
+                for _ in self._finalize_steps():
+                    feed()
+                self._finished = True
+        except ManifestError as exc:
+            return self._fail(exc.code)
         except Exception:
             return self._fail("storage_insufficient")
+        finally:
+            spent = difference(self._milliseconds(), started)
+            self.metrics["flash_windows"] += 1
+            self.metrics["flash_ms"] += spent
+            self.metrics["max_flash_ms"] = max(self.metrics["max_flash_ms"], spent)
         return None
 
     def _fail(self, error):
         self._error = error
         self._finished = True
-        try:
-            if self._handle is not None:
-                self._handle.close()
-        except Exception:
-            pass
-        self._handle = None
+        self._buffer = None
+        self._ready = []
+        self._ready_bytes = 0
         try:
             self._chunks.close()
         except Exception:
@@ -441,7 +519,7 @@ class Updater(object):
         activation.save(self.fs, accepted)
         self.journal = accepted
         while not transfer.done:
-            error = transfer.step()
+            error = transfer.flash() if transfer.flash_due else transfer.step()
             if error:
                 failed = activation.record_failure(self.journal, "failed", error,
                     command["target_revision"], command["generation"], command["attempt"])

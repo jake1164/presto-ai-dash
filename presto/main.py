@@ -76,23 +76,122 @@ ALERT_MESSAGE_MAX = 34
 BOOT_CONTEXT = None
 
 
+# The board has no battery-backed clock: every hard reset restarts the RTC at
+# 2021-01-01 (measured), which fails the updater's TLS date gate. A warm reset
+# keeps RAMFS, so the app carries the time across its own restart here.
+CLOCK_CARRY = '/ramfs/ai_dash_clock.txt'
+# What the RTC reads at a hard reset: 2021-01-01T00:00:00Z.
+RESET_EPOCH = 1609459200
+
+
+def _mount_ramfs():
+    """Mount RAMFS; the stock launcher has usually mounted it already."""
+    try:
+        import psram
+        psram.mkramfs()
+    except Exception:
+        # A second mount raises EPERM (measured). That is not a failure.
+        pass
+
+
+def _carry_clock():
+    """Leave a usable wall-clock time for the app after a warm reset."""
+    try:
+        from updater import MIN_USABLE_EPOCH
+        now = int(time.time())
+        if now >= MIN_USABLE_EPOCH:
+            with open(CLOCK_CARRY, 'w') as handle:
+                handle.write('%d' % now)
+    except Exception:
+        pass
+
+
+def _restore_clock():
+    """Set an unusable RTC from the time carried across a warm reset.
+
+    Only a reset clock is changed, never a usable one. The seconds the RTC has
+    counted since the reset are added back, so the result is close to right.
+    The carried value is used once.
+    """
+    try:
+        from updater import MIN_USABLE_EPOCH
+        now = int(time.time())
+        if now >= MIN_USABLE_EPOCH:
+            return
+        _mount_ramfs()
+        try:
+            with open(CLOCK_CARRY, 'r') as handle:
+                text = handle.read(16)
+        except OSError:
+            return
+        try:
+            import os
+            os.remove(CLOCK_CARRY)
+        except OSError:
+            pass
+        carried = int(text)
+        if not MIN_USABLE_EPOCH <= carried < 2147483647:
+            return
+        if RESET_EPOCH <= now < MIN_USABLE_EPOCH:
+            carried += now - RESET_EPOCH
+        import machine
+        value = time.gmtime(carried)
+        machine.RTC().datetime((value[0], value[1], value[2], value[6],
+                                value[3], value[4], value[5], 0))
+        print("AI Dash: clock restored after reset")
+    except Exception:
+        pass
+
+
 def _reboot():
     """Restart the board so the bootstrap enters the staged slot.
 
     The bootstrap owns the choice of slot; the app only records the candidate
     in the journal first, so a power cut here still leaves a recoverable state.
+    The handoff and clock are best effort: the reset happens either way, and
+    without the handoff the next launch still finds the candidate.
     """
     try:
         import machine
-        if BOOT_CONTEXT is not None:
-            import psram
-            psram.mkramfs()
+    except Exception:
+        return
+    if BOOT_CONTEXT is not None:
+        _mount_ramfs()
+        try:
             with open('/ramfs/launch.txt', 'w') as handle:
                 handle.write('ai_dash_boot.py')
-        time.sleep_ms(50)
-        machine.reset()
-    except Exception:
-        pass
+        except Exception:
+            pass
+        _carry_clock()
+    time.sleep_ms(50)
+    machine.reset()
+
+
+class _FlashWindow(object):
+    """Internal-flash writes, made with the display's core1 scan-out stopped.
+
+    Measured on the deployed firmware (October 29, 2026): once ``Presto()``
+    starts its core1 display driver, the first internal-flash write never
+    returns, and the watchdog resets the board. With core1 stopped the same
+    write takes milliseconds. Every journal save and slot write the running
+    app makes goes through this window; nothing may draw inside it. Windows
+    nest, and only the outermost one stops and restarts the display.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    def __enter__(self):
+        self.app._flash_depth += 1
+        if self.app._flash_depth == 1:
+            self.app._pause_display()
+        return self
+
+    def __exit__(self, kind, value, trace):
+        self.app._flash_depth -= 1
+        if self.app._flash_depth == 0:
+            self.app._resume_display()
+        return False
 SAVE_FAILED_MESSAGE = "COULD NOT SAVE - DAEMON OFFLINE"
 ALERTS_OFF_MESSAGE = "ALERTS OFF FOR ALL - SEE ADMIN"
 
@@ -161,16 +260,19 @@ class App(object):
         self.journal = None
         self._activation = None
         self._store = None
-        # No verified TLS transport or trust root is provisioned in this build,
-        # so no updater is created and no transfer can start. The path below
-        # exists, is unit-tested with injected seams, and stays inert until the
-        # deployment gate in the lifecycle plan is passed.
+        # OTA remains inert unless an explicit, matching-firmware TLS profile
+        # is provisioned outside the replaceable slots. Configure it only
+        # after the bootstrap journal and real filesystem are available.
         self.ota = None
         self._watchdog = context.get("watchdog") if context else None
         self._confirmation_started = _now_ms() if self._watchdog is not None else 0
         self._transfer = None
+        self._ota_prepare_task = None
         self._ota_slot = None
         self._ota_reset = None
+        # The display pause around flash writes (see _FlashWindow).
+        self._flash_depth = 0
+        self._display_stopped = False
         self.slot = None
         self.bootstrap = None
         self.boot_confirmed = True
@@ -196,6 +298,12 @@ class App(object):
             self.boot = (lifecycle.bump_boot(getattr(config, "BOOT_COUNTER_FILE", None))
                          if self.device_id else 1)
         self.client.lifecycle_provider = self._lifecycle_headers
+        if self.journal is not None:
+            # The TLS date gate needs a real clock; a candidate's own restart
+            # carried it across the reset.
+            _restore_clock()
+            import ota_transport
+            ota_transport.configure(self)
 
         self.gestures = GestureRecogniser(
             long_press_ms=self.long_press_ms,
@@ -634,11 +742,12 @@ class App(object):
 
         ``self.ota`` is only created by ``updater.make_updater`` with a
         verified TLS transport, a provisioned trust root and the measured
-        firmware capabilities. This build has none of them, so this returns
-        immediately. When it does run it only starts a transfer: the bytes are
+        firmware capabilities. Missing provisioning leaves this inert.
+        When it does run it only starts a transfer: the bytes are
         verified by hash before anything becomes a candidate.
         """
-        if self.ota is None or self._transfer is not None or self.journal is None:
+        if (self.ota is None or self._transfer is not None or self.journal is None
+                or self._ota_prepare_task is not None):
             return
         device = payload.get("device_lifecycle") if isinstance(payload, dict) else None
         command = device.get("command") if isinstance(device, dict) else None
@@ -658,7 +767,29 @@ class App(object):
             if error:
                 self._ota_failed(command, error, blocked=True)
                 return
+            if hasattr(self.ota.transport, 'manifest_async'):
+                print('AI Dash: update manifest scheduled')
+                self._ota_prepare_task = asyncio.create_task(self._prepare_ota_async(command))
+                return
             manifest_text = self.ota.transport.manifest(command.get("manifest_path"))
+            self._prepare_ota(command, manifest_text)
+        except Exception as exc:
+            print("AI Dash: update could not be staged (%s)" % type(exc).__name__)
+            self._transfer = None
+
+    async def _prepare_ota_async(self, command):
+        try:
+            text = await self.ota.transport.manifest_async(command['manifest_path'])
+            print('AI Dash: update manifest received')
+            self._prepare_ota(command, text)
+        except Exception as exc:
+            print('AI Dash: update manifest failed (%s)' % type(exc).__name__)
+            self._ota_failed(command, 'transport_untrusted', blocked=True)
+        finally:
+            self._ota_prepare_task = None
+
+    def _prepare_ota(self, command, manifest_text):
+        try:
             self.ota.journal = self.journal
             transfer, error = self.ota.prepare(command, manifest_text, self.slot)
             if error:
@@ -669,7 +800,9 @@ class App(object):
             self._ota_slot = "b" if self.slot == "a" else "a"
             accepted = self._activation.begin_transfer(self.journal, self._ota_slot,
                 transfer.manifest["revision"], command["generation"], command["attempt"], command["id"])
-            self._activation.save(self._store, accepted)
+            with _FlashWindow(self):
+                self._activation.save(self._store, accepted)
+            print('AI Dash: update transfer recorded')
             self.journal = accepted
             self._transfer = transfer
         except Exception as exc:
@@ -681,54 +814,112 @@ class App(object):
             value = self._activation.record_failure(self.journal,
                 "blocked" if blocked else "failed", error, command["target_revision"],
                 command["generation"], command["attempt"])
-            self._activation.save(self._store, value)
+            with _FlashWindow(self):
+                self._activation.save(self._store, value)
             self.journal = value
         except Exception:
             pass
 
     def _ota_tick(self):
-        """Advance a staged transfer by a few bounded chunks per frame.
+        """Advance a staged transfer by one bounded chunk per frame.
 
         The display keeps updating between steps: one step is at most one
-        1024-byte read and write, which is what the measured build can do
-        without stalling the touch/render loop. A finished transfer is
-        activated by the journal and the board restarts into the candidate.
+        1024-byte read into RAM. Verified files reach flash in a batch inside
+        one display pause (see _FlashWindow); the last batch also verifies
+        the slot from flash and records the candidate, and the board restarts
+        into it.
         """
-        if self._transfer is None:
+        transfer = self._transfer
+        if transfer is None:
             return
         try:
-            for _ in range(8):
-                if self._transfer.done:
-                    break
-                self._transfer.step()
-            if not self._transfer.done:
-                if self._transfer._finalizing is not None and self.journal["transfer"]["phase"] != "verifying":
-                    verifying = dict(self.journal)
-                    verifying["transfer"] = dict(self.journal["transfer"], phase="verifying")
-                    self._activation.save(self._store, verifying)
-                    self.journal = verifying
+            if not transfer.done and not transfer.flash_due:
+                transfer.step()
+            if not transfer.done and not transfer.flash_due:
                 return
-            transfer, self._transfer = self._transfer, None
-            if transfer.error is not None:
-                print("AI Dash: update staging stopped (%s)" % transfer.error)
-                accepted = self.journal.get("transfer")
-                if accepted:
-                    self._ota_failed({"target_revision": accepted["target"],
-                        "generation": accepted["generation"], "attempt": accepted["attempt"]}, transfer.error)
-                return
-            if self._activation is None:
-                return
-            accepted = self.journal["transfer"]
-            candidate = self._activation.begin_candidate(self.journal, self._ota_slot,
-                transfer.manifest["revision"], accepted["generation"], accepted["attempt"], accepted["command"])
-            self._activation.save(self._store, candidate)
-            self.journal = candidate
-            print("AI Dash: update staged in slot " + self._ota_slot)
-            reset = self._ota_reset or _reboot
-            reset()
+            staged = False
+            with _FlashWindow(self):
+                if not transfer.done:
+                    if transfer.downloaded and self.journal["transfer"]["phase"] != "verifying":
+                        verifying = dict(self.journal)
+                        verifying["transfer"] = dict(self.journal["transfer"], phase="verifying")
+                        self._activation.save(self._store, verifying)
+                        self.journal = verifying
+                    print("AI Dash: update writing slot " + self._ota_slot)
+                    transfer.flash(self._service_watchdog)
+                if transfer.done:
+                    self._transfer = None
+                    staged = self._finish_transfer(transfer)
+            if staged:
+                print("AI Dash: update staged in slot " + self._ota_slot)
+                reset = self._ota_reset or _reboot
+                reset()
         except Exception as exc:
             print("AI Dash: update step failed (%s)" % type(exc).__name__)
             self._transfer = None
+
+    def _finish_transfer(self, transfer):
+        """Record a finished transfer; True when a candidate is ready to enter.
+
+        Called inside a flash window.
+        """
+        try:
+            import json
+            self._store.write('/ai_dash_state/ota-metrics.json',
+                              json.dumps(transfer.metrics).encode())
+        except Exception:
+            pass
+        if transfer.error is not None:
+            print("AI Dash: update staging stopped (%s)" % transfer.error)
+            accepted = self.journal.get("transfer")
+            if accepted:
+                self._ota_failed({"target_revision": accepted["target"],
+                    "generation": accepted["generation"], "attempt": accepted["attempt"]}, transfer.error)
+            return False
+        if self._activation is None:
+            return False
+        accepted = self.journal["transfer"]
+        candidate = self._activation.begin_candidate(self.journal, self._ota_slot,
+            transfer.manifest["revision"], accepted["generation"], accepted["attempt"], accepted["command"])
+        self._activation.save(self._store, candidate)
+        self.journal = candidate
+        return True
+
+    def _pause_display(self):
+        """Stop the core1 display scan-out so internal flash can be written.
+
+        The native object's own finaliser stops core1 (measured: about 15 ms).
+        A stand-in display without one has nothing to stop.
+        """
+        native = getattr(self.presto, "presto", None)
+        stop = getattr(native, "__del__", None)
+        if stop is None:
+            return
+        stop()
+        self._display_stopped = True
+
+    def _resume_display(self):
+        """Restart the scan-out with a new native object of the same kind.
+
+        It draws from the same static framebuffer, so the existing PicoGraphics
+        surface stays valid (measured: about 370 ms). A second finaliser call
+        on the old object is a no-op on this firmware (measured), so letting it
+        be collected is safe. If the display cannot be restarted the board is
+        reset rather than left drawing to a stopped driver.
+        """
+        if not self._display_stopped:
+            return
+        try:
+            native = self.presto.presto
+            replacement = type(native)(full_res=self.full_res, palette=False)
+            self.presto.presto = replacement
+            if getattr(self.presto, "buffer", None) is not None:
+                self.presto.buffer = memoryview(replacement)
+            self._display_stopped = False
+            self._needs_redraw = True
+        except Exception as exc:
+            print("AI Dash: display restart failed (%s)" % type(exc).__name__)
+            _reboot()
 
     def _maybe_confirm(self, payload):
         """Write the durable healthy marker once this app has proved itself.
@@ -756,7 +947,8 @@ class App(object):
                 return
         try:
             confirmed = self._activation.confirm(self.journal, pending.get("target"))
-            self._activation.save(self._store, confirmed)
+            with _FlashWindow(self):
+                self._activation.save(self._store, confirmed)
             self.journal = confirmed
             self.boot_confirmed = True
             print("AI Dash: slot %s confirmed" % self.slot)
@@ -1249,17 +1441,28 @@ class App(object):
 
 
 def main():
+    import machine
+    sys.modules["machine"] = machine
     from presto import Presto
 
     presto = Presto(full_res=bool(getattr(config, "FULL_RES", False)))
-    display = presto.display
-    palette = Palette(display)
+    try:
+        display = presto.display
+        palette = Palette(display)
 
-    draw_boot(display, palette, "Starting...")
-    presto.update()
+        draw_boot(display, palette, "Starting...")
+        presto.update()
 
-    app = App(presto)
-    app.run()
+        app = App(presto)
+        app.run()
+    except BaseException:
+        # The bootstrap records a crashed candidate in flash, which cannot be
+        # written while the display runs (see _FlashWindow).
+        try:
+            presto.presto.__del__()
+        except Exception:
+            pass
+        raise
 
 
 if __name__ == "__main__":

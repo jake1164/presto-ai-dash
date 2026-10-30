@@ -64,6 +64,35 @@ class BootstrapTests(unittest.TestCase):
         self.assertEqual(state["failure"]["error"], "firmware_unsupported")
         self.main.assert_not_called()
 
+    def test_confirmed_slot_also_receives_watchdog_for_native_network_stalls(self):
+        state = activation.blank_journal()
+        self.store = MemoryStore({activation.JOURNAL_PATH: activation.encode_journal(state)})
+        app, _ = self.run_boot()
+        self.assertIs(app.BOOT_CONTEXT['watchdog'], self.wdt)
+        self.main.assert_called_once()
+
+    def test_builtin_machine_missing_from_module_cache_is_loaded_before_candidate(self):
+        import builtins
+        imported = builtins.__import__
+        def importer(name, *args, **kwargs):
+            return self.runtime if name == 'machine' else imported(name, *args, **kwargs)
+        app = SimpleNamespace(main=self.main)
+        with patch.object(activation, 'FileStore', return_value=self.store), \
+                patch.object(self.boot.os, 'chdir'), patch.object(self.boot, '_rearm'), \
+                patch.object(sys, 'path', list(sys.path)), \
+                patch.dict(sys.modules, {'ai_dash_app': app}), \
+                patch('builtins.__import__', side_effect=importer):
+            original = sys.modules.pop('machine', None)
+            try:
+                self.main.side_effect = lambda: self.runtime.WDT.assert_called_once_with(timeout=8000)
+                self.boot.main()
+                self.assertIs(sys.modules['machine'], self.runtime)
+            finally:
+                if original is not None:
+                    sys.modules['machine'] = original
+                else:
+                    sys.modules.pop('machine', None)
+
     def test_later_crash_cannot_overwrite_durable_confirmation(self):
         def confirmed_then_crashed():
             state = activation.load(self.store)[0]

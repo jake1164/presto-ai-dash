@@ -453,5 +453,228 @@ class SlotStagingTests(SlotAppBase):
         self.assertNotIn("/ai_dash_slots/a/ai_dash_app.py", self.store.files)
 
 
+class NativeDisplay(object):
+    """The firmware's core1 display object, as measured on the device.
+
+    Its finaliser stops the scan-out; a second call is a no-op. A new object
+    restarts the scan-out. ``live`` lists the objects scanning out now.
+    """
+    live = []
+    made = []
+
+    def __init__(self, full_res=False, palette=False):
+        self.args = (full_res, palette)
+        self.stopped = False
+        NativeDisplay.live.append(self)
+        NativeDisplay.made.append(self)
+
+    def __del__(self):
+        # CPython also calls this when the object is collected.
+        if not self.stopped:
+            self.stopped = True
+            if self in NativeDisplay.live:
+                NativeDisplay.live.remove(self)
+
+
+class DisplayGuardedStore(MemoryStore):
+    """Refuses every flash mutation while the display scans out (it hangs)."""
+
+    def __init__(self):
+        super().__init__()
+        self.mutations = 0
+
+    def _guard(self):
+        if NativeDisplay.live:
+            raise AssertionError("flash written while the display was running")
+        self.mutations += 1
+
+    def write(self, path, text):
+        self._guard()
+        super().write(path, text)
+
+    def replace(self, source, target):
+        self._guard()
+        super().replace(source, target)
+
+    def remove(self, path):
+        self._guard()
+        super().remove(path)
+
+    def sync(self):
+        self._guard()
+
+    def open(self, path, mode="wb"):
+        if "r" not in mode:
+            self._guard()
+        handle = super().open(path, mode)
+        if "r" in mode:
+            return handle
+        store = self
+
+        class Guarded(object):
+            def write(self, chunk):
+                store._guard()
+                handle.write(bytes(chunk))
+
+            def close(self):
+                handle.close()
+
+        return Guarded()
+
+
+class FlashWindowTests(SlotStagingTests):
+    """Every flash write of the running app happens with core1 stopped."""
+
+    def setUp(self):
+        super().setUp()
+        NativeDisplay.live = []
+        NativeDisplay.made = []
+        self.store = DisplayGuardedStore()
+        self.store_patch.stop()
+        self.store_patch = patch.object(activation, "FileStore", lambda: self.store)
+        self.store_patch.start()
+        self.addCleanup(self.store_patch.stop)
+        self.device.presto = NativeDisplay()
+        self.device.buffer = None
+
+    def make_app(self, journal, context):
+        # The stored journal is the bootstrap's, written before the display.
+        live, NativeDisplay.live = NativeDisplay.live, []
+        try:
+            return super().make_app(journal, context)
+        finally:
+            NativeDisplay.live = live
+
+    def test_a_whole_update_writes_flash_only_with_the_display_stopped(self):
+        app = self.app()
+        command = self.command(self.manifest())
+        app._ota_offer({"device_lifecycle": {"command": command}})
+        self.assertIsNotNone(app._transfer)
+        for _ in range(50):
+            app._ota_tick()
+            if app._transfer is None:
+                break
+        self.assertEqual(self.resets, [1])
+        self.assertGreater(self.store.mutations, 5)
+        stored = activation.load(self.store)[0]
+        self.assertEqual(stored["pending"]["target"], self.manifest()["revision"])
+        for name, data in self.files.items():
+            self.assertEqual(self.store.files["/ai_dash_slots/b/" + name], data)
+        # Restarted after each window, on the same configuration.
+        self.assertEqual(len(NativeDisplay.live), 1)
+        self.assertIs(app.presto.presto, NativeDisplay.live[0])
+        self.assertEqual(app.presto.presto.args, (False, False))
+        self.assertEqual(app._flash_depth, 0)
+        self.assertTrue(app._needs_redraw)
+
+    def test_the_two_poll_confirmation_writes_with_the_display_stopped(self):
+        journal = activation.begin_candidate(activation.blank_journal(), "b", SLOT_HASH,
+                                             GEN, ATTEMPT, "3" * 32)
+        app = self.make_app(journal, self.slot_context(journal))
+        payload = sample_payload()
+        payload["device_lifecycle"] = {"confirm_attempt_id": ATTEMPT}
+        app._set_payload(payload)
+        self.assertTrue(app.boot_confirmed)
+        self.assertEqual(activation.load(self.store)[0]["confirmed"], "b")
+        self.assertEqual(len(NativeDisplay.live), 1)
+
+    def test_a_failed_write_still_restarts_the_display(self):
+        app = self.app()
+        with patch.object(MemoryStore, "write", side_effect=OSError("full")):
+            app._ota_offer({"device_lifecycle": {"command": self.command(self.manifest())}})
+        self.assertIsNone(app._transfer)
+        self.assertEqual(len(NativeDisplay.live), 1)
+        self.assertEqual(app._flash_depth, 0)
+
+    def test_a_half_resolution_buffer_follows_the_new_native_object(self):
+        app = self.app()
+        app.presto.buffer = "old view"
+        with patch.object(self.module, "memoryview", create=True,
+                          side_effect=lambda native: ("view", native)):
+            with self.module._FlashWindow(app):
+                with self.module._FlashWindow(app):
+                    self.assertEqual(NativeDisplay.live, [])
+        self.assertEqual(app.presto.buffer, ("view", app.presto.presto))
+        # Nested windows restart the display once.
+        self.assertEqual(len(NativeDisplay.made), 2)
+
+
+class ClockCarryTests(unittest.TestCase):
+    """The RTC restarts at 2021 on every reset; the app's own restart carries it."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.module, patcher = load_app({})
+        self.addCleanup(patcher.stop)
+        self.carry = os.path.join(self.temp.name, "clock.txt")
+        patch.object(self.module, "CLOCK_CARRY", self.carry).start()
+        self.addCleanup(patch.stopall)
+        self.set_to = []
+        self.resets = []
+        self.mounts = []
+        rtc = SimpleNamespace(datetime=lambda value: self.set_to.append(value))
+
+        def mount():
+            self.mounts.append(1)
+            if len(self.mounts) > 1:
+                raise OSError(1)  # EPERM, as measured for a second mount
+
+        machine = SimpleNamespace(RTC=lambda: rtc, reset=lambda: self.resets.append(1))
+        patch.dict(sys.modules, {"machine": machine,
+                                 "psram": SimpleNamespace(mkramfs=mount)}).start()
+
+    def test_reboot_resets_even_when_ramfs_is_already_mounted(self):
+        self.module.BOOT_CONTEXT = {"journal": {}}
+        self.addCleanup(setattr, self.module, "BOOT_CONTEXT", None)
+        self.mounts.append(1)  # The stock launcher mounted it.
+        launch = os.path.join(self.temp.name, "launch.txt")
+        real_open = open
+
+        def redirected(path, *args, **kwargs):
+            return real_open(launch if path == "/ramfs/launch.txt" else path, *args, **kwargs)
+
+        with patch("builtins.open", redirected), \
+                patch.object(self.module.time, "sleep_ms", create=True, new=lambda ms: None), \
+                patch.object(self.module.time, "time", return_value=1800000000):
+            self.module._reboot()
+        self.assertEqual(self.resets, [1])
+        with real_open(launch) as handle:
+            self.assertEqual(handle.read(), "ai_dash_boot.py")
+        with real_open(self.carry) as handle:
+            self.assertEqual(handle.read(), "1800000000")
+
+    def test_an_unusable_clock_is_not_carried(self):
+        with patch.object(self.module.time, "time", return_value=1609459300):
+            self.module._carry_clock()
+        self.assertFalse(os.path.exists(self.carry))
+
+    def test_a_reset_clock_is_restored_with_the_seconds_since_the_reset(self):
+        with open(self.carry, "w") as handle:
+            handle.write("1800000000")
+        with patch.object(self.module.time, "time", return_value=1609459200 + 7):
+            self.module._restore_clock()
+        import time as host_time
+        expected = host_time.gmtime(1800000007)
+        self.assertEqual(self.set_to, [(expected[0], expected[1], expected[2], expected[6],
+                                        expected[3], expected[4], expected[5], 0)])
+        self.assertFalse(os.path.exists(self.carry))
+
+    def test_a_usable_clock_is_never_changed(self):
+        with open(self.carry, "w") as handle:
+            handle.write("1800000000")
+        with patch.object(self.module.time, "time", return_value=1790000000):
+            self.module._restore_clock()
+        self.assertEqual(self.set_to, [])
+
+    def test_a_corrupt_or_unusable_carry_sets_nothing(self):
+        for text in ("garbage", "1609459300"):
+            with open(self.carry, "w") as handle:
+                handle.write(text)
+            with patch.object(self.module.time, "time", return_value=1609459210):
+                self.module._restore_clock()
+        self.assertEqual(self.set_to, [])
+
+
 if __name__ == "__main__":
     unittest.main()

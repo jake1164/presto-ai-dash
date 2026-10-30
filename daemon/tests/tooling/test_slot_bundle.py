@@ -314,6 +314,20 @@ class LayoutScriptTests(unittest.TestCase):
 
 
 class MigrationOperationTests(unittest.TestCase):
+    def test_bootstrap_is_staged_only_for_explicit_usb_maintenance(self):
+        for maintain in (False, True):
+            uploads = []
+            def remote(port, args):
+                if 'cp' in args:
+                    uploads.extend(args[i + 2][1:] for i, value in enumerate(args) if value == 'cp')
+                return ''
+            device_install.slot_sync_operation('TESTPORT', self.built, '{"boots":1}', 'b',
+                remote=remote, receipt=self.receipt, maintain_bootstrap=maintain)
+            boot = set(self.built['bootstrap']['files'])
+            staged = {path.removesuffix('.presto-new') for path in uploads}
+            self.assertEqual(bool(boot & staged), maintain)
+            self.assertTrue(all(path.startswith('/ai_dash_slots/b/') or path in boot for path in staged))
+
     def test_directories_and_boot_epoch_are_prepared_before_uploads(self):
         prepared = []
         script_text = []
@@ -381,6 +395,61 @@ class MigrationOperationTests(unittest.TestCase):
             device_install.migrate_operation("TESTPORT", self.built, "{}",
                                              remote=remote, receipt=self.receipt)
         self.assertFalse(any("cp" in arguments for arguments in self.calls))
+
+
+class WatchdogResetTests(unittest.TestCase):
+    """A running slot app's watchdog is cleared before a long USB session."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.receipt = Path(self.temp.name) / "receipt.json"
+        self.built = bundle.snapshot()
+
+    def test_slot_sync_resets_to_the_launcher_before_uploading(self):
+        calls = []
+        def remote(port, args):
+            calls.append(list(args))
+            return ""
+        device_install.slot_sync_operation("TESTPORT", self.built, '{"boots":1}', "b",
+                                           remote=remote, receipt=self.receipt)
+        reset = calls.index(["exec", "--no-follow", device_install.RESET_TO_LAUNCHER])
+        upload = next(index for index, args in enumerate(calls) if "cp" in args)
+        self.assertLess(reset, upload)
+        self.assertIn(["exec", device_install.READY_PROBE], calls[reset:upload])
+
+    def test_slot_check_resets_to_the_launcher_before_hashing(self):
+        calls = []
+        def remote(port, args):
+            calls.append(list(args))
+            if "run" in args:
+                return device_install.MARKER + json.dumps({"boot": {}, "slots": {}, "journal": None})
+            return ""
+        device_install.slot_check_operation("TESTPORT", self.built, remote=remote,
+                                            receipt=self.receipt)
+        reset = calls.index(["exec", "--no-follow", device_install.RESET_TO_LAUNCHER])
+        inspect = next(index for index, args in enumerate(calls) if "run" in args)
+        self.assertLess(reset, inspect)
+
+    def test_waits_for_the_port_to_return(self):
+        answers = [RuntimeError("gone"), RuntimeError("gone"), ""]
+        sleeps = []
+        def remote(port, args):
+            if args[-1] == device_install.READY_PROBE:
+                answer = answers.pop(0)
+                if isinstance(answer, Exception):
+                    raise answer
+            return ""
+        device_install.reset_to_launcher("TESTPORT", remote, sleep=sleeps.append)
+        self.assertEqual(len(sleeps), 2)
+
+    def test_a_board_that_never_returns_is_reported(self):
+        def remote(port, args):
+            if args[-1] == device_install.READY_PROBE:
+                raise RuntimeError("gone")
+            return ""
+        with self.assertRaisesRegex(RuntimeError, "did not return"):
+            device_install.reset_to_launcher("TESTPORT", remote, attempts=3, sleep=lambda s: None)
 
 
 if __name__ == "__main__":

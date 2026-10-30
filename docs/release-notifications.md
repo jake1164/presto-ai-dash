@@ -83,7 +83,8 @@ no redirect to an unlisted host (PyPI: at most two same-host redirects with no
 credentials), a hard per-request time budget inside a 30 s overall deadline: a timer shuts the
 connection's socket down at the deadline, which bounds a slow TLS handshake, status line
 or headers, and the body is read in chunks against the same clock (DNS resolution and
-the TCP connect run before a socket exists and are bounded by the socket timeout), 2 MiB/256 KiB/16 KiB
+the TCP connect run before a connected socket exists; TCP connection attempts use the
+socket timeout, while DNS resolution uses the operating system resolver's limits), 2 MiB/256 KiB/16 KiB
 body limits, at most 20 pages and 5,000 tags, a validated challenge (Bearer, realm
 exactly `https://ghcr.io/token`, service `ghcr.io`, scope exactly the pull scope; the
 token URL is built locally, not copied), a real RFC 8288 `Link` parser (`rel` may follow other parameters; an unreadable header is

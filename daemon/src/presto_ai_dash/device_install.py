@@ -585,8 +585,34 @@ BOOT_LAUNCH = ("import sys, os; sys.path.insert(0, '/ai_dash_boot_files'); "
                "os.chdir('/ai_dash_boot_files'); import boot; boot.main()")
 
 
+# A running slot app has the bootstrap's 8-second hardware watchdog armed, and
+# an app interrupted over USB no longer feeds it, so a long USB session could be
+# cut short by a reset (observed on COM3 during a slot sync). RP2 cannot disarm
+# a watchdog; a hard reset clears it, and the stock launcher arms none.
+RESET_TO_LAUNCHER = "import machine; machine.reset()"
+READY_PROBE = "print('PRESTO_READY')"
+
+
+def reset_to_launcher(port, remote=run_remote, attempts=20, pause=1.0, sleep=None):
+    """Hard-reset the board to the stock launcher and wait for USB to return."""
+    import time
+    sleep = sleep or time.sleep
+    try:
+        remote(port, ["exec", "--no-follow", RESET_TO_LAUNCHER])
+    except (RuntimeError, OSError, subprocess.TimeoutExpired):
+        pass  # The port can vanish before mpremote has finished.
+    for _ in range(attempts):
+        try:
+            remote(port, ["exec", READY_PROBE])
+            return
+        except (RuntimeError, OSError, subprocess.TimeoutExpired):
+            sleep(pause)
+    raise RuntimeError("The Presto did not return after a reset. Reconnect USB and "
+                       "run Check Presto sync again.")
+
+
 def slot_sync_operation(port, bundle, journal_text, slot, remote=run_remote,
-                        receipt=DEFAULT_RECEIPT):
+                        receipt=DEFAULT_RECEIPT, maintain_bootstrap=False):
     """Install this build into one slot over USB and activate it, confirmed.
 
     A USB install is verified by hash over the cable, so it does not need the
@@ -595,7 +621,11 @@ def slot_sync_operation(port, bundle, journal_text, slot, remote=run_remote,
     fails to start.
     """
     boot, slots = _slot_targets(bundle)
-    del boot  # the bootstrap is verified by ``check``; sync does not rewrite it
+    # Bootstrap replacement is an explicit USB maintenance action, never OTA
+    # and never implied by a routine app sync.
+    if not maintain_bootstrap:
+        boot = {}
+    boot_hashes = {path: hashlib.sha256(data).hexdigest() for path, data in boot.items()}
     group = slots[slot]
     hashes = {path: hashlib.sha256(data).hexdigest() for path, data in group.items()}
     with device_lock(Path(receipt).with_suffix(".lock")):
@@ -605,15 +635,16 @@ def slot_sync_operation(port, bundle, journal_text, slot, remote=run_remote,
             with tempfile.TemporaryDirectory(prefix="presto-slot-") as temporary:
                 folder = Path(temporary)
                 script = folder / "activate.py"
-                script.write_text(layout_script({}, {slot: hashes}, journal_text),
+                script.write_text(layout_script(boot_hashes, {slot: hashes}, journal_text),
                                   encoding="utf-8")
                 arguments = ["soft-reset"]
-                for index, (target, data) in enumerate(group.items()):
+                for index, (target, data) in enumerate(list(boot.items()) + list(group.items())):
                     local = folder / (str(index) + ".py")
                     local.write_bytes(data)
                     arguments += ["fs", "cp", str(local), ":" + target + ".presto-new", "+"]
                 arguments += ["run", str(script)]
                 attempted = True
+                reset_to_launcher(port, remote)
                 remote(port, arguments)
             record("matched", bundle, receipt)
         finally:
@@ -646,6 +677,7 @@ def slot_check_operation(port, bundle, remote=run_remote, receipt=DEFAULT_RECEIP
                 script = Path(temporary) / "inspect.py"
                 script.write_text(layout_inspection_script(boot_hashes, slot_hashes_map),
                                   encoding="utf-8")
+                reset_to_launcher(port, remote)
                 output = remote(port, ["soft-reset", "run", str(script)])
             actual = parse_state(output)
             different = []
@@ -849,6 +881,12 @@ def app_snapshot(folder=None, root=None):
     checkout falls back to ``tools/presto_bundle.py`` plus ``presto/`` so the
     admin page and the USB checks describe the code that is running.
     """
+    checkout = Path(root) if root is not None else checkout_root()
+    if folder is None and checkout is not None and (root is not None or
+            Path(__file__).resolve().parent == checkout / "daemon" / "src" / "presto_ai_dash"):
+        # A build may leave staged package-data beside editable source. The
+        # checkout still serves its current shared app, not yesterday's copy.
+        return source_snapshot(checkout)
     try:
         return bundled_snapshot(folder)
     except NoBundledApp:

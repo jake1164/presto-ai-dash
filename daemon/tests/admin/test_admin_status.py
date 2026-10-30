@@ -10,6 +10,7 @@ import json
 import logging
 from pathlib import Path
 import sys
+import time
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
@@ -246,7 +247,7 @@ class ClientDiagnosticsPageTests(AdminServerBase):
     def test_the_table_has_the_diagnostics_columns(self):
         script = self.script()
         self.assertIn("buildClientTable", script)
-        for column in ("Last error", "Failures", "Free", "Signal", "Uptime"):
+        for column in ("Failures", "Free", "Signal", "Uptime"):
             self.assertIn('"%s"' % column, script)
 
     def test_a_codex_sign_in_failure_is_shown_in_the_card(self):
@@ -293,9 +294,8 @@ class ClientDiagnosticsPageTests(AdminServerBase):
         self.assertIn("NO_VALUE", script)
         self.assertIn("undefined", script)  # the guard, not a printed value
         # The cells are built from the helpers, so nothing says "undefined".
-        for call in ("diagValue(diag, \"n\")", "diagWithUnit(diag, \"free\", \"KB\")",
-                     "diagWithUnit(diag, \"rssi\", \"dBm\")", "diagUptime(diag.up)",
-                     "diagError(diag)"):
+        for call in ("(client.diag || {}).n", "diagWithUnit(diag, \"free\", \"KB\")",
+                     "diagWithUnit(diag, \"rssi\", \"dBm\")", "diagUptime(diag.up)"):
             self.assertIn(call, script)
 
     def test_the_help_note_says_a_silent_device_must_be_checked_otherwise(self):
@@ -322,7 +322,33 @@ class ClientsTableLayoutTests(unittest.TestCase):
         self.assertIn('el("table", "grid compact clients")', script)
         css = (self.folder() / "admin.css").read_text(encoding="utf-8")
         self.assertRegex(css, r"\.grid\.compact\.clients td:last-child\s*\{\s*white-space:\s*nowrap")
-        self.assertRegex(css, r"\.grid\.compact\.clients td:nth-child\(6\)\s*\{\s*white-space:\s*normal")
+
+    def test_a_stale_last_error_column_is_gone_and_failures_opens_a_dated_list(self):
+        script = (self.folder() / "admin.js").read_text(encoding="utf-8")
+        body = script[script.index("function buildClientTable"):script.index("// -- requests")]
+        self.assertNotIn('"Last error"', body)
+        self.assertIn('"Failures"', body)
+        self.assertIn("failureDetail", body)
+        self.assertIn("when the daemon heard about the failures, not when they happened", script)
+        self.assertNotIn("diagError", script)
+
+
+class ClientFailureListTests(AdminServerBase):
+    def test_the_status_carries_each_report_of_new_failures_with_a_utc_time(self):
+        clients = self.manager.clients
+        now = time.time()
+        clients.record("presto", "10.0.0.9", "abc123", now=now - 60, diag="n=0")
+        clients.record("presto", "10.0.0.9", "abc123", now=now,
+                       diag="err=TimeoutError;st=conn;n=4")
+        _, _, body = self.request("/api/admin/status")
+        record = body["clients"][0]
+        self.assertEqual(len(record["events"]), 1)
+        event = record["events"][0]
+        self.assertEqual((event["count"], event["err"], event["st"], event["first"]),
+                         (4, "TimeoutError", "conn", False))
+        self.assertEqual(event["at"], record["last_seen"],
+                         "the same moment, spelled the way last_seen is")
+        self.assertNotIn("failures_seen", record)
 
 
 if __name__ == "__main__":

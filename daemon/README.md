@@ -37,8 +37,7 @@ presto-ai-dash install-presto --port COM3
 
 To move a Presto to another daemon, or after the Wi-Fi changes, use the same
 **Set up a Presto** page and script as for a first setup: it works out what the
-Presto needs. Developers can also run `presto-ai-dash set-daemon` or
-`set-wifi`, which check the result and put the old settings back on failure.
+Presto needs.
 
 Prefer a container? See the
 [Docker guide](https://jake1164.github.io/presto-ai-dash/getting-started/install-with-docker/).

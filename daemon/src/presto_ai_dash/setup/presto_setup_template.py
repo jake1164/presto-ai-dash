@@ -786,22 +786,21 @@ def write_private(device, path, data):
 CONFIG_LINES = ("DAEMON_HOST", "DAEMON_PORT", "SHARED_TOKEN")
 
 
-def merge_config(existing, payload, name, device_id):
-    """The Presto's own settings file with only the daemon lines changed, or None.
+def merge_assignments(existing, wanted, defaults=None):
+    """A settings file with only the named lines changed, or None.
 
-    Everything else in it stays: tuning, sound, brightness, comments. The file is
-    parsed, never run, because it came from a device. None means the file does not
-    have the usual shape (it does not parse, or sets a daemon line twice, or over
-    several lines), and the caller writes a fresh one instead.
+    ``wanted`` maps each name to the value it must have; a name the file lacks is
+    added at the end. ``defaults`` are added only when the file has no such line.
+    Everything else stays: tuning, comments, other keys. The file is parsed, never
+    run, because it came from a device. None means it does not have the usual shape
+    (it does not parse, or sets a wanted name twice, or over several lines), and the
+    caller writes a fresh file instead.
     """
     try:
         text = bytes(existing).decode("utf-8")
         tree = ast.parse(text)
     except (UnicodeError, SyntaxError, ValueError):
         return None
-    daemon = payload["daemon"]
-    wanted = {"DAEMON_HOST": daemon["host"], "DAEMON_PORT": int(daemon["port"]),
-              "SHARED_TOKEN": daemon["token"]}
     found = {}
     for node in tree.body:
         if (isinstance(node, ast.Assign) and len(node.targets) == 1
@@ -822,10 +821,9 @@ def merge_config(existing, payload, name, device_id):
             lines[index] = line + tail
         else:
             additions.append(line)
-    if "DEVICE_ID" not in found:
-        additions.append("DEVICE_ID = %r" % device_id)
-    if "DEVICE_NAME" not in found:
-        additions.append("DEVICE_NAME = %r" % name)
+    for key, value in (defaults or {}).items():
+        if key not in found:
+            additions.append("%s = %r" % (key, value))
     merged = "\n".join(lines)
     if additions:
         merged = merged.rstrip("\r\n") + "\n" + "\n".join(additions) + "\n"
@@ -840,6 +838,16 @@ def merge_config(existing, payload, name, device_id):
     if check != wanted:
         return None
     return merged.encode("utf-8")
+
+
+def merge_config(existing, payload, name, device_id):
+    """The Presto's own settings file with only the daemon lines changed, or None."""
+    daemon = payload["daemon"]
+    return merge_assignments(
+        existing,
+        {"DAEMON_HOST": daemon["host"], "DAEMON_PORT": int(daemon["port"]),
+         "SHARED_TOKEN": daemon["token"]},
+        {"DEVICE_ID": device_id, "DEVICE_NAME": name})
 
 
 def ask_settings(device, payload, requested_name, ask, say):
@@ -868,6 +876,13 @@ def ask_settings(device, payload, requested_name, ask, say):
     name = (requested_name or existing.get("name") or payload["device"]["name"] or "presto")
     if not isinstance(name, str) or not name.isascii() or len(name) > 32:
         name = "presto"
+    # The Wi-Fi file is treated the same way: only its two Wi-Fi lines change, so any
+    # other key kept there (other apps keep theirs in this same file) stays.
+    secrets_mode, secrets_data = "create", None
+    if replace_secrets and secrets_exists:
+        secrets_data = merge_assignments(device.read(SECRETS_PATH),
+                                         {"WIFI_SSID": ssid, "WIFI_PASSWORD": password})
+        secrets_mode = "update" if secrets_data is not None else "rewrite"
     kept_id = bool(existing.get("device_id"))
     device_id = existing.get("device_id") or new_device_id()
     # A Presto that already has settings keeps all of them: only the daemon lines
@@ -878,6 +893,7 @@ def ask_settings(device, payload, requested_name, ask, say):
         data = merge_config(device.read(CONFIG_PATH), payload, name, device_id)
         mode = "update" if data is not None else "rewrite"
     return {"config": mode, "config_data": data, "secrets": replace_secrets,
+            "secrets_mode": secrets_mode, "secrets_data": secrets_data,
             "ssid": ssid, "password": password, "name": name, "device_id": device_id,
             "kept_id": kept_id}
 
@@ -906,8 +922,14 @@ def preview(payload, plan, port, machine, say):
     else:
         say('  - /ai_dash_files/config.py: create it for daemon %s:%d, name "%s", new device ID.'
             % (daemon["host"], int(daemon["port"]), plan["name"]))
-    if plan["secrets"]:
-        say("  - /secrets.py: replace with the Wi-Fi network you entered.")
+    if plan["secrets"] and plan.get("secrets_mode") == "update":
+        say("  - /secrets.py: change the Wi-Fi network and password to the ones you entered.")
+        say("    Every other line in it stays.")
+    elif plan["secrets"] and plan.get("secrets_mode") == "rewrite":
+        say("  - /secrets.py: write a new one with the Wi-Fi network you entered.")
+        say("    The existing file does not have the usual shape, so its other lines are not kept.")
+    elif plan["secrets"]:
+        say("  - /secrets.py: create it with the Wi-Fi network you entered.")
     else:
         say("  - /secrets.py: keep the existing file.")
     say("  - Firmware, the stock launcher and every other file are left alone.")
@@ -923,7 +945,10 @@ def apply_plan(device, payload, plan, say):
         write_private(device, CONFIG_PATH, config_text(payload, plan["name"], plan["device_id"]))
     say("Wrote /ai_dash_files/config.py and verified it.")
     if plan["secrets"]:
-        write_private(device, SECRETS_PATH, secrets_text(plan["ssid"], plan["password"]))
+        if plan.get("secrets_mode") == "update":
+            write_private(device, SECRETS_PATH, plan["secrets_data"])
+        else:
+            write_private(device, SECRETS_PATH, secrets_text(plan["ssid"], plan["password"]))
         say("Wrote /secrets.py and verified it.")
     if not device.exists(CONFIG_PATH):
         raise SetupStopped("The device has no /ai_dash_files/config.py, so it cannot reach "

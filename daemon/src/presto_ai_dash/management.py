@@ -750,7 +750,9 @@ class SourceConfiguration:
             },
             "clients": [dict(record, last_seen=_stamp(record["last_seen"]),
                             first_seen=_stamp(record["first_seen"]),
-                            diag=dict(record.get("diag") or {}))
+                            diag=dict(record.get("diag") or {}),
+                            events=[dict(event, at=_stamp(event["at"]))
+                                    for event in record.get("events") or []])
                         for record in self.clients.clients(poll_interval=poll_interval)],
             "accounts": [self._account_health(source, snapshots.get(source["id"]))
                          for source in sources],

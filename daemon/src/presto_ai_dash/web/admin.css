@@ -121,15 +121,17 @@ main > .panel { min-width: 0; }
 .grid th { color: #7ce6da; font-weight: 600; }
 .grid.compact th, .grid.compact td { white-space: nowrap; }
 .grid.compact th:last-child, .grid.compact td:last-child { white-space: normal; }
-/* The clients table has eleven columns of short values and one that can be long (the
-   last error). Letting the last column wrap squeezed State to one letter wide whenever
-   the error was long: "connected" ran down the page. Keep every short column on one
-   line and let only Last error wrap; the wrapper scrolls if there is still not room. */
+/* Keep the clients table's short columns on one line. The last one, State, used to be
+   allowed to wrap, and when the table was wide the browser squeezed it to a single
+   letter: "connected" ran down the page. */
 @media (min-width: 601px) {
   .grid.compact.clients th:last-child, .grid.compact.clients td:last-child { white-space: nowrap; }
-  .grid.compact.clients td:nth-child(6) { white-space: normal; overflow-wrap: normal; min-width: 9rem; }
-  .grid.compact.clients th, .grid.compact.clients td { padding-left: 6px; padding-right: 6px; }
 }
+/* The number that opens a client's list of failures, and the list. */
+.linklike { background: none; border: 0; padding: 0; font: inherit; color: #7ce6da;
+  text-decoration: underline; cursor: pointer; }
+.grid.compact .failure-detail td { white-space: normal; background: #101a2b; }
+.failure-list { margin: 4px 0 6px 18px; padding: 0; }
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 10px 0 0; }
 .facts dt { color: #7ce6da; font-size: .88rem; }
 .facts dd { margin: 0; color: #e3edf8; font-size: .9rem; }

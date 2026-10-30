@@ -116,8 +116,9 @@ On macOS or Linux, use `python3` if that is how Python 3 is named. The script:
 4. asks for your Wi-Fi network name and password locally (hidden) when you left
    **Set the Wi-Fi network on the Presto** ticked, even if the Presto already has
    some, and tells you what will change. It only goes to the Presto's own
-   `/secrets.py`. The password is shown as `*` too. If you unticked the box, it
-   keeps the Wi-Fi already on the Presto and asks nothing;
+   `/secrets.py`, where an existing file keeps its other lines and only the two
+   Wi-Fi lines change. The password is shown as `*` too. If you unticked the box,
+   it keeps the Wi-Fi already on the Presto and asks nothing;
 5. shows a summary of exactly what will change, and asks one question,
    **Continue? [Y/n]**. Press Enter to go ahead, or `n` to stop with nothing
    written. It then installs the app, verifies every file by SHA-256, and puts
@@ -172,145 +173,53 @@ future work and are not part of this setup.
 
 ## Moving a Presto to a different daemon
 
-The usual way is the admin page: open **Set up a Presto** on the daemon the
-Presto should use and run the script, as for a first setup (see above). It works
-for every Presto, keeps its name, identifier and Wi-Fi, and needs nothing
-installed beyond the two packages the script asks for. This section is the same
-change from the command line, for developers with a checkout or a pipx install.
-
 A Presto learns where its daemon is from `/ai_dash_files/config.py`. When the
-daemon moves - a new server, a new address, or a copy on your laptop for
-testing - the command points the Presto at it. It changes the daemon
-address (and the device token, if you ask) and nothing else, checks that the
-Presto can reach the new daemon, and **puts the old settings back if it
-cannot**, so a typing mistake does not leave a Presto you can only fix with
-another cable session.
+daemon moves - a new server, a new address, or a copy on your laptop for testing -
+use the same two steps as a first setup, on the admin page of the daemon the
+Presto should use:
 
-```bash
-presto-ai-dash set-daemon --port COM3 --daemon-host 192.168.1.50
-```
+1. Open **Set up a Presto**, enter the address the Presto can reach and the
+   daemon's device port, and leave **Set the Wi-Fi network on the Presto**
+   unticked, because it already has its network. Prepare the download.
+2. Run the script on the USB computer. It finds the Presto, changes only the
+   daemon address and the device token in its settings, keeps every other setting
+   including the name and the device identifier, checks that the Presto can reach
+   the new daemon, and starts AI Dash. A Presto that updates over the air keeps
+   its app.
 
-From a checkout of the repository, the same command is
-`.venv/Scripts/python tools/presto_device.py set-daemon --port COM3 --daemon-host 192.168.1.50`
-(`.venv/bin/python` outside Windows). Run it on the computer the Presto is
-plugged into.
+The new token arrives inside the download, so you never copy it from the old
+daemon. The old daemon lists the Presto as *not connected* and forgets the row
+after a day; the new one lists it on its next poll. Moving back is the same two
+steps on the old daemon's page.
 
-| Option | Meaning |
-| --- | --- |
-| `--port` | The Presto's USB port. Required: it never picks a board for you |
-| `--daemon-host` | The daemon computer's **IPv4 address**. Not a name, and not `localhost`, which would mean the Presto itself |
-| `--daemon-port` | The daemon's device port. Default 8787 |
-| `--token-env NAME` | The name of an environment variable holding the new daemon's `daemon.shared_token`. Leave it out to keep the token the Presto already has |
-| `--no-reach-check` | Do not ask the Presto to reach the new daemon. Only for preparing an address before the daemon is running |
-
-If the new daemon has a **different shared token**, which is the usual case for
-a second daemon, pass it through the environment. The token is never taken from
-the command line, so it does not land in your shell history, and the tool never
-prints it:
-
-```powershell
-$env:NEW_PRESTO_TOKEN = "the new daemon's daemon.shared_token"
-presto-ai-dash set-daemon --port COM3 --daemon-host 192.168.1.50 --token-env NEW_PRESTO_TOKEN
-```
-
-What happens, in order:
-
-1. The Presto is restarted into its stock launcher, which stops the running app.
-2. The three settings lines are rewritten in a new file, checked, and swapped in.
-   The device name, the device identifier, the poll timings and the rest of the
-   file are kept byte for byte. The Wi-Fi file, the app and the firmware are not
-   touched.
-3. The Presto joins its Wi-Fi network and reads the new daemon's status with the
-   token it now holds. This takes a few seconds, and longer on a weak signal.
-4. If that works, the old file is deleted and AI Dash starts. If it does not,
-   the old file is put back, the command says why, and AI Dash starts on the old
-   settings.
-
-A run that is cut short (a pulled cable, a closed terminal) leaves the old file
-beside the new one. The next `set-daemon` puts it back before it starts.
-
-Afterwards the old daemon lists the Presto as *not connected* and the new one
-lists it on its next poll. Moving back is the same command with the old
-address.
-
-| What you see | What to do |
-| --- | --- |
-| `refused its device token` | The new daemon has a different token. Run the command again with `--token-env` set to that daemon's `shared_token` |
-| `could not reach a daemon at that address and port` | Check that the daemon is running, the address, and the device port. From another machine, the `curl` check in [Daemon offline](../troubleshooting/daemon-offline.md) must work |
-| `could not join the Wi-Fi network` | The radio did not get an address, which a weak signal can cause. Run the command again; nothing was changed |
-| `did not answer as the daemon` | Something else answers on that port. Use the daemon's device port (8787 by default) |
-| `does not have exactly one DAEMON_HOST` | The settings file was edited by hand into a shape this command will not guess at. Use **Set up a Presto** to write it again |
-| `has no /ai_dash_files/config.py` | The Presto was never set up. Use **Set up a Presto** |
-
-The difference from the admin page is that the command checks the new daemon
-and **undoes the change** if the Presto cannot reach it, and it needs no
-download or unlock code. The page's script saves the settings and then reports
-whether the Presto reached the daemon, keeping the download so you can run it
-again.
+If the Presto cannot reach the new daemon, the script says why and keeps the
+download. Its settings are already written, so fix the cause (is the daemon
+running, is the address one the Presto can reach, is the device port open in the
+firewall?) and run the same script again. The table under *If something goes
+wrong* above lists what each message means.
 
 ## Changing the Wi-Fi network
 
 A Presto remembers one Wi-Fi network, in `/secrets.py`. If the router, the
 network name or the password changes, or you move the Presto to another
 building, it keeps trying the old one and shows **Daemon offline**; it cannot
-learn the new settings by itself. They have to go over USB.
+learn the new settings by itself. They have to go over USB, with the same two
+steps as before:
 
-The usual way is the admin page: **Set up a Presto**, with **Set the Wi-Fi
-network on the Presto** ticked, then run the script and type the new network
-name and password when it asks. The command line does the same, with a check
-that undoes the change if the Presto cannot join the new network:
+1. Open **Set up a Presto** on the admin page, enter the daemon's address as
+   usual, and leave **Set the Wi-Fi network on the Presto** ticked. Prepare the
+   download.
+2. Run the script and type the new network name and password when it asks. The
+   password is shown as `*`, one for each character, and it is written only to
+   the Presto's own `/secrets.py`, replacing just the two Wi-Fi lines there. The script joins the new network, and
+   tries several times with the radio switched off and on between tries, because
+   a weak signal sometimes needs it.
 
-```bash
-presto-ai-dash set-wifi --port COM3 --ssid "Office 2G"
-```
-
-From a checkout, the same command is
-`.venv/Scripts/python tools/presto_device.py set-wifi --port COM3 --ssid "Office 2G"`.
-Run it on the computer the Presto is plugged into.
-
-| Option | Meaning |
-| --- | --- |
-| `--port` | The Presto's USB port. Required: it never picks a board for you |
-| `--ssid` | The network name. The Presto's radio is 2.4 GHz only |
-| `--password-env NAME` | The name of an environment variable holding the password. Without this or `--open`, the command asks for the password with the typing hidden |
-| `--open` | The network has no password |
-| `--no-join-check` | Do not check that the Presto can join the network. Only for preparing a network you are not on yet |
-
-```powershell
-$env:PRESTO_WIFI_PASSWORD = "the new password"
-presto-ai-dash set-wifi --port COM3 --ssid "Office 2G" --password-env PRESTO_WIFI_PASSWORD
-```
-
-The password is never taken from the command line, so it does not land in your
-shell history, and the command never prints it. A name of 1 to 32 printable
-ASCII characters and a password of 8 to 63 are accepted, which is what Wi-Fi
-allows.
-
-What happens, in order:
-
-1. The Presto is restarted into its stock launcher, which stops the running app.
-2. The two lines in `/secrets.py` are rewritten in a new file, checked, and
-   swapped in. If the file does not exist it is created. Nothing else on the
-   Presto is touched, including the daemon address and token.
-3. The Presto joins the new network. This takes a few seconds, and longer on a
-   weak signal; it tries up to four times, switching the radio off and on
-   between tries.
-4. If it joins, the old file is deleted and AI Dash starts. If it cannot, the old
-   file is put back, the command says so, and AI Dash starts on the old network.
-
-If the Presto **joins but then cannot reach its daemon**, the new network is
-kept: moving to another network usually changes the daemon's address too. The
-command tells you, and you finish with
-[`set-daemon`](#moving-a-presto-to-a-different-daemon).
-
-| What you see | What to do |
-| --- | --- |
-| `could not join that Wi-Fi network` | Check the name and the password, that the network has a 2.4 GHz band, and the signal. Nothing was changed, so run it again |
-| `joined it, but could not reach its daemon from there` | The network is set. Run `set-daemon` if the daemon's address differs on this network |
-| `does not have exactly one WIFI_SSID` | `/secrets.py` was edited into a shape this command will not guess at. Fix it by hand, or delete it from the Presto: a missing file is created |
-
-A run that is cut short leaves the old file beside the new one, and the next
-`set-wifi` puts it back before it starts.
+A name of 1 to 32 printable ASCII characters and a password of 8 to 63 are what
+Wi-Fi allows. If the Presto cannot join, the script says so and keeps the
+download. The new settings are already saved and the Presto keeps trying on its
+own, so check the name and the password (and that the network has a 2.4 GHz
+band) and run the script again.
 
 ## The manual route
 
@@ -397,8 +306,8 @@ access point and nowhere else: they are never sent to the daemon.
 
 The Presto's radio is 2.4 GHz only. A 5 GHz-only network will not work.
 
-To change the network later, use
-[`set-wifi`](#changing-the-wi-fi-network) rather than editing this file.
+To change the network later, use the admin page rather than editing this file:
+see [Changing the Wi-Fi network](#changing-the-wi-fi-network).
 
 ### Copying the private files
 

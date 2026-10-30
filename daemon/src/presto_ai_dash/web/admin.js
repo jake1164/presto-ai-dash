@@ -203,27 +203,11 @@
   // A missing value is a dash, never the word "undefined".
   const NO_VALUE = "—";
 
-  function diagValue(diag, key) {
-    if (!diag) return NO_VALUE;
-    const value = diag[key];
-    if (value === undefined || value === null || value === "") return NO_VALUE;
-    return String(value);
-  }
-
   function diagWithUnit(diag, key, unit) {
     if (!diag) return NO_VALUE;
     const value = diag[key];
     if (value === undefined || value === null || value === "") return NO_VALUE;
     return String(value) + " " + unit;
-  }
-
-  function diagError(diag) {
-    if (!diag) return NO_VALUE;
-    const err = diag.err;
-    const stage = diag.st;
-    if (!err && !stage) return NO_VALUE;
-    if (err && stage) return err + " (" + stage + ")";
-    return err || stage;
   }
 
   function diagUptime(seconds) {
@@ -237,12 +221,65 @@
     return minutes + "m";
   }
 
+  // Which clients' failure lists are open, so the page's own refresh does not close them.
+  const openFailures = new Set();
+
+  function failureWhat(event) {
+    const what = [event.err, event.st ? "(" + event.st + ")" : ""].filter(Boolean).join(" ");
+    return what || "a failed fetch";
+  }
+
+  function failureDetail(client, columns) {
+    const row = el("tr", "failure-detail");
+    const cell = el("td");
+    cell.colSpan = columns;
+    const list = el("ul", "failure-list");
+    for (const event of client.events.slice().reverse()) {
+      list.append(el("li", "", whenText(event.at) + " \u2014 " + event.count
+        + (event.count === 1 ? " failure: " : " failures: ") + failureWhat(event)
+        + (event.first ? " (before the daemon first saw this device)" : "")));
+    }
+    cell.append(list, el("p", "note",
+      "Each time is when the daemon heard about the failures, not when they happened: a device "
+      + "that cannot reach the daemon cannot say so at the time."));
+    row.append(cell);
+    row.hidden = !openFailures.has(client.name + "|" + client.address);
+    return row;
+  }
+
+  function failureCell(client, detail) {
+    const count = (client.diag || {}).n;
+    const cell = el("td");
+    if (count === undefined || count === null) {
+      cell.textContent = NO_VALUE;
+      return cell;
+    }
+    const events = client.events || [];
+    if (!events.length) {
+      cell.textContent = String(count);
+      return cell;
+    }
+    const key = client.name + "|" + client.address;
+    const button = el("button", "linklike", String(count));
+    button.type = "button";
+    button.title = "Show when the daemon heard about these failures";
+    button.setAttribute("aria-expanded", String(!detail.hidden));
+    button.addEventListener("click", () => {
+      detail.hidden = !detail.hidden;
+      if (detail.hidden) openFailures.delete(key); else openFailures.add(key);
+      button.setAttribute("aria-expanded", String(!detail.hidden));
+    });
+    cell.append(button, el("span", "note", " \u00b7 last " + agoText(events[events.length - 1].at)));
+    return cell;
+  }
+
   function buildClientTable(clients) {
     const table = el("table", "grid compact clients");
     const head = el("thead");
     const headRow = el("tr");
-    for (const header of ["Name", "Address", "Last seen", "Fetches", "Revision",
-                          "Last error", "Failures", "Free", "Signal", "Uptime", "State"]) {
+    const headers = ["Name", "Address", "Last seen", "Fetches", "Revision",
+                     "Failures", "Free", "Signal", "Uptime", "State"];
+    for (const header of headers) {
       headRow.append(el("th", "", header));
     }
     head.append(headRow);
@@ -250,27 +287,33 @@
     for (const client of clients) {
       const diag = client.diag || {};
       const line = el("tr");
-      const cells = [
+      const detail = failureDetail(client, headers.length);
+      const before = [
         client.name === "unknown" ? "(no name)" : client.name,
         client.address,
         whenText(client.last_seen) + " (" + agoText(client.last_seen) + ")",
         String(client.fetches),
         client.revision === "unknown" ? "\u2014" : client.revision,
-        diagError(diag),
-        diagValue(diag, "n"),
+      ];
+      const after = [
         diagWithUnit(diag, "free", "KB"),
         diagWithUnit(diag, "rssi", "dBm"),
         diagUptime(diag.up),
         client.connected ? "connected" : "not connected",
       ];
-      for (const cell of cells) line.append(el("td", "", cell));
+      for (const cell of before) line.append(el("td", "", cell));
+      line.append(failureCell(client, detail));
+      for (const cell of after) line.append(el("td", "", cell));
       body.append(line);
+      if ((client.events || []).length) body.append(detail);
     }
     table.append(head, body);
     const wrapper = el("div", "table-wrap");
     wrapper.append(table);
     wrapper.append(el("p", "note",
-      "A device that cannot reach the daemon cannot report a problem here, so check \"Last seen\" first. Last error is the device's most recent failure since it last started; Failures counts them since then."));
+      "A device that cannot reach the daemon cannot report a problem here, so check \"Last seen\" first. "
+      + "Failures counts the fetches the device has failed since it last started; click the number to see "
+      + "when the daemon heard about them."));
     return wrapper;
   }
 

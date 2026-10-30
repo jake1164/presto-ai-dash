@@ -2,24 +2,20 @@
 
     presto-ai-dash install-presto --port COM3
     presto-ai-dash check-presto --port COM3
-    presto-ai-dash set-daemon --port COM3 --daemon-host 192.168.1.50
-    presto-ai-dash set-wifi --port COM3 --ssid MyNetwork
 
 The app files travel inside the release wheel (``presto_app/``), so the device
 always gets the version that matches this daemon. A daemon running from a
 source checkout has no staged copy, so it reads the same inventory from
 ``tools/presto_bundle.py`` instead; there is still one list of public files.
-Neither of those two reads or writes the device's config, secrets, provider data
-or firmware launcher; ``set-daemon`` changes only the daemon address (and, when
-asked, the device token) in the config, and puts it back if the Presto cannot
-reach the new daemon; ``set-wifi`` changes only the Wi-Fi name and password,
-and puts them back if the Presto cannot join the new network. The repository's ``tools/presto_device.py`` is a thin
-wrapper over this module, so the checkout and the wheel share one USB engine.
+Neither command reads or writes the device's config, secrets, provider data or
+firmware launcher. The repository's ``tools/presto_device.py`` is a thin wrapper
+over this module, so the checkout and the wheel share one USB engine.
 
 First-time provisioning needs settings as well as app files, so it is a
 different command: the standalone ``presto_setup.py`` the admin page serves
-(see ``presto_ai_dash.device_setup``) collects Wi-Fi locally, keeps or writes
-the private files and then uses the same staged, verified, rolled-back copy.
+(see ``presto_ai_dash.device_setup``). The same script also changes the daemon
+address or the Wi-Fi of a Presto that is already set up, on either layout, so
+there is one way to do every one of those things.
 """
 
 import argparse
@@ -28,9 +24,7 @@ from datetime import datetime, timezone
 import hashlib
 from importlib import resources
 import importlib.util
-import ipaddress
 import json
-import os
 from pathlib import Path
 import re
 import subprocess
@@ -725,15 +719,12 @@ def slot_check_operation(port, bundle, remote=run_remote, receipt=DEFAULT_RECEIP
 
 
 
-# -- changing the settings of a provisioned Presto over USB -------------------
+# -- the layout of the device -------------------------------------------------
 #
-# Moving the daemon (a new server, a new address, a test daemon on a laptop) or
-# changing the Wi-Fi network each changes two or three lines of one private
-# settings file and nothing else. The device identity, the other file, the app
-# files or slots and the activation journal stay exactly as they are, on either
-# layout. A secret is never printed. A change the device cannot use is put
-# back, so a typing mistake cannot strand a Presto that is out of reach of the
-# keyboard.
+# The commands in this module write the single-folder app, so they refuse a
+# Presto that uses the bootstrap and A/B slots. Its settings (the daemon, the
+# token, the Wi-Fi) are changed with the admin page's setup script, which
+# works on either layout.
 
 # Starts AI Dash whichever layout the device has: the bootstrap when it is
 # installed, otherwise the legacy app.
@@ -750,494 +741,6 @@ LAUNCH_AUTO = (
     "else:\n"
     "    sys.path.insert(0, '/ai_dash_files'); os.chdir('/ai_dash_files')\n"
     "    from ai_dash_app import main; main()\n")
-
-SETTINGS_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-WIFI_PATH = "/secrets.py"
-WIFI_HEADER = ("# Presto AI Dash Wi-Fi credentials.\n"
-               "# Private: never commit or share this file. Use a 2.4 GHz network.\n")
-DAEMON_LAYOUT_MESSAGE = (
-    "The settings file does not have exactly one DAEMON_HOST, DAEMON_PORT and (when the "
-    "token is changed) SHARED_TOKEN line, so it was not changed. Use 'Set up a Presto' in "
-    "the daemon's admin page to write the settings again.")
-WIFI_LAYOUT_MESSAGE = (
-    "/secrets.py does not have exactly one WIFI_SSID and one WIFI_PASSWORD line, so it was "
-    "not changed. Fix it by hand, or delete it from the Presto: a missing file is created.")
-DAEMON_REACH_MESSAGES = {
-    "unauthorised": "The Presto reached that address, but the daemon there refused its "
-                    "device token. Run the command again with --token-env set to that "
-                    "daemon's shared token.",
-    "wifi": "The Presto could not join the Wi-Fi network from its /secrets.py, so it could "
-            "not look for the daemon. A weak signal can cause this: run the command again.",
-}
-DAEMON_REACH_FALLBACK = (
-    "The Presto could not reach a daemon at that address and port. Check that the daemon "
-    "is running, that its device port is the one you gave (8787 by default), and that "
-    "this address is reachable from the Presto's Wi-Fi network.")
-DAEMON_HTTP_MESSAGE = (
-    "The Presto reached a server at that address, but it did not answer as the daemon. "
-    "Check that the port is the daemon's device port (8787 by default).")
-WIFI_JOIN_MESSAGE = (
-    "The Presto could not join that Wi-Fi network. Check the network name and the "
-    "password, and that the network has a 2.4 GHz band (the Presto has no 5 GHz radio). "
-    "A weak signal can also cause this, so move the Presto closer and try again.")
-UNSAFE_CHANGE_MESSAGE = (
-    "The settings file could not be changed safely. Nothing was replaced; reconnect the "
-    "Presto and run this command again.")
-
-_DAEMON_PREAMBLE = r'''
-STAGE = TARGET + '.presto-new'
-PREV = TARGET + '.presto-prev'
-def say(result, **more):
-    more['result'] = result
-    print('PRESTO_SYNC:' + json.dumps(more))
-'''
-
-_DAEMON_APPLY = r'''
-def apply():
-    # An earlier run that was cut short leaves the settings it replaced in PREV.
-    # A finished run always removes it, so PREV is the authoritative original.
-    if exists(PREV):
-        if exists(TARGET):
-            os.remove(TARGET)
-        os.rename(PREV, TARGET)
-    if exists(STAGE):
-        os.remove(STAGE)
-    if exists(TARGET):
-        before = digest(TARGET)
-        with open(TARGET, 'rb') as stream:
-            lines = stream.read().decode().split('\n')
-        found = {}
-        for number, line in enumerate(lines):
-            bare = line.rstrip('\r')
-            for name in WANT:
-                if bare.startswith(name) and bare[len(name):].lstrip().startswith('='):
-                    found.setdefault(name, []).append(number)
-        for name in WANT:
-            if len(found.get(name, ())) != 1:
-                return say('layout', before=before)
-        for name in WANT:
-            number = found[name][0]
-            tail = '\r' if lines[number].endswith('\r') else ''
-            lines[number] = name + ' = ' + repr(WANT[name]) + tail
-        data = '\n'.join(lines).encode()
-    elif CREATE:
-        before = None
-        data = (HEADER + ''.join([name + ' = ' + repr(WANT[name]) + '\n' for name in ORDER])).encode()
-    else:
-        return say('no_config')
-    space = {}
-    try:
-        exec(data.decode(), space)
-    except Exception:
-        return say('invalid', before=before)
-    for name in WANT:
-        if space.get(name) != WANT[name]:
-            return say('invalid', before=before)
-    hasher = hashlib.sha256()
-    hasher.update(data)
-    wanted = binascii.hexlify(hasher.digest()).decode()
-    with open(STAGE, 'wb') as stream:
-        stream.write(data)
-    if digest(STAGE) != wanted:
-        os.remove(STAGE)
-        return say('write', before=before)
-    if before is not None:
-        os.rename(TARGET, PREV)
-    os.rename(STAGE, TARGET)
-    if digest(TARGET) != wanted:
-        os.remove(TARGET)
-        if before is not None:
-            os.rename(PREV, TARGET)
-        return say('write', before=before)
-    return say('changed', before=before)
-apply()
-'''
-
-# Joins the network, then (only if it joined) reads the daemon's status with the
-# token the device holds. The two outcomes are reported separately: a network
-# change must be kept when the join works even if the daemon is elsewhere.
-_DAEMON_REACH = r'''
-import sys, json
-sys.path.insert(0, '/ai_dash_files')
-code = 'error'
-joined = False
-try:
-    import secrets, network, time, socket
-    wlan = network.WLAN(network.STA_IF)
-    # A weak signal sometimes leaves the radio linked but without an address, or
-    # not linked at all; switching the radio off and on between tries clears it.
-    for attempt in range(4):
-        if attempt:
-            wlan.disconnect()
-            wlan.active(False)
-            time.sleep(0.5)
-        if not wlan.active():
-            wlan.active(True)
-        if wlan.isconnected():
-            break
-        wlan.connect(secrets.WIFI_SSID, secrets.WIFI_PASSWORD)
-        for _ in range(48):
-            if wlan.isconnected():
-                break
-            time.sleep(0.25)
-        if wlan.isconnected():
-            break
-    joined = wlan.isconnected()
-    if not joined:
-        code = 'wifi'
-    else:
-        import config
-        link = socket.socket()
-        try:
-            link.settimeout(8)
-            link.connect(socket.getaddrinfo(config.DAEMON_HOST, int(config.DAEMON_PORT))[0][-1])
-            link.send(b'GET /api/v1/status?cards=lazy HTTP/1.0\r\nHost: presto\r\n'
-                      b'X-Presto-Client: setup\r\n'
-                      b'Authorization: Bearer ' + config.SHARED_TOKEN.encode() + b'\r\n\r\n')
-            head = b''
-            while b'\r\n' not in head and len(head) < 128:
-                chunk = link.recv(64)
-                if not chunk:
-                    break
-                head += chunk
-            status = int(head.split(b' ')[1]) if b'\r\n' in head else 0
-            if status == 200:
-                code = 'ok'
-            elif status == 401:
-                code = 'unauthorised'
-            else:
-                code = 'http_%d' % status
-        finally:
-            link.close()
-except Exception:
-    code = 'error'
-print('PRESTO_SYNC:' + json.dumps({'result': code, 'joined': joined}))
-'''
-
-_DAEMON_SETTLE = r'''
-def settle():
-    if RESTORE:
-        if BEFORE is None:
-            # The file did not exist before this run created it.
-            if exists(TARGET):
-                os.remove(TARGET)
-            if exists(PREV):
-                os.remove(PREV)
-            return say('restored')
-        if not exists(PREV):
-            return say('restore_failed')
-        if exists(TARGET):
-            os.remove(TARGET)
-        os.rename(PREV, TARGET)
-        if digest(TARGET) != BEFORE:
-            return say('restore_failed')
-        return say('restored')
-    if exists(PREV):
-        os.remove(PREV)
-    return say('done')
-settle()
-'''
-
-
-def check_daemon_address(host, port):
-    """The normalised IPv4 address, or a ValueError whose text is safe to print."""
-    try:
-        address = ipaddress.IPv4Address(host)
-    except ValueError:
-        raise ValueError(
-            "--daemon-host must be the daemon computer's IPv4 address, such as 192.168.1.50. "
-            "A name can freeze the Presto's touch screen while it is looked up.") from None
-    if address.is_loopback or address.is_unspecified or address.is_multicast or address.is_reserved:
-        raise ValueError(
-            "--daemon-host must be the daemon computer's address on your network. localhost "
-            "would mean the Presto itself.")
-    if type(port) is not int or not 1 <= port <= 65535:
-        raise ValueError("--daemon-port must be a number from 1 to 65535.")
-    return str(address)
-
-
-def _secret_from_environment(name, option, environ):
-    environ = os.environ if environ is None else environ
-    if not isinstance(name, str) or not SETTINGS_ENV_NAME.match(name):
-        raise ValueError("%s must be the NAME of an environment variable." % option)
-    value = environ.get(name)
-    if not value:
-        raise ValueError("The environment variable %s is not set." % name)
-    return value
-
-
-def token_from_environment(name, environ=None):
-    """The device token named by an environment variable, never from the command line."""
-    value = _secret_from_environment(name, "--token-env", environ)
-    if not value.isascii() or any(char.isspace() for char in value) or not value.isprintable():
-        raise ValueError("The device token must be printable ASCII without whitespace.")
-    from .config import ConfigError, check_token_strength
-    try:
-        check_token_strength("The device token", value)
-    except ConfigError as exc:
-        raise ValueError(str(exc)) from None
-    return value
-
-
-def password_from_environment(name, environ=None):
-    """The Wi-Fi password named by an environment variable."""
-    return _secret_from_environment(name, "--password-env", environ)
-
-
-def check_wifi_credentials(ssid, password):
-    """Refuse values a Wi-Fi network cannot have; the text never repeats the password."""
-    def printable(text):
-        return all(" " <= char <= "~" for char in text)
-    if not isinstance(ssid, str) or not 1 <= len(ssid) <= 32 or not printable(ssid):
-        raise ValueError("--ssid must be 1 to 32 printable ASCII characters.")
-    if not isinstance(password, str) or not printable(password) or \
-            (password and not 8 <= len(password) <= 63):
-        raise ValueError("The Wi-Fi password must be 8 to 63 printable ASCII characters, "
-                         "or empty for an open network.")
-
-
-def _daemon_script(body, **names):
-    """A device script: the shared helpers, literal inputs, then the body."""
-    literals = "".join("%s = %r\n" % item for item in sorted(names.items()))
-    return HELPERS + literals + _DAEMON_PREAMBLE + body
-
-
-def _run_daemon_script(remote, port, folder, name, text):
-    script = Path(folder) / (name + ".py")
-    script.write_bytes(text.encode("utf-8"))
-    return parse_state(remote(port, ["soft-reset", "run", str(script)]))
-
-
-def _reach_message(code):
-    if code in DAEMON_REACH_MESSAGES:
-        return DAEMON_REACH_MESSAGES[code]
-    if isinstance(code, str) and code.startswith("http_"):
-        return DAEMON_HTTP_MESSAGE
-    return DAEMON_REACH_FALLBACK
-
-
-def _settings_session(port, target, want, order, header, create, verify, keep, failure,
-                      missing, layout_message, remote, receipt):
-    """Rewrite named lines of one settings file, check it works, else put it back.
-
-    ``keep(reach)`` says whether the device's check of the new settings is good
-    enough to keep them; ``failure(reach)`` explains why not. Returns the
-    device's check result (or ``None`` when ``verify`` is off).
-    """
-    with device_lock(Path(receipt).with_suffix(".lock")):
-        attempted = False
-        try:
-            # A running app's watchdog would cut a longer USB session short.
-            reset_to_launcher(port, remote)
-            attempted = True
-            with tempfile.TemporaryDirectory(prefix="presto-settings-") as temporary:
-                applied = _run_daemon_script(
-                    remote, port, temporary, "apply",
-                    _daemon_script(_DAEMON_APPLY, TARGET=target, WANT=want, ORDER=order,
-                                   HEADER=header, CREATE=create))
-                outcome = applied.get("result")
-                if outcome == "no_config":
-                    raise RuntimeError(missing)
-                if outcome in ("layout", "invalid"):
-                    raise RuntimeError(layout_message)
-                if outcome != "changed":
-                    raise RuntimeError(UNSAFE_CHANGE_MESSAGE)
-                reach = None
-                if verify:
-                    try:
-                        reach = _run_daemon_script(remote, port, temporary, "reach",
-                                                   HELPERS + _DAEMON_REACH)
-                    except (RuntimeError, ValueError, OSError, subprocess.TimeoutExpired):
-                        reach = {"result": "error", "joined": False}
-                    if not keep(reach):
-                        restored = _run_daemon_script(
-                            remote, port, temporary, "restore",
-                            _daemon_script(_DAEMON_SETTLE, TARGET=target, RESTORE=True,
-                                           BEFORE=applied.get("before")))
-                        if restored.get("result") != "restored":
-                            raise RuntimeError(
-                                "The new settings did not work and the earlier file could not "
-                                "be put back automatically. It is %s.presto-prev on the "
-                                "Presto; running this command again restores it first." % target)
-                        raise RuntimeError(failure(reach) + " The previous settings were put back.")
-                _run_daemon_script(remote, port, temporary, "finish",
-                                   _daemon_script(_DAEMON_SETTLE, TARGET=target, RESTORE=False,
-                                                  BEFORE=None))
-            return reach
-        finally:
-            if attempted:
-                pending_failure = sys.exc_info()[0] is not None
-                try:
-                    remote(port, ["soft-reset", "exec", "--no-follow", LAUNCH_AUTO])
-                except (RuntimeError, OSError, subprocess.TimeoutExpired):
-                    if not pending_failure:
-                        raise RuntimeError("Could not relaunch AI Dash. Reconnect USB and "
-                                           "run the command again.") from None
-                    print("Could not relaunch AI Dash. Reconnect USB.", file=sys.stderr)
-
-
-def set_daemon_operation(port, host, daemon_port, token=None, verify=True,
-                         remote=run_remote, receipt=DEFAULT_RECEIPT):
-    """Point the Presto at another daemon; the old settings come back if it fails.
-
-    Only DAEMON_HOST, DAEMON_PORT and (when ``token`` is given) SHARED_TOKEN
-    change; the rest of the file is kept byte for byte. With ``verify`` the
-    device then joins Wi-Fi and reads the new daemon's status with the token it
-    now holds, and anything but a 200 puts the previous file back.
-    """
-    host = check_daemon_address(host, daemon_port)
-    want = {"DAEMON_HOST": host, "DAEMON_PORT": daemon_port}
-    if token is not None:
-        want["SHARED_TOKEN"] = token
-    reach = _settings_session(
-        port, CONFIG_PATH, want, sorted(want), "", False, verify,
-        keep=lambda result: result.get("result") == "ok",
-        failure=lambda result: _reach_message(result.get("result")),
-        missing=CONFIG_MISSING, layout_message=DAEMON_LAYOUT_MESSAGE,
-        remote=remote, receipt=receipt)
-    return {"host": host, "port": daemon_port,
-            "reach": reach["result"] if reach else "skipped",
-            "token_replaced": token is not None}
-
-
-def set_wifi_operation(port, ssid, password, verify=True,
-                       remote=run_remote, receipt=DEFAULT_RECEIPT):
-    """Give the Presto another Wi-Fi network; the old one comes back if it cannot join.
-
-    The settings are kept whenever the Presto joins the new network, even if it
-    then cannot reach its daemon from there: moving networks usually means the
-    daemon's address changed too, which ``set-daemon`` handles. ``password`` may
-    be empty for an open network. A missing ``/secrets.py`` is created.
-    """
-    check_wifi_credentials(ssid, password)
-    want = {"WIFI_SSID": ssid, "WIFI_PASSWORD": password}
-    reach = _settings_session(
-        port, WIFI_PATH, want, ["WIFI_SSID", "WIFI_PASSWORD"], WIFI_HEADER, True, verify,
-        keep=lambda result: bool(result.get("joined")),
-        failure=lambda result: WIFI_JOIN_MESSAGE,
-        missing=UNSAFE_CHANGE_MESSAGE, layout_message=WIFI_LAYOUT_MESSAGE,
-        remote=remote, receipt=receipt)
-    return {"ssid": ssid, "joined": reach is not None,
-            "daemon": reach["result"] if reach else "skipped",
-            "open": password == ""}
-
-
-def _usb_ready(port, err):
-    """True when a USB command may go ahead; otherwise prints why and is False."""
-    if not port or port in ("auto", "list"):
-        print("An explicit --port is required (for example COM3 or /dev/ttyACM0); "
-              "automatic board selection is disabled.", file=err)
-        return False
-    if importlib.util.find_spec("mpremote") is None:
-        print('USB tools are missing. Install them with: pipx install --force '
-              '"presto-ai-dash[device]"  (or: pip install "presto-ai-dash[device]")',
-              file=err)
-        return False
-    return True
-
-
-def _usb_failure(exc, err):
-    print(str(exc) if isinstance(exc, (RuntimeError, ValueError)) else
-          "USB operation failed or timed out. Check the port and retry.", file=err)
-    return 2
-
-
-def set_daemon_main(argv=None, prog="presto-ai-dash set-daemon", receipt=DEFAULT_RECEIPT,
-                    remote=run_remote, out=None, err=None):
-    """Entry point for ``set-daemon``; prints the result and returns the exit code."""
-    out = out or sys.stdout
-    err = err or sys.stderr
-    parser = argparse.ArgumentParser(
-        prog=prog,
-        description="Point a set-up Presto at a different daemon over USB. Only the daemon "
-                    "address (and, if asked, the device token) changes. If the Presto cannot "
-                    "reach the new daemon, the old settings are put back.")
-    parser.add_argument("--port", help="explicit USB port, e.g. COM3 or /dev/ttyACM0")
-    parser.add_argument("--daemon-host", required=True,
-                        help="the daemon computer's IPv4 address on your network")
-    parser.add_argument("--daemon-port", type=int, default=8787,
-                        help="the daemon's device port (default 8787)")
-    parser.add_argument("--token-env", metavar="NAME",
-                        help="name of an environment variable holding the new daemon's shared "
-                             "token. Leave it out to keep the token the Presto already has")
-    parser.add_argument("--no-reach-check", action="store_true",
-                        help="do not check that the Presto can reach the new daemon "
-                             "(for an address you are preparing before the daemon runs)")
-    args = parser.parse_args(argv)
-    if not _usb_ready(args.port, err):
-        return 2
-    try:
-        token = token_from_environment(args.token_env) if args.token_env else None
-        result = set_daemon_operation(args.port, args.daemon_host, args.daemon_port, token,
-                                      verify=not args.no_reach_check, remote=remote,
-                                      receipt=receipt)
-    except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
-        return _usb_failure(exc, err)
-    print("Pointed the Presto at %s:%d." % (result["host"], result["port"]), file=out)
-    if result["token_replaced"]:
-        print("The device token was replaced. It was not printed.", file=out)
-    if result["reach"] == "ok":
-        print("The Presto reached that daemon with its device token. AI Dash relaunched.",
-              file=out)
-    else:
-        print("Not checked: the Presto was not asked to reach the new daemon. AI Dash "
-              "relaunched.", file=out)
-    return 0
-
-
-def set_wifi_main(argv=None, prog="presto-ai-dash set-wifi", receipt=DEFAULT_RECEIPT,
-                  remote=run_remote, out=None, err=None, prompt=None, interactive=None):
-    """Entry point for ``set-wifi``; prints the result and returns the exit code."""
-    out = out or sys.stdout
-    err = err or sys.stderr
-    parser = argparse.ArgumentParser(
-        prog=prog,
-        description="Give a set-up Presto another Wi-Fi network over USB. If the Presto "
-                    "cannot join the new network, the old settings are put back.")
-    parser.add_argument("--port", help="explicit USB port, e.g. COM3 or /dev/ttyACM0")
-    parser.add_argument("--ssid", required=True, help="the network name (2.4 GHz)")
-    secret = parser.add_mutually_exclusive_group()
-    secret.add_argument("--password-env", metavar="NAME",
-                        help="name of an environment variable holding the Wi-Fi password. "
-                             "Without this or --open, the password is asked for with the "
-                             "typing hidden")
-    secret.add_argument("--open", action="store_true", help="the network has no password")
-    parser.add_argument("--no-join-check", action="store_true",
-                        help="do not check that the Presto can join the network")
-    args = parser.parse_args(argv)
-    if not _usb_ready(args.port, err):
-        return 2
-    try:
-        if args.open:
-            password = ""
-        elif args.password_env:
-            password = password_from_environment(args.password_env)
-        else:
-            if interactive is None:
-                interactive = sys.stdin.isatty()
-            if not interactive:
-                raise ValueError("Give the password with --password-env NAME (an environment "
-                                 "variable), or --open for a network without one.")
-            if prompt is None:
-                import getpass
-                prompt = getpass.getpass
-            password = prompt("Wi-Fi password for %s (hidden): " % args.ssid)
-        result = set_wifi_operation(args.port, args.ssid, password,
-                                    verify=not args.no_join_check, remote=remote,
-                                    receipt=receipt)
-    except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
-        return _usb_failure(exc, err)
-    print("Wi-Fi network set to %s. The password was not printed." % result["ssid"], file=out)
-    if not result["joined"]:
-        print("Not checked: the Presto was not asked to join it. AI Dash relaunched.", file=out)
-    elif result["daemon"] == "ok":
-        print("The Presto joined it and reached its daemon. AI Dash relaunched.", file=out)
-    else:
-        print("The Presto joined it, but could not reach its daemon from there. If the "
-              "daemon's address is different on this network, run set-daemon. AI Dash "
-              "relaunched.", file=out)
-    return 0
-
 
 def device_layout(port, remote=run_remote, receipt=DEFAULT_RECEIPT):
     """Which layout the device has, without writing anything."""
@@ -1471,12 +974,8 @@ def run(action, port, snapshot, receipt=DEFAULT_RECEIPT, out=None, err=None):
         return 2
 
 
-def main(command, argv=None, receipt=DEFAULT_RECEIPT):
-    """Entry point for ``install-presto``, ``check-presto``, ``set-daemon`` and ``set-wifi``."""
-    if command == "set-daemon":
-        return set_daemon_main(argv, receipt=receipt)
-    if command == "set-wifi":
-        return set_wifi_main(argv, receipt=receipt)
+def main(command, argv=None):
+    """Entry point for ``presto-ai-dash install-presto`` and ``check-presto``."""
     parser = argparse.ArgumentParser(
         prog="presto-ai-dash " + command,
         description="Copy the bundled Presto app to a USB-connected Presto." if command == "install-presto"

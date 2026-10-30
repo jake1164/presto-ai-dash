@@ -371,6 +371,74 @@ class BoardAndPortTests(ScriptCase):
                           ("/dev/ttyACM0", "2E8A:000F MicroPython board")])
 
 
+class WifiFileMergeTests(ScriptCase):
+    """Setting the Wi-Fi changes the two Wi-Fi lines of /secrets.py and nothing else in it."""
+
+    def test_other_lines_in_the_wifi_file_stay(self):
+        code = device_setup.new_unlock_code()
+        files = existing_install()
+        files[SECRETS] = (b"# keys kept here by other apps\nWEATHER_KEY = 'abc123'\n"
+                          b"WIFI_SSID = 'Home 2G'  # old\nWIFI_PASSWORD = 'old-pass'\n")
+        device = FakeDevice(files, device_id="a" * 32, name="x")
+        status, said = self.run_script(self.handoff(code, wifi="set"),
+                                       [code, "Office 2G", "new-wifi-pass", "yes"], device)
+        self.assertEqual(status, 0, said)
+        written = device.files[SECRETS].decode("ascii")
+        for kept in ("# keys kept here by other apps", "WEATHER_KEY = 'abc123'"):
+            self.assertIn(kept, written)
+        self.assertIn("WIFI_SSID = 'Office 2G'", written)
+        self.assertIn("WIFI_PASSWORD = 'new-wifi-pass'", written)
+        self.assertNotIn("Home 2G", written)
+        self.assertNotIn("old-pass", written)
+        blob = "\n".join(said)
+        self.assertIn("Every other line in it stays.", blob)
+        self.assert_no_secret(said, "new-wifi-pass")
+
+    def test_a_wifi_file_of_an_unusual_shape_is_rewritten_and_the_summary_says_so(self):
+        code = device_setup.new_unlock_code()
+        files = existing_install()
+        files[SECRETS] = b"WIFI_SSID = 'a'\nWIFI_SSID = 'b'\nWEATHER_KEY = 'abc123'\n"
+        device = FakeDevice(files, device_id="a" * 32, name="x")
+        status, said = self.run_script(self.handoff(code, wifi="set"),
+                                       [code, "Office 2G", "new-wifi-pass", "yes"], device)
+        self.assertEqual(status, 0, said)
+        self.assertIn("does not have the usual shape", "\n".join(said))
+        written = device.files[SECRETS].decode("ascii")
+        self.assertIn("WIFI_SSID = 'Office 2G'", written)
+        self.assertNotIn("WEATHER_KEY", written)
+
+    def test_a_missing_wifi_file_is_created(self):
+        code = device_setup.new_unlock_code()
+        files = existing_install()
+        del files[SECRETS]
+        device = FakeDevice(files, device_id="a" * 32, name="x")
+        status, said = self.run_script(self.handoff(code, wifi="set"),
+                                       [code, "Office 2G", "new-wifi-pass", "yes"], device)
+        self.assertEqual(status, 0, said)
+        self.assertIn("create it with the Wi-Fi network you entered", "\n".join(said))
+        self.assertIn("WIFI_SSID = 'Office 2G'", device.files[SECRETS].decode("ascii"))
+
+    def test_an_open_network_and_awkward_passwords_survive(self):
+        module = rendered_module()
+        for password in ("", "with spaces and 'quotes'", 'double " and back' + chr(92) + "slash"):
+            with self.subTest(password=password):
+                merged = module.merge_assignments(
+                    b"WEATHER_KEY = 'k'\nWIFI_SSID = 'a'\nWIFI_PASSWORD = 'b'\n",
+                    {"WIFI_SSID": "Odd 'name'", "WIFI_PASSWORD": password})
+                space = {}
+                exec(merged.decode(), space)
+                self.assertEqual((space["WIFI_SSID"], space["WIFI_PASSWORD"], space["WEATHER_KEY"]),
+                                 ("Odd 'name'", password, "k"))
+
+    def test_the_merge_adds_a_missing_line_and_never_runs_the_file(self):
+        module = rendered_module()
+        merged = module.merge_assignments(b"raise SystemExit(7)\nWEATHER_KEY = 'k'\n",
+                                          {"WIFI_SSID": "Net", "WIFI_PASSWORD": "pw-pw-pw-pw"})
+        self.assertIn(b"WIFI_SSID = 'Net'", merged)
+        self.assertIn(b"WIFI_PASSWORD = 'pw-pw-pw-pw'", merged)
+        self.assertIsNone(module.merge_assignments(b"WIFI_SSID = (\n", {"WIFI_SSID": "Net"}))
+
+
 class MergeConfigTests(unittest.TestCase):
     """Only the daemon lines of a Presto's own settings change."""
 

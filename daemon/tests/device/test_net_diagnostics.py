@@ -2,9 +2,11 @@
 
 import asyncio
 import unittest
+from unittest.mock import patch
 
 import presto_path  # noqa: F401
 
+import net
 from net import NetworkUnavailable, StatusClient, describe_error
 
 
@@ -95,6 +97,36 @@ class FetchReasonTests(unittest.TestCase):
         error, received = run(go())
         self.assertEqual(error.reason, "short body @body")
         self.assertEqual(received, 5)
+
+class AbandonedConnectTests(unittest.TestCase):
+    """A timed-out connect leaves its socket open until a collection runs."""
+
+    def test_a_timed_out_connect_is_collected_before_the_next_poll(self):
+        async def never(host, port):
+            await asyncio.sleep(30)
+
+        async def go():
+            client = StatusClient("192.0.2.1", 8787, "t", timeout=1)
+            with patch.object(asyncio, "open_connection", never),                     patch.object(net, "_collect") as collect:
+                with self.assertRaises(NetworkUnavailable):
+                    await client.fetch_async()
+                return collect.call_count
+
+        self.assertEqual(run(go()), 1)
+
+    def test_a_failed_alert_write_is_collected_too(self):
+        async def never(host, port):
+            await asyncio.sleep(30)
+
+        async def go():
+            client = StatusClient("192.0.2.1", 8787, "t", timeout=1)
+            with patch.object(asyncio, "open_connection", never),                     patch.object(net, "_collect") as collect:
+                with self.assertRaises(NetworkUnavailable):
+                    await client.post_alert("codex", False)
+                return collect.call_count
+
+        self.assertEqual(run(go()), 1)
+
 
 
 if __name__ == "__main__":

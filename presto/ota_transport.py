@@ -16,6 +16,17 @@ MAX_HEADERS = 4096
 NAME = re.compile(r"^[A-Za-z0-9_]+\.py$")
 
 
+def release_sockets():
+    """Free the socket of a connect that a timeout cancelled.
+
+    MicroPython's ``open_connection`` leaves its socket open when the connect
+    is cancelled, and the stack's small socket pool is exhausted after about
+    five of them (measured: every later connect then fails with ENOMEM).
+    """
+    import gc
+    gc.collect()
+
+
 class Transport:
     def __init__(self, host, port, hostname, ca, token, timeout=3):
         # The browser demo imports every shared module but has no sockets.
@@ -180,7 +191,11 @@ class Transport:
             finally:
                 writer.close()
                 await writer.wait_closed()
-        return await asyncio.wait_for(fetch(), self.timeout + 3)
+        try:
+            return await asyncio.wait_for(fetch(), self.timeout + 3)
+        except BaseException:
+            release_sockets()
+            raise
 
     def stream_async(self, name, chunk_bytes):
         if (not isinstance(name, str) or name != name.strip() or not NAME.match(name)
@@ -216,6 +231,7 @@ class BufferedStream:
                 self.queue.append(chunk)
         except Exception as exc:
             self.error = exc
+            release_sockets()
         finally:
             if writer is not None:
                 writer.close()

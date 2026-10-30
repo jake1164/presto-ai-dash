@@ -173,3 +173,20 @@ class AsyncTransportTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0)
         self.assertEqual(received, b'x' * 10000)
         writer.close.assert_called_once()
+
+
+class AbandonedConnectTests(unittest.IsolatedAsyncioTestCase):
+    async def test_a_timed_out_manifest_connect_releases_its_socket(self):
+        tools = Path(presto_path.REPO_ROOT) / 'tools'
+        with patch.object(sys, 'path', list(sys.path) + [str(tools)]):
+            from hardware_gate.tls_fixture import fixtures, HOSTNAME
+        async def never(*args, **kwargs):
+            await asyncio.sleep(30)
+
+        with tempfile.TemporaryDirectory() as folder, fixtures('127.0.0.1', folder) as settings:
+            transport = ota.Transport('192.0.2.1', 443, HOSTNAME,
+                                      bytes.fromhex(settings['ca_der_hex']), 't', timeout=0.2)
+            with patch.object(asyncio, 'open_connection', never),                     patch.object(ota, 'release_sockets') as release:
+                with self.assertRaises(asyncio.TimeoutError):
+                    await transport.manifest_async('/api/v1/device-app/manifest')
+            release.assert_called()

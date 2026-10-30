@@ -4,7 +4,9 @@ Status: the controlled full-app success scenario **passed twice on the real
 board** on the evening of October 29 (EDT), after the journal-save stall was
 traced to the firmware's display driver and worked around (see
 [Root cause and full-app acceptance](#root-cause-and-full-app-acceptance)).
-Crash/hang rollback, production power-cut, near-full storage, cold-boot clock
+Crash/hang rollback, weak-Wi-Fi socket release and near-full storage were
+then tested on the board too (see the follow-up section). Production power cuts at three
+representative points then passed as well (see "Power cuts"); cold-boot clock
 provisioning and release publication remain open gates. Normal daemon
 configuration still defaults to `presto_ota_enabled = false`.
 
@@ -280,14 +282,112 @@ just before; both slots hold current source.
 
 Verification: the frozen source passed the full suite, **2,803 tests, 9 skipped, zero failures** (432.951 s, repository `.venv`, about 21:05 EDT October 29); log `.preview/stall2/full-tests-2.log`. PSL Home and a card were rendered and inspected after the app change (PSL has no core1, so the display pause is a no-op there).
 
-### Gates still open
+### Follow-up session, October 30, 2026 (UTC morning)
 
-- `crash` and `hang` candidate rollback on the production bootstrap (now
-  possible: success is established).
-- Production power cut during download, during the flash window, and before
-  confirmation, with the user arming a real window.
-- Cold-boot clock source for production OTA readiness.
-- Weak-Wi-Fi resilience: socket release on poll timeout (`OSError 12`) and the
-  180-second confirmation window under repeated poll loss.
-- Near-full storage policy, supported-profile scope, and real GHCR/PyPI
-  release progression.
+**Crash and hang rollback: both passed on COM3.** The `crash` candidate raises at
+import; the `hang` candidate loops forever at import. Both were delivered over
+the real OTA path (verified TLS, display-paused write of slot `b`, restart), and
+the bootstrap rolled both back to the confirmed slot `a`.
+
+| | crash | hang |
+| --- | --- | --- |
+| Result | `.preview/ota-hardware/rollback-crash/result.json` | `.preview/ota-hardware/rollback-hang/result.json` |
+| Time from permit to terminal report | about 100 s | about 115 s |
+| Recorded failure | `rolled_back` / `boot_crash` | `rolled_back` / `boot_crash` |
+| Daemon attempt | `failed`, recovery `rolled_back` | same |
+| Journal afterwards | active = confirmed = `a`, no pending or transfer | same |
+
+The crash candidate raised immediately and the bootstrap's own crash handler
+recorded it; the hang candidate was broken by the 8 s watchdog.
+In both, the device kept re-reporting the retained failure until a daemon
+settled it, which is the intended behaviour. After each, the board's clock was
+back at 2021 (the rollback restart carries no time), which is the same cold-clock
+gap recorded above.
+
+A first crash attempt failed before provisioning: the harness's probe opened a
+soft-reset session on a running app and the app's 8 s watchdog cut it short.
+Nothing was written. `tools/presto_ota_acceptance.py` now calls
+`reset_to_launcher()` before each probe, with a test.
+
+**Weak-Wi-Fi socket leak: confirmed and fixed.** On the device, connecting to an
+unused LAN address with `wait_for(open_connection(...), 0.5)`: without garbage
+collection the first 5 timed out cleanly and the other **35 of 40 failed with
+`OSError 12`**; with `gc.collect()` after each, **40 of 40** timed out cleanly.
+A timeout cancels the connect before a writer exists and MicroPython leaves
+the socket open until a collection runs, so with several MB of free heap the
+small socket pool fills first. Every later poll then fails until a collection
+happens to run, which also explains the poll failures seen in the run-2 candidate.
+`net.StatusClient` (status polls and alert writes) and the OTA transport
+(manifest and file streams) now collect after a failed connect. With the shipped
+client deployed, 30 polls to the unreachable address gave 30 clean timeouts.
+Regression tests for all three paths stub a connect that never completes.
+
+**Near-full storage: policy behaves as designed.** A scratch file in
+`/ai_dash_state/` (removed afterwards; free space returned to the 13,504,512
+baseline) set free space just around the updater's requirement: the bundle plus
+the 1,572,864-byte margin, about 1.87 MB.
+
+| Free space | Outcome |
+| --- | --- |
+| 1,765,376 B (about 100 KB under) | Refused 3 s after the manifest: device `blocked` / `storage_insufficient`, daemon `manual_action`, attempt never started, nothing written to a slot, slot `b` stayed confirmed |
+| 2,015,232 B (about 150 KB over) | Full update, restart, two-poll confirmation, `current`; 294,621 bytes, flash window 5.9 s, minimum heap 7,448,288 B |
+
+The success at 2.0 MB free shows the margin is conservative: an update rewrites
+files in an inactive slot that already holds a full copy, so it needs little
+extra space. It is a policy choice, not a measured limit; it was left alone.
+
+After these runs both slots were restored to current source by standard sync
+(shared aggregate `754a8fb8f288`, slot revision `12d03306564e`), with an independent
+`check` verifying the bootstrap and slot `a`.
+
+### Power cuts, October 30, 2026 (EDT morning)
+
+A person physically removed USB power at three points of a real full-app update.
+`tools/presto_ota_acceptance.py --cut {download,flash,confirm}` arms each window,
+beeps (one low beep to get ready, three high beeps to cut now, because the window
+can be about 5 seconds), waits for the board to return, reads the public journal
+**as the cut left it** (the stock launcher runs, not the bootstrap), removes the
+temporary profile, relaunches the real bootstrap, reads the journal again and
+judges it with `cut_verdict()` (unit tested). The confirm cut holds back the
+daemon's acknowledgement for 30 seconds so there is a usable window.
+
+| Cut | Where it landed | Journal as the cut left it | After the real bootstrap | Verdict |
+| --- | --- | --- | --- | --- |
+| 1. Download | Transfer recorded, file stream open, nothing yet written to flash | `a` confirmed, transfer set | `failed` / `connection_lost`, no transfer or pending, `a` confirmed | pass (harness) |
+| 2. Flash write | During the display-paused write of slot `b` (log: `writing slot b`, no `staged`) | `a` confirmed, transfer set | `failed` / `connection_lost`, `a` confirmed | pass (harness) |
+| 3. Before confirmation | Candidate in slot `b` running, unconfirmed, acknowledgement withheld | `b` active, pending, `a` confirmed | `rolled_back` / `boot_crash`, back on `a`, nothing pending | pass (`recovery.json`) |
+
+Results: `.preview/ota-hardware/cut-download/`, `cut-flash/` and `cut-confirm/`.
+Cut 3's harness did not register the cut (see below), so its journals came from
+`.preview/stall2/recover_cut.py`, which uses the harness's own probe and verdict.
+
+- Cut 3's update wrote slot `b` **on top of** the half-written files cut 2 left,
+  and the candidate ran and reached confirmation, so an update resumes cleanly
+  after an interrupted one.
+- The cut during download wrote nothing to flash, because downloads are held in
+  RAM until the verified batch is committed. The flash-window cut is the only
+  one that can leave a partial slot, and it never became active.
+- Every cut left the confirmed slot `a` running afterwards, with no manual repair.
+
+Harness mistakes found along the way (no device harm; each is recorded):
+
+- The first cut-1 attempt was wasted: a demo of the cue sound played just before
+  the run was taken for the real cue and power was pulled before the update had
+  started (`no_device_reports`, journal clean).
+- The 'staged' guard that ignores the board's own restart in cuts 1 and 2 was
+  also applied to cut 3, which is prompted after that restart, so the loss was
+  not detected and the run had to be stopped and recovered by hand. Fixed:
+  the guard now applies only to the download and flash cuts.
+
+After these runs both slots were restored to current source by standard sync
+(slot `12d03306564e`), with an independent `check` verifying slot `a`.
+
+Not covered: a cut inside the journal's own write/rename sequence (a window of
+milliseconds, covered only by the unit tests' simulated crash points) and cuts at
+the warm-reset boundary. The three cuts above are the representative windows.
+
+### Gates still open
+- Cold-boot clock source for production OTA readiness (a trust decision).
+- Real GHCR/PyPI release progression and supported-profile scope.
+- Optional: a cut inside the journal's rename sequence and at the warm-reset
+  boundary, if a finer physical test is wanted.

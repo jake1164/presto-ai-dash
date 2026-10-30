@@ -586,6 +586,11 @@ class StatusClient(object):
             self._note_failure(exc)
             raise
         except Exception as exc:
+            # A timeout cancels the connect before there is a writer to close,
+            # and MicroPython leaves that socket open until a collection runs.
+            # Measured: five timed-out connects exhaust the socket pool, and
+            # every later one fails with ENOMEM until a collection frees them.
+            _collect()
             self._note_failure(exc)
             error = NetworkUnavailable("cannot reach daemon")
             error.reason = describe_error(exc, self.stage)
@@ -687,6 +692,11 @@ class StatusClient(object):
             self._note_failure(exc)
             raise
         except Exception as exc:
+            # A timeout cancels the connect before there is a writer to close,
+            # and MicroPython leaves that socket open until a collection runs.
+            # Measured: five timed-out connects exhaust the socket pool, and
+            # every later one fails with ENOMEM until a collection frees them.
+            _collect()
             self._note_failure(exc)
             error = NetworkUnavailable("cannot reach daemon")
             error.reason = describe_error(exc, self.stage)

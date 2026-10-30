@@ -32,7 +32,7 @@ computer. The script looks at the Presto and does what is needed.
 | You want to | What to do |
 | --- | --- |
 | Set up a new Presto | The steps below |
-| Re-initialise a Presto | The same steps |
+| Re-initialise a Presto | The same steps. A re-initialised Presto gets a new device identifier, so the old record stays listed as offline in **Presto devices** on the daemon's Status tab: open it and press **Remove this record** |
 | Change the Wi-Fi network or password | The same steps, with **Set the Wi-Fi network on the Presto** ticked |
 | Move a Presto to a new daemon (the database and settings stay where they are) | The same steps on the **new** daemon's admin page; the script changes only the daemon address and token |
 

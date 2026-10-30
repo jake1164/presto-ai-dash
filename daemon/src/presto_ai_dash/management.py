@@ -778,6 +778,10 @@ class SourceConfiguration:
         """One device's detail, or None for an ID the daemon does not know."""
         return self.lifecycle.device_view(device_id, self.config["daemon"]["poll_interval"])
 
+    def forget_device(self, device_id):
+        """Remove the record of a device that has gone quiet."""
+        self.lifecycle.forget(device_id, self.config["daemon"]["poll_interval"])
+
     def device_attention_count(self):
         return self.lifecycle.attention_count()
 

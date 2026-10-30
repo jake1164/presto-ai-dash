@@ -1073,6 +1073,22 @@ class Storage:
         with self._lock:
             return self._conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
 
+    def delete_device(self, device_id):
+        """Remove one device's record. Its budgets, attempts and saved requests go with it.
+
+        The other three tables reference the device ``ON DELETE CASCADE``, and
+        foreign keys are enforced on this connection. Returns whether a row was removed.
+        """
+        with self._lock:
+            try:
+                cursor = self._conn.execute(
+                    "DELETE FROM devices WHERE device_id = ?", (device_id,))
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+            return cursor.rowcount > 0
+
     def save_device(self, record):
         """Write one device row, and nothing else, in one transaction."""
         with self._lock:

@@ -858,6 +858,25 @@ class DeviceLifecycle(object):
 
     # -- authenticated admin mutations -------------------------------------
 
+    def forget(self, device_id, poll_interval=None):
+        """Remove the record of a device that has gone quiet.
+
+        A device that is still reporting would reappear as new on its next report
+        and lose its history for nothing, so that is refused. The device itself is
+        neither contacted nor changed.
+        """
+        if not protocol.valid_id(device_id):
+            raise AdminRequestError(404, "not_found")
+        row = self._read_device(device_id)
+        if row is None:
+            raise AdminRequestError(404, "not_found")
+        if self._projection(row, poll_interval)["connected"]:
+            raise AdminRequestError(409, "device_online")
+        with self._lock:
+            self.storage.delete_device(device_id)
+            self._seen.pop(device_id, None)
+        log.info('device record removed: "%s"', row["name"])
+
     def refuse_mutation(self, device_id, kind):
         """Answer a retry or recovery request while the updater is absent.
 

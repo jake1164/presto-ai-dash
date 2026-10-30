@@ -323,6 +323,14 @@ class ClientsTableLayoutTests(unittest.TestCase):
         css = (self.folder() / "admin.css").read_text(encoding="utf-8")
         self.assertRegex(css, r"\.grid\.compact\.clients td:last-child\s*\{\s*white-space:\s*nowrap")
 
+    def test_an_older_daemon_that_sends_no_events_does_not_break_the_table(self):
+        # The page script and the daemon are separate files: a newer page can meet an
+        # older daemon, and a missing list means "none recorded", never a crash.
+        script = (self.folder() / "admin.js").read_text(encoding="utf-8")
+        body = script[script.index("function failureDetail"):script.index("function buildClientTable")]
+        self.assertNotIn("client.events.", body)
+        self.assertIn("(client.events || [])", body)
+
     def test_a_stale_last_error_column_is_gone_and_failures_opens_a_dated_list(self):
         script = (self.folder() / "admin.js").read_text(encoding="utf-8")
         body = script[script.index("function buildClientTable"):script.index("// -- requests")]

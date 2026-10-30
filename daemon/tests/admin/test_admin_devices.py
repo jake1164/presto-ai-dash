@@ -54,6 +54,103 @@ class DeviceRouteBase(AdminServerBase):
                             **kwargs)
 
 
+class DeviceRemoveTests(DeviceRouteBase):
+    """Forgetting the record of a Presto that has gone quiet."""
+
+    OTHER = "fedcba9876543210" * 2
+
+    def go_quiet(self):
+        """An hour on: the device has not reported since."""
+        lifecycle = self.manager.lifecycle
+        now = lifecycle._clock()
+        lifecycle._clock = lambda: now + 3600
+
+    def seed_history(self, device_id=DEVICE):
+        storage = self.manager.storage
+        storage.save_device_budget({
+            "generation_id": "a" * 32, "device_id": device_id, "target_scheme": "legacy-v1",
+            "target_revision": LEGACY[:12], "attempts_started": 1, "status": "active",
+            "next_attempt_at": None, "created_at": "2026-10-30T10:00:00Z",
+            "updated_at": "2026-10-30T10:00:00Z"})
+        storage.save_device_attempt({
+            "attempt_id": "b" * 32, "generation_id": "a" * 32, "command_id": "c" * 32,
+            "attempt_no": 1, "status": "failed", "issued_at": "2026-10-30T10:00:00Z",
+            "started_at": None, "attempt_deadline": None, "confirmation_deadline": None,
+            "confirmation_acked_at": None, "finished_at": None, "last_phase": None,
+            "error_code": None, "retryable": 0, "recovery": None})
+        storage.save_device_admin_request({
+            "device_id": device_id, "request_key": KEY, "body_sha256": "0" * 64,
+            "response_json": "{}", "created_at": "2026-10-30T10:00:00Z"})
+
+    def rows(self, table):
+        storage = self.manager.storage
+        with storage._lock:
+            return storage._conn.execute("SELECT COUNT(*) FROM " + table).fetchone()[0]
+
+    def remove(self, device_id=DEVICE, **kwargs):
+        return self.request(self.device_path(device_id), "DELETE", **kwargs)
+
+    def test_a_quiet_device_is_removed_with_everything_that_belongs_to_it(self):
+        self.seed_history()
+        self.go_quiet()
+        status, _, body = self.remove()
+        self.assertEqual((status, body), (200, {"removed": True}))
+        self.assertEqual(self.request("/api/admin/devices")[2]["devices"], [])
+        self.assertEqual(self.request(self.device_path())[0], 404)
+        for table in ("devices", "device_update_budgets", "device_update_attempts",
+                      "device_admin_requests"):
+            self.assertEqual(self.rows(table), 0, table)
+
+    def test_a_device_that_is_still_reporting_is_refused_and_kept(self):
+        status, _, body = self.remove()
+        self.assertEqual((status, body["error"]), (409, "device_online"))
+        self.assertEqual(len(self.request("/api/admin/devices")[2]["devices"]), 1)
+
+    def test_an_unknown_device_is_not_found(self):
+        self.go_quiet()
+        self.assertEqual(self.remove(self.OTHER)[0], 404)
+
+    def test_only_the_named_device_goes(self):
+        self.manager.lifecycle.observe(headers_for(device_id=self.OTHER, revision="0123456789ab", seq=1))
+        self.seed_history(self.OTHER)
+        self.go_quiet()
+        self.assertEqual(self.remove(DEVICE)[0], 200)
+        remaining = self.request("/api/admin/devices")[2]["devices"]
+        self.assertEqual([device["device_id"] for device in remaining], [self.OTHER])
+        self.assertEqual(self.rows("device_update_budgets"), 1)
+        self.assertEqual(self.rows("device_admin_requests"), 1)
+
+    def test_it_needs_sign_in(self):
+        self.go_quiet()
+        for token in (None, "wrong", "device-token"):
+            with self.subTest(token=token):
+                self.assertEqual(self.remove(token=token)[0], 401)
+        self.assertEqual(len(self.request("/api/admin/devices")[2]["devices"]), 1)
+
+    def test_a_browser_session_needs_the_csrf_token(self):
+        self.go_quiet()
+        cookie, session, _ = self.login()
+        headers = {"Cookie": cookie, "Origin": self.base_url}
+        self.assertEqual(self.remove(token=None, headers=headers)[0], 403)
+        headers["X-CSRF-Token"] = session["csrf_token"]
+        self.assertEqual(self.remove(token=None, headers=headers)[0], 200)
+
+    def test_a_removed_device_that_reports_again_is_listed_as_new(self):
+        self.go_quiet()
+        self.assertEqual(self.remove()[0], 200)
+        self.manager.lifecycle.observe(headers_for(revision="0123456789ab", seq=1))
+        status, _, body = self.request("/api/admin/devices")
+        self.assertEqual([device["device_id"] for device in body["devices"]], [DEVICE])
+
+    def test_the_page_offers_it_only_for_a_device_that_has_gone_quiet(self):
+        status, _, script = self.request("/admin.js")
+        script = script.decode("utf-8")
+        self.assertIn("removeDeviceControl", script)
+        self.assertIn("if (!device.connected) body.append(removeDeviceControl(device));", script)
+        self.assertIn('"DELETE"', script[script.index("async function removeDevice"):])
+        self.assertIn("Nothing on the Presto", script)
+
+
 class DeviceListTests(DeviceRouteBase):
     def test_it_needs_authorization(self):
         for token in (None, "wrong", "device-token"):

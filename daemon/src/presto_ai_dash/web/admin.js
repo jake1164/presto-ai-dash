@@ -234,7 +234,8 @@
     const cell = el("td");
     cell.colSpan = columns;
     const list = el("ul", "failure-list");
-    for (const event of client.events.slice().reverse()) {
+    // An older daemon sends no events at all: that is "none recorded", not an error.
+    for (const event of (client.events || []).slice().reverse()) {
       list.append(el("li", "", whenText(event.at) + " \u2014 " + event.count
         + (event.count === 1 ? " failure: " : " failures: ") + failureWhat(event)
         + (event.first ? " (before the daemon first saw this device)" : "")));
@@ -1916,6 +1917,35 @@
       box.replaceChildren(el("p", "note", error.message));
     }
   }
+  const REMOVE_DEVICE_REASONS = {
+    device_online: "That Presto is online, so its record would come straight back. Remove a "
+      + "record only after the Presto has gone quiet.",
+    not_found: "That record is already gone.",
+  };
+
+  async function removeDevice(device) {
+    if (busy || !window.confirm("Remove the record of " + device.name + "? Nothing on the Presto "
+      + "changes. If it reports again it is listed as a new device, without this history.")) return;
+    busy = true;
+    try {
+      await request("/api/admin/devices/" + encodeURIComponent(device.device_id), "DELETE");
+      message("Removed the record of " + device.name + ".");
+    } catch (error) {
+      message(REMOVE_DEVICE_REASONS[error.message] || error.message, true);
+    } finally { busy = false; }
+    await refreshStatus();
+  }
+
+  function removeDeviceControl(device) {
+    const box = el("div", "actions");
+    const button = el("button", "", "Remove this record");
+    button.type = "button";
+    button.title = "Forget this Presto on this daemon. The Presto itself is not changed.";
+    button.addEventListener("click", () => removeDevice(device));
+    box.append(button);
+    return box;
+  }
+
   function buildDeviceList(devices) {
     const wrap = el("div", "device-list");
     for (const device of devices) {
@@ -1950,6 +1980,7 @@
       ]));
       const attemptsBox = el("div", "");
       body.append(attemptsBox);
+      if (!device.connected) body.append(removeDeviceControl(device));
       block.append(body);
       // The attempt history is fetched only when someone opens the row.
       block.addEventListener("toggle", () => {

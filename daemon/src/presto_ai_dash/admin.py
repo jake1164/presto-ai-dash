@@ -588,6 +588,25 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
                 return
             self._send(201, result)
 
+        def _forget_device(self, device_id):
+            """Remove the record of a device that has gone quiet.
+
+            The same sign-in, Host, Origin and CSRF checks as every other change.
+            The device itself is neither contacted nor changed.
+            """
+            if not self._authorized():
+                return
+            try:
+                manager.forget_device(device_id)
+            except AdminRequestError as exc:
+                self._send(exc.status, {"error": exc.code})
+                return
+            except Exception:
+                log.error("admin device removal failed")
+                self._send(500, {"error": "device record could not be removed"})
+                return
+            self._send(200, {"removed": True})
+
         def _device_mutation(self, device_id, kind):
             """A retry or recovery request, refused while the updater is absent.
 
@@ -775,6 +794,10 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
             token_revoke = re.fullmatch(INGEST_TOKEN_PATH, urlsplit(self.path).path)
             if token_revoke:
                 self._ingest_token("DELETE", token_revoke[1])
+                return
+            device_forget = re.fullmatch(DEVICE_PATH, urlsplit(self.path).path)
+            if device_forget:
+                self._forget_device(device_forget[1])
                 return
             self._mutation("DELETE")
 

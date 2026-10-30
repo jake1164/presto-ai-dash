@@ -509,7 +509,9 @@ class RequestTests(Base):
         adapter = FakeAdapter([["0.50.0"]])
         release_gate, entered = threading.Event(), threading.Event()
         adapter.gate = lambda: (entered.set(), release_gate.wait(5))
-        found = self.checker(adapter)
+        # A start-up check due at once would race the requested one for the adapter and
+        # sometimes make a second call; only the requested check is wanted here.
+        found = self.checker(adapter, startup_delay=3600)
         found.start()
         self.addCleanup(found.stop)
         outcomes = []

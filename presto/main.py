@@ -134,13 +134,18 @@ def _restore_clock():
             return
         if RESET_EPOCH <= now < MIN_USABLE_EPOCH:
             carried += now - RESET_EPOCH
-        import machine
-        value = time.gmtime(carried)
-        machine.RTC().datetime((value[0], value[1], value[2], value[6],
-                                value[3], value[4], value[5], 0))
+        _set_clock(carried)
         print("AI Dash: clock restored after reset")
     except Exception:
         pass
+
+
+def _set_clock(epoch):
+    """Set the RTC to a unix time."""
+    import machine
+    value = time.gmtime(epoch)
+    machine.RTC().datetime((value[0], value[1], value[2], value[6],
+                            value[3], value[4], value[5], 0))
 
 
 def _reboot():
@@ -298,6 +303,10 @@ class App(object):
             self.boot = (lifecycle.bump_boot(getattr(config, "BOOT_COUNTER_FILE", None))
                          if self.device_id else 1)
         self.client.lifecycle_provider = self._lifecycle_headers
+        # A board with no clock battery restarts at 2021; the daemon proves the
+        # real time with a nonce, and only while the clock is unusable.
+        self._time_nonce = None
+        self.client.time_nonce_provider = self._clock_nonce
         if self.journal is not None:
             # The TLS date gate needs a real clock; a candidate's own restart
             # carried it across the reset.
@@ -665,6 +674,7 @@ class App(object):
             self._note_failure(reason)
             self._poll_failed("Daemon offline", reason)
             return False
+        self._apply_clock(payload)
         saved = self._display_state()
         try:
             self._set_payload(payload)
@@ -681,6 +691,46 @@ class App(object):
         self.connection_error = None
         self.fail_count = 0
         return True
+
+    def _clock_usable(self):
+        from updater import MIN_USABLE_EPOCH
+        return time.time() >= MIN_USABLE_EPOCH
+
+    def _clock_nonce(self):
+        """A fresh nonce to ask the daemon for the time, only while it is needed."""
+        if self._clock_usable():
+            self._time_nonce = None
+            return None
+        import clockproof
+        self._time_nonce = clockproof.new_nonce()
+        return self._time_nonce
+
+    def _apply_clock(self, payload):
+        """Set a reset clock from the daemon's authenticated time, then enable OTA.
+
+        Only while the clock is unusable, only for the reply to this device's
+        own nonce (used once), and only when the HMAC under the shared token
+        verifies, so a forged or replayed reply changes nothing. A clock that
+        is already real is never touched. The updater is built at start-up
+        only if the clock was real then, so it is built here once it is.
+        """
+        nonce, self._time_nonce = self._time_nonce, None
+        if nonce is None or not isinstance(payload, dict) or self._clock_usable():
+            return
+        try:
+            import clockproof
+            from updater import MIN_USABLE_EPOCH
+            epoch = clockproof.verify(self.client.token, nonce,
+                                      payload.get(clockproof.PAYLOAD_KEY), MIN_USABLE_EPOCH)
+            if epoch is None:
+                return
+            _set_clock(epoch)
+            print("AI Dash: clock set from daemon")
+            if self.ota is None and self.journal is not None:
+                import ota_transport
+                ota_transport.configure(self)
+        except Exception as exc:
+            print("AI Dash: clock not set (%s)" % type(exc).__name__)
 
     def _display_state(self):
         """What a payload replaces, so a refresh that fails can be put back."""

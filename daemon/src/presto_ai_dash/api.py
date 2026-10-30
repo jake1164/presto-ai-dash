@@ -14,6 +14,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
+from . import clock_proof
 from . import demo
 from .dashboard import build_status_payload, lazy_cards
 from .device_app import FILE_PATH as DEVICE_FILE_PATTERN
@@ -435,6 +436,9 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                                            diag=self.headers.get("X-Presto-Diag"))
                 except Exception:
                     log.debug("could not record the client", exc_info=True)
+            # A board with no clock battery asks for the time with a nonce;
+            # the proof is single-use, so it cannot be replayed (clock_proof).
+            payload = clock_proof.attach(payload, self.headers, shared_token, MAX_STATUS_BYTES)
             self._send_json(200, payload)
 
         def _with_lifecycle(self, payload, lifecycle):

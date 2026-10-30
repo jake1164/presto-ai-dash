@@ -143,6 +143,7 @@ status payload is the same with or without them, apart from the optional
 | `X-Presto-Diag` | The client's own diagnostics, at most 120 characters |
 | `X-Presto-Device-ID` | The persistent device identifier: exactly 32 lowercase hexadecimal characters. Status requests only |
 | `X-Presto-Lifecycle` | One compact JSON object, at most 1,024 bytes, schema `v: 1`. Status requests only |
+| `X-Presto-Time-Nonce` | Exactly 32 lowercase hexadecimal characters. Sent only by a Presto whose clock has restarted at 2021 and needs the date. Status requests only |
 
 A header value that is not printable ASCII, or that is too long, is dropped
 rather than partly trusted. The first three are kept in memory only, and the
@@ -161,6 +162,22 @@ A client without a device identifier is legacy telemetry: a bare 12- or
 64-character revision is compared with the expected **legacy** aggregate only,
 and is never stored. A repeated poll whose `(boot, seq)` is not higher than the
 stored one is `stale` and changes nothing.
+
+A Presto has no clock battery, so every cold start reads January 2021, and it
+will not fetch an update until it knows the date: the date is what rejects an
+expired certificate. A device in that state sends a fresh random nonce, and the
+status answer then carries one extra object:
+
+```json
+"clock": {"t": 1793318338, "mac": "<64 lowercase hexadecimal characters>"}
+```
+
+`t` is the daemon's own time in Unix seconds, and `mac` is HMAC-SHA256, keyed
+with the shared token, over `presto-time-v1|<nonce>|<t>`. The device sets its
+clock only if the answer verifies for the nonce it just sent, so an answer
+forged on the network, or replayed from an earlier poll, cannot move its clock.
+Nothing is stored. A request with no nonce, an invalid one, or more than one
+gets no `clock` object, and so does an unauthenticated request.
 
 `X-Presto-Diag` is a list of `key=value` pairs, separated by `;`:
 

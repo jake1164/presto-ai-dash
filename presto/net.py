@@ -46,6 +46,7 @@ MAX_LABEL = 32
 STATUS_PATH = "/api/v1/status"
 DEVICE_ID_HEADER = "X-Presto-Device-ID"
 LIFECYCLE_HEADER = "X-Presto-Lifecycle"
+TIME_NONCE_HEADER = "X-Presto-Time-Nonce"
 DEVICE_ID_CHARS = 32
 HEX = "0123456789abcdef"
 
@@ -193,7 +194,7 @@ def request_headers(headers):
     """
     lines = []
     for name in ("Authorization", "X-Presto-Client", "X-Presto-Revision", DIAG_HEADER,
-                 DEVICE_ID_HEADER, LIFECYCLE_HEADER):
+                 DEVICE_ID_HEADER, LIFECYCLE_HEADER, TIME_NONCE_HEADER):
         value = headers.get(name)
         if value:
             lines.append("%s: %s" % (name, value))
@@ -432,6 +433,9 @@ class StatusClient(object):
         # A callable returning ``(device_id, lifecycle_text)`` or None. It is
         # asked once per status poll and never breaks one.
         self.lifecycle_provider = lifecycle_provider
+        # Returns a fresh nonce while the board's clock is unusable, else None
+        # (see clockproof.py). It is asked once per status request.
+        self.time_nonce_provider = None
         # Where the last async fetch got to and why it ended; the screen and
         # the serial log report these when the daemon looks unreachable.
         self.stage = "start"
@@ -478,6 +482,14 @@ class StatusClient(object):
         headers = self.headers
         for name, value in self.lifecycle_headers(path).items():
             headers[name] = value
+        provider = self.time_nonce_provider
+        if provider is not None and (path or "").split("?")[0] == STATUS_PATH:
+            try:
+                nonce = provider()
+            except Exception:
+                nonce = None
+            if nonce:
+                headers[TIME_NONCE_HEADER] = nonce
         return headers
 
     def diag_header(self):

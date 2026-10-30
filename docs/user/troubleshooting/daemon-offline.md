@@ -36,10 +36,12 @@ If the computer's address changes - a new DHCP lease, a different network -
 the device has to be updated. A fixed address for the daemon, or a DHCP
 reservation in the router, avoids that.
 
-To update it, run `presto-ai-dash set-daemon --port COM3 --daemon-host <address>`
-on the computer the Presto is plugged into. It changes only the address,
-checks that the Presto can reach the daemon there, and puts the old settings
-back if it cannot. See
+To update it, open **Set up a Presto** on the daemon's admin page, prepare a
+download with the new address, and run the script on the computer the Presto is
+plugged into: see
+[One process for every case](../getting-started/set-up-the-presto.md#one-process-for-every-case).
+Developers can run `presto-ai-dash set-daemon --port COM3 --daemon-host <address>`,
+which also puts the old settings back if the Presto cannot reach the daemon. See
 [Moving a Presto to a different daemon](../getting-started/set-up-the-presto.md#moving-a-presto-to-a-different-daemon).
 
 ## 3. Can the device reach the port?
@@ -167,7 +169,7 @@ client "presto" reported a fetch problem: err=OSError 110 st=conn n=3
 | Symptom | Cause |
 | --- | --- |
 | **Unauthorised** | `SHARED_TOKEN` on the device does not match `daemon.shared_token` |
-| **No network** | The SSID or the password in `/secrets.py` is wrong, the network is 5 GHz only, or the Wi-Fi changed. Run `presto-ai-dash set-wifi --port COM3 --ssid <name>`: see [Changing the Wi-Fi network](../getting-started/set-up-the-presto.md#changing-the-wi-fi-network) |
+| **No network** | The SSID or the password in `/secrets.py` is wrong, the network is 5 GHz only, or the Wi-Fi changed. Run **Set up a Presto** from the admin page with the Wi-Fi box ticked: see [Changing the Wi-Fi network](../getting-started/set-up-the-presto.md#changing-the-wi-fi-network) |
 | The daemon is up but the port is closed | A firewall on the daemon machine. Allow the private LAN |
 | The device works, then stops after a while | Look at the router's client list and the DHCP lease |
 

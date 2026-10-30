@@ -68,6 +68,8 @@ class FakeDevice:
         self.writes = []
         self.launched = False
         self.closed = False
+        self.resets = []
+        self.log = []
 
     def _marker(self, value):
         return (MARK + json.dumps(value)).encode("ascii")
@@ -79,6 +81,7 @@ class FakeDevice:
         if "'reach': result" in text:
             return self._marker({"reach": self.reach})
         if "DEVICE_ID" in text:
+            self.log.append("config_state")
             return self._marker({"device_id": self.device_id, "name": self.config_name})
         rename = re.search(r"os\.rename\((.+), (.+)\)", text)
         if rename:
@@ -118,6 +121,10 @@ class FakeDevice:
         return [path[len(prefix):] for path in self.files
                 if path.startswith(prefix) and "/" not in path[len(prefix):]]
 
+    def reset_to_launcher(self):
+        self.resets.append(len(self.writes))
+        self.log.append("reset")
+
     def launch(self):
         self.launched = True
 
@@ -133,6 +140,19 @@ def existing_install():
     files["/ai_dash_files/old_helper.py"] = b"old helper"
     files["/main.py"] = b"stock launcher"
     return files
+
+
+def slot_install():
+    """A Presto on the over-the-air layout: bootstrap, two slots, private settings."""
+    return {
+        "/ai_dash_boot.py": b"bootstrap",
+        "/ai_dash_boot_files/boot.py": b"boot",
+        "/ai_dash_slots/a/ai_dash_app.py": b"slot a app",
+        "/ai_dash_slots/b/ai_dash_app.py": b"slot b app",
+        CONFIG: b"DAEMON_HOST = '10.0.0.2'\nDEVICE_NAME = 'desk'\nDEVICE_ID = '%s'\n" % (b"a" * 32),
+        SECRETS: b"WIFI_SSID = 'old'\nWIFI_PASSWORD = 'old-pass'\n",
+        "/main.py": b"stock launcher",
+    }
 
 
 class ScriptCase(unittest.TestCase):
@@ -429,25 +449,6 @@ class PreservationTests(ScriptCase):
         self.assertEqual(status, 0, said)
         self.assertTrue(any("Replace the Wi-Fi settings" in text for text in said))
 
-    def test_a_slot_device_is_refused_before_anything_is_written(self):
-        # Setup installs the single-folder app; on a bootstrap device that would
-        # leave a second, older copy beside the slots.
-        code = device_setup.new_unlock_code()
-        path = self.handoff(code)
-        files = existing_install()
-        files["/ai_dash_boot.py"] = b"bootstrap"
-        device = FakeDevice(files, device_id="a" * 32, name="old-name")
-        before = dict(device.files)
-        status, said = self.run_script(path, [code, "1"], device)
-        self.assertEqual(status, 1)
-        self.assertEqual(device.files, before)
-        self.assertEqual(device.writes, [])
-        self.assertFalse(device.launched)
-        self.assertTrue(path.exists(), "the handoff is kept")
-        blob = "\n".join(said)
-        self.assertIn("set-daemon", blob)
-        self.assertIn("A/B app slots", blob)
-
     def test_an_unrelated_file_on_a_fresh_device_is_left_alone(self):
         code = device_setup.new_unlock_code()
         path = self.handoff(code)
@@ -586,7 +587,7 @@ class StandaloneExecutionTests(unittest.TestCase):
             elif isinstance(node, ast.ImportFrom) and node.level == 0:
                 top_level.add((node.module or "").split(".")[0])
         self.assertEqual(top_level, {"argparse", "base64", "binascii", "getpass",
-                                     "hashlib", "json", "os", "re", "sys"})
+                                     "hashlib", "json", "os", "re", "sys", "time"})
 
 
 class DependencyTests(ScriptCase):
@@ -628,6 +629,147 @@ class DependencyTests(ScriptCase):
         with self.assertRaises(module.SetupStopped) as caught:
             module.find_handoff(None)
         self.assertIn("presto-setup.enc", str(caught.exception))
+
+
+class SlotDeviceTests(ScriptCase):
+    """A Presto that updates over the air keeps its app: only its settings change."""
+
+    def test_a_slot_presto_gets_settings_only_and_keeps_every_app_file(self):
+        code = device_setup.new_unlock_code()
+        path = self.handoff(code, wifi="keep")
+        device = FakeDevice(slot_install(), device_id="a" * 32, name="desk")
+        before = dict(device.files)
+        status, said = self.run_script(path, [code, "1", "y", "yes"], device)
+        self.assertEqual(status, 0, said)
+        for target, data in before.items():
+            if target != CONFIG:
+                self.assertEqual(device.files[target], data, target)
+        self.assertEqual(sorted(set(device.files) - set(before)), [])
+        written = device.files[CONFIG].decode("ascii")
+        self.assertIn("DAEMON_HOST = '192.168.1.50'", written)
+        self.assertIn("DEVICE_ID = '%s'" % ("a" * 32), written)
+        self.assertIn("DEVICE_NAME = 'desk'", written)
+        self.assertTrue(all(target.startswith(CONFIG) for target in device.writes), device.writes)
+        self.assertTrue(device.launched)
+        self.assertFalse(path.exists(), "the handoff is removed once the Presto reached the daemon")
+        blob = "\n".join(said)
+        self.assertIn("over the air", blob)
+        self.assertNotIn("app files,", blob)
+        self.assertIn("/secrets.py: keep the existing file", blob)
+
+    def test_the_board_goes_back_to_the_launcher_before_anything_else_happens(self):
+        # A running slot app's watchdog would reset the board mid-session.
+        code = device_setup.new_unlock_code()
+        device = FakeDevice(slot_install(), device_id="a" * 32, name="desk")
+        status, said = self.run_script(self.handoff(code, wifi="keep"), [code, "1", "y", "yes"], device)
+        self.assertEqual(status, 0, said)
+        self.assertEqual(device.resets, [0], "reset once, before the first write")
+        self.assertLess(device.log.index("reset"), device.log.index("config_state"))
+
+    def test_the_wifi_box_still_decides_on_a_slot_presto(self):
+        code = device_setup.new_unlock_code()
+        device = FakeDevice(slot_install(), device_id="a" * 32, name="desk")
+        status, said = self.run_script(self.handoff(code, wifi="set"),
+                                       [code, "1", "y", "Office 2G", "new-wifi-pass", "yes"], device)
+        self.assertEqual(status, 0, said)
+        self.assertIn("WIFI_SSID = 'Office 2G'", device.files[SECRETS].decode("ascii"))
+        self.assertEqual(device.files["/ai_dash_slots/a/ai_dash_app.py"], b"slot a app")
+        files = slot_install()
+        del files[SECRETS]
+        empty = FakeDevice(files, device_id="a" * 32, name="desk")
+        status, said = self.run_script(self.handoff(code, wifi="keep"), [code, "1"], empty)
+        self.assertEqual(status, 1)
+        self.assertEqual(empty.writes, [])
+        self.assertIn("has no Wi-Fi settings", "\n".join(said))
+
+    def test_a_daemon_it_cannot_reach_is_reported_and_the_app_is_still_started(self):
+        code = device_setup.new_unlock_code()
+        path = self.handoff(code, wifi="keep")
+        device = FakeDevice(slot_install(), device_id="a" * 32, name="desk", reach="error")
+        status, said = self.run_script(path, [code, "1", "y", "yes"], device)
+        self.assertEqual(status, 1)
+        self.assertTrue(device.launched, "the app is started so the screen can say why")
+        self.assertTrue(path.exists(), "the handoff is kept for another try")
+        self.assertTrue(any("could not reach" in text for text in said), said)
+
+    def test_a_single_folder_presto_is_never_reset_and_still_gets_its_app(self):
+        code = device_setup.new_unlock_code()
+        device = FakeDevice(existing_install(), device_id="a" * 32, name="x")
+        status, said = self.run_script(self.handoff(code, wifi="keep"), [code, "1", "n", "yes"], device)
+        self.assertEqual(status, 0, said)
+        self.assertEqual(device.resets, [])
+        for target, data in BUNDLE["files"].items():
+            self.assertEqual(device.files[target], data)
+
+
+class ReconnectTests(unittest.TestCase):
+    """MpremoteDevice.reset_to_launcher, with a transport that returns after a delay."""
+
+    def make(self, failures, attempts=30):
+        module = rendered_module()
+        made = []
+
+        class Transport:
+            def __init__(self, port):
+                if made and failures[0] > 0:
+                    failures[0] -= 1
+                    raise OSError("not back yet")
+                self.port = port
+                self.sent = []
+                self.closed = False
+                made.append(self)
+
+            def enter_raw_repl(self):
+                pass
+
+            def exec_raw_no_follow(self, code):
+                self.sent.append(bytes(code))
+
+            def exit_raw_repl(self):
+                pass
+
+            def close(self):
+                self.closed = True
+
+        fake = types.ModuleType("mpremote.transport_serial")
+        fake.SerialTransport = Transport
+        package = types.ModuleType("mpremote")
+        module.RECONNECT_ATTEMPTS = attempts
+        patches = unittest.mock.patch.dict(sys.modules, {"mpremote": package,
+                                                         "mpremote.transport_serial": fake})
+        patches.start()
+        self.addCleanup(patches.stop)
+        sleep = unittest.mock.patch.object(module.time, "sleep")
+        sleep.start()
+        self.addCleanup(sleep.stop)
+        return module, made
+
+    def test_it_sends_the_reset_and_reconnects_when_the_board_returns(self):
+        module, made = self.make([2])
+        device = module.MpremoteDevice("COM9")
+        first = device.transport
+        device.reset_to_launcher()
+        self.assertIn(b"machine.reset()", first.sent[0])
+        self.assertTrue(first.closed)
+        self.assertEqual(len(made), 2, "the old session and one new one; two attempts failed")
+        self.assertIs(device.transport, made[-1])
+        self.assertEqual(device.transport.port, "COM9")
+
+    def test_a_board_that_never_returns_is_reported(self):
+        module, _made = self.make([99], attempts=3)
+        device = module.MpremoteDevice("COM9")
+        with self.assertRaises(module.DeviceError) as caught:
+            device.reset_to_launcher()
+        self.assertIn("did not come back", str(caught.exception))
+
+    def test_launch_picks_the_layout_on_the_device(self):
+        module, made = self.make([0])
+        device = module.MpremoteDevice("COM9")
+        device.launch()
+        sent = made[0].sent[-1].decode("ascii")
+        self.assertIn("boot.main()", sent)
+        self.assertIn("ai_dash_app import main", sent)
+        compile(sent, "launch", "exec")
 
 
 if __name__ == "__main__":

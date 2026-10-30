@@ -38,6 +38,7 @@ import json
 import os
 import re
 import sys
+import time
 
 SETUP_PROTOCOL = 1
 REVISION_CHARS = 12
@@ -81,6 +82,25 @@ LOOPBACK_NAMES = ("127.0.0.1", "localhost", "::1", "0.0.0.0", "::")
 
 LAUNCH = ("import sys, os; sys.path.insert(0, '/ai_dash_files'); "
           "os.chdir('/ai_dash_files'); from ai_dash_app import main; main()")
+# Starts AI Dash whichever layout the device has: the bootstrap when it is
+# installed, otherwise the single-folder app.
+LAUNCH_AUTO = (
+    "import sys, os\n"
+    "try:\n"
+    "    os.stat('/ai_dash_boot.py')\n"
+    "    booted = True\n"
+    "except OSError:\n"
+    "    booted = False\n"
+    "if booted:\n"
+    "    sys.path.insert(0, '/ai_dash_boot_files'); os.chdir('/ai_dash_boot_files')\n"
+    "    import boot; boot.main()\n"
+    "else:\n"
+    "    sys.path.insert(0, '/ai_dash_files'); os.chdir('/ai_dash_files')\n"
+    "    from ai_dash_app import main; main()\n")
+# A running slot app arms a watchdog that resets the board within seconds of
+# USB stopping it; a hard reset lands on the stock launcher, which arms none.
+RESET_CODE = "import machine; machine.reset()"
+RECONNECT_ATTEMPTS = 30
 
 DEPENDENCY_MESSAGE = (
     "This setup script needs two Python packages on this computer, and one is\n"
@@ -127,30 +147,50 @@ try:
     import secrets
     import network
     import time
+    import socket
     wlan = network.WLAN(network.STA_IF)
-    if not wlan.active():
-        wlan.active(True)
-    if not wlan.isconnected():
+    # A weak signal sometimes leaves the radio linked but without an address, or
+    # not linked at all; switching the radio off and on between tries clears it.
+    for attempt in range(6):
+        if attempt:
+            wlan.disconnect()
+            wlan.active(False)
+            time.sleep(0.5)
+        if not wlan.active():
+            wlan.active(True)
+        if wlan.isconnected():
+            break
         wlan.connect(secrets.WIFI_SSID, secrets.WIFI_PASSWORD)
-        for _ in range(40):
+        for _ in range(48):
             if wlan.isconnected():
                 break
             time.sleep(0.25)
-    if wlan.isconnected():
-        import requests
-        response = requests.get(
-            'http://%s:%d/api/v1/status?cards=lazy' % (config.DAEMON_HOST, int(config.DAEMON_PORT)),
-            headers={'Authorization': 'Bearer ' + config.SHARED_TOKEN})
-        code = response.status_code
-        response.close()
-        if code == 200:
-            result = 'ok'
-        elif code == 401:
-            result = 'unauthorised'
-        else:
-            result = 'http_%d' % code
-    else:
+        if wlan.isconnected():
+            break
+    if not wlan.isconnected():
         result = 'wifi'
+    else:
+        link = socket.socket()
+        try:
+            link.settimeout(8)
+            link.connect(socket.getaddrinfo(config.DAEMON_HOST, int(config.DAEMON_PORT))[0][-1])
+            link.send(b'GET /api/v1/status?cards=lazy HTTP/1.0\r\nHost: presto\r\n'
+                      b'Authorization: Bearer ' + config.SHARED_TOKEN.encode() + b'\r\n\r\n')
+            head = b''
+            while b'\r\n' not in head and len(head) < 128:
+                chunk = link.recv(64)
+                if not chunk:
+                    break
+                head += chunk
+            code = int(head.split(b' ')[1]) if b'\r\n' in head else 0
+            if code == 200:
+                result = 'ok'
+            elif code == 401:
+                result = 'unauthorised'
+            else:
+                result = 'http_%d' % code
+        finally:
+            link.close()
 except Exception:
     result = 'error'
 print('PRESTO_SETUP:' + json.dumps({'reach': result}))
@@ -343,6 +383,8 @@ class MpremoteDevice:
             from mpremote.transport_serial import SerialTransport
         except ImportError:
             raise SetupStopped(DEPENDENCY_MESSAGE) from None
+        self.port = port
+        self._transport_class = SerialTransport
         try:
             self.transport = SerialTransport(port)
             self.transport.enter_raw_repl()
@@ -404,8 +446,26 @@ class MpremoteDevice:
             names.append(str(name))
         return names
 
+    def reset_to_launcher(self):
+        """Hard-reset the board and reconnect once it is back on the stock launcher."""
+        try:
+            self.transport.exec_raw_no_follow(RESET_CODE.encode("ascii"))
+        except Exception:
+            pass  # The port can vanish before the command has returned.
+        self.close()
+        for _attempt in range(RECONNECT_ATTEMPTS):
+            time.sleep(1)
+            try:
+                self.transport = self._transport_class(self.port)
+                self.transport.enter_raw_repl()
+                return
+            except Exception:
+                continue
+        raise DeviceError("The Presto did not come back after a restart. Reconnect it "
+                          "and run this script again.")
+
     def launch(self):
-        self.transport.exec_raw_no_follow(LAUNCH.encode("ascii"))
+        self.transport.exec_raw_no_follow(LAUNCH_AUTO.encode("ascii"))
 
     def close(self):
         for action in (self.transport.exit_raw_repl, self.transport.close):
@@ -515,7 +575,7 @@ def config_state(device):
 
 def check_reachability(device):
     """Run the app's own read on the device and report a fixed result code."""
-    state = marker_json(device.run(REACH_CODE.encode("ascii"), timeout=60), "connection")
+    state = marker_json(device.run(REACH_CODE.encode("ascii"), timeout=180), "connection")
     return safe_text(state.get("reach"), 16)
 
 
@@ -716,9 +776,12 @@ def preview(payload, plan, port, machine, say):
     say("")
     say("Presto AI Dash %s (app revision %s) on %s (%s):"
         % (RELEASE or "unknown", str(BUNDLE["revision"])[:REVISION_CHARS], port, machine))
-    say("  - %d app files, %.1f KiB, installed in /ai_dash_files and as /ai_dash.py,"
-        % (len(BUNDLE["files"]), total / 1024.0))
-    say("    verified by SHA-256 and rolled back if a write fails.")
+    if plan.get("slot"):
+        say("  - App files: left alone. This Presto updates its app over the air.")
+    else:
+        say("  - %d app files, %.1f KiB, installed in /ai_dash_files and as /ai_dash.py,"
+            % (len(BUNDLE["files"]), total / 1024.0))
+        say("    verified by SHA-256 and rolled back if a write fails.")
     if plan["config"]:
         say('  - /ai_dash_files/config.py: replace with daemon %s:%d, name "%s", %s device ID.'
             % (daemon["host"], int(daemon["port"]), plan["name"],
@@ -734,7 +797,8 @@ def preview(payload, plan, port, machine, say):
 
 
 def apply_plan(device, payload, plan, say):
-    install_app(device, say)
+    if not plan.get("slot"):
+        install_app(device, say)
     if plan["config"]:
         write_private(device, CONFIG_PATH, config_text(payload, plan["name"], plan["device_id"]))
         say("Wrote /ai_dash_files/config.py and verified it.")
@@ -835,9 +899,14 @@ def run(arguments, device_factory, ask, say):
     completed = False
     try:
         machine = probe_board(device)
-        if device.exists(BOOT_ENTRY):
-            raise SetupStopped(SLOT_DEVICE_MESSAGE)
+        # A Presto that updates its app over the air keeps its app: only its
+        # settings change, and the app never comes from this script.
+        slot = device.exists(BOOT_ENTRY)
+        if slot:
+            say("This Presto updates its app over the air, so only its settings will change.")
+            device.reset_to_launcher()
         plan = ask_settings(device, payload, arguments.name, ask, say)
+        plan["slot"] = slot
         preview(payload, plan, port, machine, say)
         if not yes(ask("Type yes to install: ")):
             raise Cancelled()
@@ -865,23 +934,15 @@ NO_WIFI_MESSAGE = (
     "Presto' ticked.")
 
 
-SLOT_DEVICE_MESSAGE = (
-    "This Presto already uses the bootstrap and A/B app slots, which this setup script "
-    "does not manage: it would install a second, older copy of the app beside them. "
-    "Nothing was written. To point it at a different daemon, run: presto-ai-dash "
-    "set-daemon --port <port> --daemon-host <daemon address>. To change its Wi-Fi "
-    "network, run: presto-ai-dash set-wifi --port <port> --ssid <network name>. To "
-    "update the app, use Sync Presto (tools/presto_device.py sync) or an "
-    "over-the-air update.")
-
-
 def reach_message(reach):
     if reach == "unauthorised":
         return ("The Presto reached the daemon, but the daemon refused the device token. "
                 "Prepare a new download in the admin page and run this script again.")
     if reach == "wifi":
-        return ("The Presto could not join the Wi-Fi network. Check the network name and "
-                "password (2.4 GHz only), then run this script again.")
+        return ("The Presto could not join the Wi-Fi network just now, so it could not look "
+                "for the daemon. The settings are saved and the Presto keeps trying on its "
+                "own. If you entered a new network, check its name and password (2.4 GHz "
+                "only); a weak signal can also cause this. Run this script again to retry.")
     if reach.startswith("http_"):
         return ("The Presto reached a server on that address, but it did not answer as the "
                 "daemon. Check that the port is the daemon's device port (8787 by default).")

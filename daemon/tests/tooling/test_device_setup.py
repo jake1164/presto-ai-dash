@@ -388,12 +388,16 @@ class PackagingParityTests(unittest.TestCase):
             self.assertEqual(staged, BUNDLE["files"])
             # The slot and bootstrap bundles come too, so the image serves what a
             # wheel install does: loaded the way the daemon loads them, they match.
+            from presto_ai_dash.device_app import manifest_bytes, slot_inventory
             loaded = device_install.bundled_snapshot(root)
-            for part in ("slot", "bootstrap"):
-                with self.subTest(part=part):
-                    self.assertIsNotNone(BUNDLE.get(part))
-                    self.assertIsNotNone(loaded.get(part))
-                    self.assertEqual(loaded[part]["files"], BUNDLE[part]["files"])
+            self.assertIsNotNone(loaded.get("slot"), "the image can serve updates")
+            self.assertIsNotNone(loaded.get("bootstrap"))
+            served = slot_inventory(loaded)
+            self.assertIsNotNone(served)
+            # The same update manifest a wheel install serves (compared as bytes:
+            # a dict diff of whole files would take minutes to print).
+            self.assertTrue(manifest_bytes(served) == manifest_bytes(slot_inventory(BUNDLE)))
+            self.assertTrue(loaded["bootstrap"]["hashes"] == BUNDLE["bootstrap"]["hashes"])
 
     def test_the_daemon_reads_the_checkout_bundle_when_it_has_no_staged_copy(self):
         self.assertEqual(device_install.app_snapshot()["revision"], BUNDLE["revision"])

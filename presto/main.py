@@ -197,6 +197,28 @@ class _FlashWindow(object):
         if self.app._flash_depth == 0:
             self.app._resume_display()
         return False
+
+
+def _manifest_error(exc):
+    """The failure code for a manifest fetch that raised ``exc``.
+
+    A blocked report stops automatic updates until someone acts, so only a
+    certificate or protocol failure may be one. A timeout or a dropped
+    connection is reported as the retryable failure it is. MicroPython raises
+    mbedTLS errors as OSError with a negative code and network errors with a
+    positive one; CPython's certificate error is a ValueError too.
+    """
+    # asyncio.TimeoutError, not the builtin: MicroPython defines it in asyncio, and
+    # on CPython 3.11+ it is the builtin TimeoutError.
+    if isinstance(exc, asyncio.TimeoutError):
+        return "transfer_timeout"
+    if isinstance(exc, OSError) and not isinstance(exc, ValueError):
+        code = exc.args[0] if exc.args else None
+        if not isinstance(code, int) or code > 0:
+            return "connection_lost"
+    return "transport_untrusted"
+
+
 SAVE_FAILED_MESSAGE = "COULD NOT SAVE - DAEMON OFFLINE"
 ALERTS_OFF_MESSAGE = "ALERTS OFF FOR ALL - SEE ADMIN"
 
@@ -840,7 +862,8 @@ class App(object):
             self._prepare_ota(command, text)
         except Exception as exc:
             print('AI Dash: update manifest failed (%s)' % type(exc).__name__)
-            self._ota_failed(command, 'transport_untrusted', blocked=True)
+            error = _manifest_error(exc)
+            self._ota_failed(command, error, blocked=error == 'transport_untrusted')
         finally:
             self._ota_prepare_task = None
 

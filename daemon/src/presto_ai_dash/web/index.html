@@ -155,7 +155,8 @@
             You need no copy of this project: this page gives you the exact app this daemon
             serves, plus a one-time encrypted setup file with the daemon address and device
             token. Do this once for each Presto. The setup script asks for Wi-Fi locally, so
-            a Wi-Fi password is never typed into this page.</p>
+            a Wi-Fi password is never typed into this page. A Presto that already updates its
+            app over the air keeps its app: for it, the script changes only the settings.</p>
           <p id="setup-unavailable" class="warning" hidden>This daemon has no Presto app files
             to install. Use a release wheel or the container image; a source-only install
             without the <code>presto/</code> folder cannot prepare a download.</p>
@@ -176,17 +177,15 @@
                  placeholder="presto">
           <label class="check" id="setup-wifi-label"><input id="setup-wifi" type="checkbox" checked>
             Set the Wi-Fi network on the Presto</label>
-          <p class="note" id="setup-wifi-note">A Presto that already updates its app over the air
-            keeps its app: for it, the script changes only the settings. The setup script asks for the network name and
+          <p class="note" id="setup-wifi-note">The setup script asks for the network name and
             password on the USB computer. The Wi-Fi password is never typed into this page.</p>
-          <div id="setup-wifi-warning" class="wifi-required" role="alert" hidden>
-            <strong>Wi-Fi is required</strong>
-            <span>The Presto cannot reach this daemon, show anything or be updated without a
-              Wi-Fi network. Leave this box ticked unless this Presto already joins your network.
-              With it unticked, the setup script keeps the Wi-Fi already on the Presto, and stops
-              without writing anything if there is none.</span>
+          <div id="setup-wifi-warning" class="wifi-required" role="status" hidden>
+            <strong>Wi-Fi is needed</strong>
+            <span>The Presto cannot reach this daemon without a Wi-Fi network. Untick this only
+              if the Presto already joins your network: the setup script then keeps the Wi-Fi it
+              has, and stops without changing anything if it has none.</span>
           </div>
-          <div class="actions">
+          <div class="actions" id="setup-actions">
             <button type="button" id="prepare-presto-setup">Prepare download</button>
           </div>
           <div id="setup-downloads" hidden>
@@ -199,14 +198,19 @@
               <button type="button" id="copy-setup-code">Copy</button>
             </div>
             <ol class="note">
-              <li>Download <a id="download-setup-script" href="#" download="presto_setup.py">presto_setup.py</a>
-                and <a id="download-setup-handoff" href="#" download="presto-setup.enc">presto-setup.enc</a>.</li>
+              <li>Your browser has downloaded <a id="download-setup-script" href="#" download="presto_setup.py">presto_setup.py</a>
+                and <a id="download-setup-handoff" href="#" download="presto-setup.enc">presto-setup.enc</a>.
+                If it asked to allow several downloads, allow them. If one did not arrive, use these links.</li>
               <li>Put both files in one folder on the computer the Presto is plugged into.</li>
               <li>Run <code>python presto_setup.py</code> there and type the code when asked.
-                The script installs the app, keeps or replaces the device's own settings, and
-                deletes the encrypted file when setup succeeds.</li>
+                The script installs the app (a Presto that already updates its app over the air
+                keeps its app and gets only its settings), keeps or replaces the device's own
+                settings, and deletes the encrypted file when setup succeeds.</li>
             </ol>
             <p class="note" id="setup-summary"></p>
+            <div class="actions">
+              <button type="button" id="prepare-another-setup">Prepare another download</button>
+            </div>
           </div>
         </div>
       </details>

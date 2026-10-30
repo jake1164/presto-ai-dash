@@ -762,6 +762,27 @@ class ReconnectTests(unittest.TestCase):
             device.reset_to_launcher()
         self.assertIn("did not come back", str(caught.exception))
 
+    def test_it_leaves_the_board_alone_while_the_launcher_finishes_starting(self):
+        # Taking the board over a second after a hard reset left the radio unable to
+        # join any network until the next hard reset (found on hardware).
+        module, _made = self.make([0])
+        waits = []
+        module.time.sleep.side_effect = waits.append
+        device = module.MpremoteDevice("COM9")
+        device.reset_to_launcher()
+        self.assertGreaterEqual(module.RESET_SETTLE_SECONDS, 5)
+        self.assertEqual(waits[0], module.RESET_SETTLE_SECONDS,
+                         "the first wait after the reset is the settle time")
+
+    def test_the_reach_check_forgets_the_settings_read_earlier_in_the_session(self):
+        # The setup reads the old settings with `import config` in the same session, so
+        # an unchanged check would test the old daemon address, not the one just written.
+        module = rendered_module()
+        code = module.REACH_CODE
+        self.assertLess(code.index("sys.modules.pop"), code.index("import config"))
+        for name in ("config", "secrets"):
+            self.assertIn("'%s'" % name, code[:code.index("import config")])
+
     def test_launch_picks_the_layout_on_the_device(self):
         module, made = self.make([0])
         device = module.MpremoteDevice("COM9")

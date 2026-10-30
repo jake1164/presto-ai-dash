@@ -464,9 +464,44 @@
         + (result.wifi ? " The setup script will ask for the Wi-Fi network and password."
                        : " Wi-Fi is not being set: the Presto must already have Wi-Fi settings.");
       element("setup-downloads").hidden = false;
+      // The result appears below the form: hide the button that made it, so it is
+      // clear the click worked, and bring the result into view.
+      element("setup-actions").hidden = true;
+      element("setup-downloads").scrollIntoView({ behavior: "smooth", block: "nearest" });
+      startSetupDownloads();
       message("Setup download ready. Copy the unlock code now: it is shown once.");
     } catch (error) { message(error.message, true); }
     finally { busy = false; renderPrestoSetup(); }
+  }
+
+  function startSetupDownloads() {
+    // Both files, one after the other, so nobody has to find and click two links.
+    // A browser may ask once to allow several downloads; the links stay on the
+    // page in case it blocks one.
+    ["download-setup-script", "download-setup-handoff"].forEach((id, index) => {
+      setTimeout(() => {
+        const link = element(id);
+        const href = link.getAttribute("href");
+        if (!href) return;
+        const trigger = document.createElement("a");
+        trigger.href = href;
+        trigger.download = link.getAttribute("download") || "";
+        trigger.hidden = true;
+        document.body.append(trigger);
+        trigger.click();
+        trigger.remove();
+      }, index * 400);
+    });
+  }
+
+  function prepareAnotherSetup() {
+    setupPrepared = null;
+    element("setup-downloads").hidden = true; element("setup-unlock-code").textContent = "";
+    for (const id of ["download-setup-script", "download-setup-handoff"]) {
+      element(id).removeAttribute("href");
+    }
+    element("setup-actions").hidden = false;
+    element("prepare-presto-setup").focus();
   }
 
   async function copySetupCode() {
@@ -2117,6 +2152,7 @@
     // A setup unlock code must not survive a locked page.
     setupState = null; setupPrepared = null;
     element("setup-downloads").hidden = true; element("setup-unlock-code").textContent = "";
+    element("setup-actions").hidden = false;
     element("setup-host").value = ""; element("setup-name").value = "";
     element("setup-wifi").checked = true; element("setup-wifi-warning").hidden = true;
     element("setup-wifi-label").classList.remove("wifi-off");
@@ -2242,6 +2278,7 @@
   element("prepare-presto-setup").addEventListener("click", preparePrestoSetup);
   element("setup-wifi").addEventListener("change", renderPrestoSetup);
   element("copy-setup-code").addEventListener("click", copySetupCode);
+  element("prepare-another-setup").addEventListener("click", prepareAnotherSetup);
   element("overflow-rows").addEventListener("change", async () => {
     if (busy) { renderDisplay(); return; }
     busy = true;

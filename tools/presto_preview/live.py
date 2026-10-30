@@ -95,11 +95,43 @@ class LivePresto(object):
         self._publish(bytes(self.display.pixels), list(self.leds[0]))
 
 
+def daemon_settings(config_path):
+    """The daemon address and token to poll, taken from a daemon configuration.
+
+    Returns ``(settings, note)``. ``settings`` uses the app's own setting names,
+    or is None when the file cannot be used; ``note`` says what the person needs
+    to know, or is None. Neither ever holds a token that was not already in the
+    file, and ``note`` never repeats it.
+    """
+    from presto_ai_dash.config import ConfigError, load_config
+    try:
+        daemon = load_config(config_path)["daemon"]
+    except ConfigError as exc:
+        return None, ("cannot use %s (%s); it keeps the daemon address from presto/config.py"
+                      % (os.path.basename(config_path), exc))
+    host = (daemon.get("host") or "").strip()
+    if host in ("", "0.0.0.0", "::", "[::]"):
+        # A bind-everything address is not one to connect to; the preview runs
+        # on the same computer as the daemon it follows.
+        host = "127.0.0.1"
+    settings = {"DAEMON_HOST": host, "DAEMON_PORT": int(daemon["port"])}
+    token = daemon.get("shared_token") or ""
+    if token:
+        settings["SHARED_TOKEN"] = token
+        return settings, None
+    return settings, ("daemon.shared_token is not set, so the daemon invents a new token at "
+                      "every start and the preview cannot know it. Set daemon.shared_token in "
+                      "the daemon configuration; until then it keeps the token from "
+                      "presto/config.py")
+
+
 class Runner(object):
     """Owns one App thread; restarts it on demand with freshly imported code."""
 
-    def __init__(self, demo=False, scene=None):
+    def __init__(self, demo=False, scene=None, daemon=None):
         self.demo = demo
+        # Settings that replace the app's own daemon address and token.
+        self.daemon = dict(daemon or {})
         from demo_client import DEFAULT_SCENE
         self.scene = scene or DEFAULT_SCENE
         self.network_fail = False
@@ -161,6 +193,8 @@ class Runner(object):
     def _run(self, stop):
         try:
             main, net = render._load_app_modules(real_sleep=True)
+            for name, value in self.daemon.items():
+                setattr(main.config, name, value)
             self.code_revision = main.__presto_revision__
             from ui import Palette, draw_boot
             display = Framebuffer()
@@ -565,12 +599,24 @@ def main_cli(argv=None):
     parser.add_argument("--demo", action="store_true",
                         help="start with Demo on: the scripted sample data, no daemon")
     parser.add_argument("--port", type=int, default=8790)
+    parser.add_argument("--config", metavar="PATH",
+                        help="a daemon configuration (dash.toml): poll that daemon's address "
+                             "and token instead of the ones in presto/config.py")
     parser.add_argument("--open", action="store_true", help="open the page in the default browser")
     parser.add_argument("--open-first", action="append", default=[], metavar="URL",
                         help="with --open, open this URL first, once its port accepts "
                              "connections (repeatable); the preview opens last, in front")
     args = parser.parse_args(argv)
-    runner = Runner(demo=args.demo)
+    daemon = None
+    if args.config:
+        daemon, note = daemon_settings(args.config)
+        if daemon:
+            print("Presto live preview polls the daemon at %s:%d (from %s)"
+                  % (daemon["DAEMON_HOST"], daemon["DAEMON_PORT"],
+                     os.path.basename(args.config)), flush=True)
+        if note:
+            print("Presto live preview: " + note, flush=True)
+    runner = Runner(demo=args.demo, daemon=daemon)
     runner.restart()
     threading.Thread(target=watch, args=(runner,), daemon=True).start()
     # Loopback only: the live dash shows account names and quotas.

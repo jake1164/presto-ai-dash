@@ -573,17 +573,71 @@ they reach the install prompt (several had been passing only because a prompt
 mismatch is reported as a generic failure).
 
 **Looked at in a browser** (a throwaway daemon with its own config and disposable
-tokens, never `dash.toml`): ticked by default; unticking shows a red panel with an
-uppercase **WI-FI IS REQUIRED** heading and turns the label red; re-ticking clears
+tokens, never `dash.toml`): ticked by default; unticking shows a warning panel (first
+red and uppercase, then softened to the page's amber on the user's feedback that it was
+too harsh) headed **Wi-Fi is needed** and highlights the label; re-ticking clears
 both; *Prepare download* sent `wifi: false`, the page said "Wi-Fi is not being
 set", and decrypting the resulting handoff with its own unlock code showed
 `keep`. No device was involved in this change.
+
+### One process for every case: the setup script on an over-the-air Presto
+
+**Direction.** After the CLI commands were built, the user's point was that a
+Docker user has only the admin page and its two downloads, so first setup,
+re-initialising, changing the Wi-Fi and moving a Presto to another daemon must
+all be the same page-and-script flow, with the script working out what the Presto
+needs. The CLI stays as a developer route.
+
+**Built.** `presto_setup.py` no longer refuses a Presto on the bootstrap and A/B
+layout. It detects it, says so, hard-resets the board to the stock launcher before
+any prompt (a running slot app's watchdog would otherwise reset the board in the
+middle of the session), changes only the settings the page asked for, never touches
+the app files or slots, and starts the app through whichever layout is present.
+The page's note and the setup guide describe one process for every case.
+
+**Two defects found by running it on COM3.**
+
+1. *Taking the board over too soon.* Reconnecting one second after a hard reset
+   interrupted the stock launcher while it was still starting, and from then on a
+   plain Wi-Fi join stuck at status 1 until the next hard reset. A controlled
+   comparison showed the in-process session failing and the CLI session (which
+   waits for a readiness probe) joining in 9 s. The script now leaves the board
+   alone for 8 s after the reset. This also explains most of the "weak signal"
+   failures seen earlier in the day; the signal is weak, but the poisoned radio was
+   a larger cause than it.
+2. *A stale module in the reach check.* The script reads the old settings with
+   `import config` in the same MicroPython session, so the reach check's own
+   `import config` returned the cached old module and tested the **old** daemon
+   address. This predates this work and affects any flow that replaces the daemon
+   settings. The check now drops the cached `config` and `secrets` first.
+
+The reach check also gained the radio-cycling join (six attempts), bounded socket
+waits and a 180 s USB timeout.
+
+**Measured on COM3** (device-side backup of `config.py`, digests only, original
+`00ffb69feeb7` restored after every run):
+
+| Step | Result |
+| --- | --- |
+| Script, settings-only, daemon address replaced, Wi-Fi kept | Exit 0 in 19 s; the check reached the isolated daemon (1 request); the relaunched app polled it 3 times; the handoff was removed; no legacy launcher or app files appeared; every app and slot file untouched |
+| Same run before the two fixes | The check reported "could not join the Wi-Fi", or reached the old address; the app made no polls |
+| App followed on its own serial output after a hard reset, against an isolated daemon running this branch's code | `AI Dash: clock set from daemon`, then 5 polls |
+
+The last row is the cold-boot clock check, reached by a hard reset (which restores
+the 2021 clock) rather than by pulling the cable.
+
+**Not covered.** A single-folder (legacy) Presto and a blank Presto were not
+available, so those paths are covered by unit tests only. The unticked-Wi-Fi case
+was exercised on hardware; the ticked case (asking for the password) by tests only.
+A literal unplug and replug through the user's own daemon is still the user's test.
 
 ### Gates still open
 - Cold power cycle through the whole app against the user's own daemon, once it
   runs this change (the clock source itself is built and measured above). It
   can be done without touching the server: run this tree's daemon locally,
   `set-daemon` the Presto to it, unplug and replug, then `set-daemon` back.
+  A hard reset followed by the app against a daemon running this code was
+  already observed to set the clock and poll (see above).
 - Real GHCR/PyPI release progression and supported-profile scope.
 - Optional: a cut inside the journal's rename sequence and at the warm-reset
   boundary, if a finer physical test is wanted.

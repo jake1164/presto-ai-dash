@@ -60,16 +60,22 @@ default).
 ticked: without a Wi-Fi network the Presto cannot reach the daemon, show
 anything or be updated. Untick it only for a Presto that already joins your
 network (it was set up before, or another Pimoroni app uses it). The page then
-shows a red **Wi-Fi is required** warning, and the setup script keeps the
+shows an amber **Wi-Fi is needed** note, and the setup script keeps the
 Wi-Fi already on the Presto and never asks for a password. If the Presto turns
 out to have none, the script stops before writing anything and tells you to
 prepare the download again with the box ticked.
 
-Press **Prepare download**. The page then shows:
+Press **Prepare download**. The button goes away, your browser downloads both
+files by itself, and the page shows:
 
 - a **setup unlock code** with a **Copy** button;
-- **`presto_setup.py`**, the standalone installer with this build's app files;
-- **`presto-setup.enc`**, the encrypted configuration for this handoff.
+- links to **`presto_setup.py`**, the standalone installer with this build's
+  app files, and **`presto-setup.enc`**, the encrypted configuration for this
+  handoff, in case your browser blocked one. A browser may ask once whether to
+  allow several downloads: allow it.
+
+To prepare another download, for example with different settings, press
+**Prepare another download**.
 
 The code is deliberately **not** inside either file. It is shown once; if you
 lose it, prepare a new download. The encrypted file holds the daemon address,

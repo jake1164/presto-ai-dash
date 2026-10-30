@@ -101,6 +101,10 @@ LAUNCH_AUTO = (
 # USB stopping it; a hard reset lands on the stock launcher, which arms none.
 RESET_CODE = "import machine; machine.reset()"
 RECONNECT_ATTEMPTS = 30
+# After a hard reset the stock launcher is still starting up, radio included.
+# Taking the board over before it has finished leaves the radio unable to join a
+# network until the next hard reset, so the board is left alone for this long.
+RESET_SETTLE_SECONDS = 8
 
 DEPENDENCY_MESSAGE = (
     "This setup script needs two Python packages on this computer, and one is\n"
@@ -141,6 +145,10 @@ print('PRESTO_SETUP:' + json.dumps(state))
 REACH_CODE = r'''
 import sys, json
 sys.path.insert(0, '/ai_dash_files')
+# This runs in the session that already imported the old settings to read the
+# device identifier. Without this, the check would test the old daemon address.
+for name in ('config', 'secrets'):
+    sys.modules.pop(name, None)
 result = 'error'
 try:
     import config
@@ -453,6 +461,7 @@ class MpremoteDevice:
         except Exception:
             pass  # The port can vanish before the command has returned.
         self.close()
+        time.sleep(RESET_SETTLE_SECONDS)
         for _attempt in range(RECONNECT_ATTEMPTS):
             time.sleep(1)
             try:

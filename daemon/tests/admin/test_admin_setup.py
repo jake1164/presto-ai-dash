@@ -140,6 +140,14 @@ class SetupPageTextTests(unittest.TestCase):
         self.assertIn('id="setup-actions"', page)
         self.assertIn('id="prepare-another-setup"', page)
 
+    def test_prepare_another_makes_the_next_download_in_one_click(self):
+        # It used to only reveal the form again, so the second download took two clicks.
+        folder = Path(device_setup.__file__).parent / "web"
+        script = (folder / "admin.js").read_text(encoding="utf-8")
+        body = script[script.index("async function prepareAnotherSetup"):]
+        body = body[:body.index("\n  }\n")]
+        self.assertIn("await preparePrestoSetup()", body)
+
 
 class SetupDownloadTests(SetupServerBase):
     def prepare(self):

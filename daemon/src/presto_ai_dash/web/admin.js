@@ -504,6 +504,7 @@
       data.wifi = element("setup-wifi").checked;
       const result = await request("/api/admin/presto-setup", "POST", data);
       setupPrepared = result;
+      element("copy-setup-code").textContent = "Copy";
       element("setup-unlock-code").textContent = result.unlock_code;
       element("download-setup-script").href = result.downloads.script;
       element("download-setup-handoff").href = result.downloads.handoff;
@@ -543,15 +544,10 @@
     });
   }
 
-  function prepareAnotherSetup() {
-    setupPrepared = null;
-    element("copy-setup-code").textContent = "Copy";
-    element("setup-downloads").hidden = true; element("setup-unlock-code").textContent = "";
-    for (const id of ["download-setup-script", "download-setup-handoff"]) {
-      element(id).removeAttribute("href");
-    }
-    element("setup-actions").hidden = false;
-    element("prepare-presto-setup").focus();
+  // One click makes the next download from the form as it is now (change the form
+  // first for different settings). The old result stays until the new one is ready.
+  async function prepareAnotherSetup() {
+    await preparePrestoSetup();
   }
 
   let copiedTimer = null;

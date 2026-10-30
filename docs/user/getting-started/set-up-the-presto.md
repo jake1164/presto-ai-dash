@@ -85,8 +85,9 @@ password or token, because those are in `presto-setup.enc`, which only the
 unlock code opens. Keep it only if you pressed **Prepare download** a moment
 ago; if you did not, delete it.
 
-To prepare another download, for example with different settings, press
-**Prepare another download**.
+To prepare another download, press **Prepare another download**. It uses the
+settings in the form above it, so change them there first if you want
+different ones. The new unlock code replaces the old one.
 
 The code is deliberately **not** inside either file. It is shown once; if you
 lose it, prepare a new download. The encrypted file holds the daemon address,

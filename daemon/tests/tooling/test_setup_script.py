@@ -942,6 +942,10 @@ class PrivateEnvironmentTests(ScriptCase):
         self.assertEqual(status, 0)
         self.assertEqual(len(asked), 1)
         self.assertIn("private, temporary environment", asked[0])
+        # The internet is needed to install, so it is said before the question, not after.
+        self.assertIn("internet", said[0])
+        self.assertIn("needs to be online", self.module.MISSING_PACKAGES_MESSAGE)
+        self.assertNotIn("internet", "\n".join(said[1:]))
         venv, pip = run.call_args_list[0].args[0], run.call_args_list[1].args[0]
         self.assertEqual(venv[1:], ["-m", "venv", self.env_folder])
         self.assertEqual(pip[1:4], ["-m", "pip", "install"])

@@ -599,6 +599,42 @@ class FlashWindowTests(SlotStagingTests):
         self.assertEqual(len(NativeDisplay.made), 2)
 
 
+class LegacyStartTests(SlotAppBase):
+    """A legacy install counts its boots with the display stopped.
+
+    Measured on the device: with the display driver running, the first flash write
+    never returns, and the screen stayed on "Starting..." for good.
+    """
+
+    def test_the_boot_counter_is_written_with_the_display_stopped(self):
+        NativeDisplay.live, NativeDisplay.made = [], []
+        self.device.presto = NativeDisplay()
+        self.device.buffer = None
+        seen = []
+
+        def bump(file=None):
+            seen.append(list(NativeDisplay.live))
+            return 7
+
+        self.module.BOOT_CONTEXT = None
+        with patch.object(self.module.lifecycle, "bump_boot", side_effect=bump):
+            app = self.module.App(self.device)
+        self.assertEqual(seen, [[]])
+        self.assertEqual(app.boot, 7)
+        # The display is running again afterwards, and the screen is redrawn.
+        self.assertEqual(len(NativeDisplay.live), 1)
+        self.assertEqual(app._flash_depth, 0)
+        self.assertTrue(app._needs_redraw)
+
+    def test_without_a_device_identity_nothing_is_written(self):
+        self.module.BOOT_CONTEXT = None
+        with patch.object(self.module, "current_device_id", return_value=None), \
+                patch.object(self.module.lifecycle, "bump_boot") as bump:
+            app = self.module.App(self.device)
+        bump.assert_not_called()
+        self.assertEqual(app.boot, 1)
+
+
 class ClockCarryTests(unittest.TestCase):
     """The RTC restarts at 2021 on every reset; the app's own restart carries it."""
 

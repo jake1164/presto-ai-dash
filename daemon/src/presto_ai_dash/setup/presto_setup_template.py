@@ -139,7 +139,8 @@ MISSING_PACKAGES_MESSAGE = (
     "This script needs two Python packages that are not installed on this computer:\n"
     "cryptography, to open the setup file, and mpremote, to talk to the Presto over\n"
     "USB. It can install them into a private, temporary environment that is deleted\n"
-    "when it finishes. Nothing else on this computer changes.")
+    "when it finishes. Nothing else on this computer changes. Installing them\n"
+    "downloads from the internet, so this computer needs to be online.")
 
 PROBE_CODE = r'''
 import os, sys, json
@@ -1227,8 +1228,7 @@ def run_in_private_environment(argv, ask, say):
         raise SetupStopped(DEPENDENCY_MESSAGE)
     folder = tempfile.mkdtemp(prefix="presto-setup-env-")
     try:
-        say("Creating the environment and installing the packages (this needs the "
-            "internet)...")
+        say("Creating the environment and installing the packages...")
         python = private_environment_python(folder)
         try:
             subprocess.run([sys.executable, "-m", "venv", folder], check=True,

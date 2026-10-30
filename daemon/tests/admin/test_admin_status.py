@@ -323,6 +323,17 @@ class ClientsTableLayoutTests(unittest.TestCase):
         css = (self.folder() / "admin.css").read_text(encoding="utf-8")
         self.assertRegex(css, r"\.grid\.compact\.clients td:last-child\s*\{\s*white-space:\s*nowrap")
 
+    def test_the_open_tab_is_loaded_again_once_sign_in_has_finished(self):
+        # Unlocking opens the tab while sign-in still holds ``busy``, which makes the
+        # first status load return early; without this the tab sat empty for ten seconds.
+        script = (self.folder() / "admin.js").read_text(encoding="utf-8")
+        self.assertIn("function loadOpenTab", script)
+        self.assertEqual(script.count("    loadOpenTab();"), 2)
+        for start in ("element(\"login-form\").addEventListener", "async function restoreLogin"):
+            block = script[script.index(start):]
+            block = block[:block.index("loadOpenTab();") + 20]
+            self.assertLess(block.index("busy = false"), block.index("loadOpenTab();"))
+
     def test_an_older_daemon_that_sends_no_events_does_not_break_the_table(self):
         # The page script and the daemon are separate files: a newer page can meet an
         # older daemon, and a missing list means "none recorded", never a crash.

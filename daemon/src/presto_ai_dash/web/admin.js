@@ -369,6 +369,11 @@
     if (tab === "status") refreshStatus();
     if (tab === "settings") { refreshConfig(); loadAlerts(); loadPrestoSetup(); }
   }
+  // Unlocking opens a tab while the sign-in still holds ``busy``, so that tab's first
+  // load is skipped. Load it again once the sign-in has finished.
+  function loadOpenTab() {
+    if (unlocked) showTab(activeTab, false);
+  }
   function moveTabFocus(from, step) {
     const index = TABS.indexOf(from);
     let next = index + step;
@@ -2320,6 +2325,7 @@
       await unlock();
     } catch (error) { lock(); message(error.message, true); }
     finally { busy = false; element("unlock").disabled = false; }
+    loadOpenTab();
   });
   element("logout").addEventListener("click", async () => {
     if (busy) return;
@@ -2466,6 +2472,7 @@
       message(error.status === 401 ? "Enter the admin token shown at startup." : error.message,
         error.status !== 401);
     } finally { busy = false; element("unlock").disabled = false; }
+    loadOpenTab();
   }
   restoreLogin();
   mountHelp();

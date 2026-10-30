@@ -300,8 +300,14 @@ class App(object):
                 # dashboard: the daemon then just sees an ordinary revision.
                 self._activation = None
         else:
-            self.boot = (lifecycle.bump_boot(getattr(config, "BOOT_COUNTER_FILE", None))
-                         if self.device_id else 1)
+            # The counter is a flash write, and Presto() has already started the
+            # display driver. Without the window that first write never returns
+            # and the screen stays on "Starting..." (see _FlashWindow).
+            if self.device_id:
+                with _FlashWindow(self):
+                    self.boot = lifecycle.bump_boot(getattr(config, "BOOT_COUNTER_FILE", None))
+            else:
+                self.boot = 1
         self.client.lifecycle_provider = self._lifecycle_headers
         # A board with no clock battery restarts at 2021; the daemon proves the
         # real time with a nonce, and only while the clock is unusable.

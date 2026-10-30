@@ -80,6 +80,9 @@ def slot_sync(port, bundle, maintain_bootstrap=False):
 
 
 def main(argv=None):
+    arguments = sys.argv[1:] if argv is None else list(argv)
+    if arguments[:1] in (["set-daemon"], ["set-wifi"]):
+        return _engine.main(arguments[0], arguments[1:], receipt=RECEIPT)
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("action", choices=("plan", "check", "sync", "migrate"))

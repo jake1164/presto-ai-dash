@@ -431,7 +431,11 @@
     element("setup-unavailable").hidden = !(setupState && !available);
     element("setup-temporary-token").hidden = !setupState?.token_temporary;
     element("prepare-presto-setup").disabled = !available;
-    for (const id of ["setup-host", "setup-port", "setup-name"]) element(id).disabled = !available;
+    for (const id of ["setup-host", "setup-port", "setup-name", "setup-wifi"]) element(id).disabled = !available;
+    // Unticking the box must be impossible to miss: Wi-Fi is what makes the Presto work.
+    const wifiOn = element("setup-wifi").checked;
+    element("setup-wifi-warning").hidden = wifiOn;
+    element("setup-wifi-label").classList.toggle("wifi-off", !wifiOn);
     if (!setupState?.daemon) return;
     if (!element("setup-host").value) element("setup-host").value = setupState.daemon.host || "";
     if (!element("setup-port").value) element("setup-port").value = String(setupState.daemon.port || 8787);
@@ -448,6 +452,7 @@
       const data = { host: element("setup-host").value.trim(), port: Number(element("setup-port").value) };
       const name = element("setup-name").value.trim();
       if (name) data.name = name;
+      data.wifi = element("setup-wifi").checked;
       const result = await request("/api/admin/presto-setup", "POST", data);
       setupPrepared = result;
       element("setup-unlock-code").textContent = result.unlock_code;
@@ -455,7 +460,9 @@
       element("download-setup-handoff").href = result.downloads.handoff;
       element("setup-summary").textContent = "Presto AI Dash " + result.release
         + ", app revision " + result.label + ", for daemon " + result.daemon.host
-        + ":" + result.daemon.port + ".";
+        + ":" + result.daemon.port + "."
+        + (result.wifi ? " The setup script will ask for the Wi-Fi network and password."
+                       : " Wi-Fi is not being set: the Presto must already have Wi-Fi settings.");
       element("setup-downloads").hidden = false;
       message("Setup download ready. Copy the unlock code now: it is shown once.");
     } catch (error) { message(error.message, true); }
@@ -2111,6 +2118,8 @@
     setupState = null; setupPrepared = null;
     element("setup-downloads").hidden = true; element("setup-unlock-code").textContent = "";
     element("setup-host").value = ""; element("setup-name").value = "";
+    element("setup-wifi").checked = true; element("setup-wifi-warning").hidden = true;
+    element("setup-wifi-label").classList.remove("wifi-off");
     for (const id of ["download-setup-script", "download-setup-handoff"]) {
       element(id).removeAttribute("href");
     }
@@ -2231,6 +2240,7 @@
   element("demo-callout-button").addEventListener("click", () => setDemoEnabled(true));
   element("demo-banner-off").addEventListener("click", () => setDemoEnabled(false));
   element("prepare-presto-setup").addEventListener("click", preparePrestoSetup);
+  element("setup-wifi").addEventListener("change", renderPrestoSetup);
   element("copy-setup-code").addEventListener("click", copySetupCode);
   element("overflow-rows").addEventListener("change", async () => {
     if (busy) { renderDisplay(); return; }

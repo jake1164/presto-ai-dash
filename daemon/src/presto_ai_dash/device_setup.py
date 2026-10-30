@@ -277,8 +277,10 @@ def validate_payload(payload):
             not token.isascii() or any(char.isspace() for char in token)):
         raise SetupError("The setup configuration's device token is not usable.")
     device = payload["device"]
-    if not isinstance(device, dict) or set(device) != {"name", "settings"}:
+    if not isinstance(device, dict) or set(device) != {"name", "settings", "wifi"}:
         raise SetupError("The setup configuration does not have the expected shape.")
+    if device["wifi"] not in ("set", "keep"):
+        raise SetupError("The setup configuration's Wi-Fi choice is not usable.")
     if not isinstance(device["name"], str) or not _DEVICE_NAME.match(device["name"]):
         raise SetupError("The setup configuration's device name is not usable.")
     settings = device["settings"]
@@ -307,12 +309,13 @@ def validate_payload(payload):
 
 
 def build_payload(snapshot, host, port, token, device_name, release, settings=None,
-                  now=None):
+                  now=None, wifi="set"):
     """The configuration one handoff carries for one running daemon build.
 
     ``snapshot`` is the daemon's verified public app bundle. The shared device
     token is included; the admin token never is, and there is no parameter for
-    one here on purpose.
+    one here on purpose. ``wifi`` is ``"set"`` when the setup script should collect the
+    Wi-Fi network and ``"keep"`` when the Presto must keep the one it already has.
     """
     values = dict(DEFAULT_SETTINGS)
     values.update(settings or {})
@@ -320,7 +323,7 @@ def build_payload(snapshot, host, port, token, device_name, release, settings=No
     payload = {
         "v": 1,
         "daemon": {"host": host, "port": port, "token": token},
-        "device": {"name": device_name, "settings": values},
+        "device": {"name": device_name, "settings": values, "wifi": wifi},
         "app": {"revision": snapshot["revision"],
                 "label": snapshot["revision"][:REVISION_CHARS]},
         "release": {"version": release},
@@ -458,7 +461,7 @@ class SetupService:
 
     # -- preparing a handoff ----------------------------------------------
 
-    def create(self, host, port, device_name="presto", settings=None):
+    def create(self, host, port, device_name="presto", settings=None, wifi=True):
         """A new handoff and its one-time unlock code.
 
         The code is returned once, for display in the authenticated page. It
@@ -485,8 +488,11 @@ class SetupService:
             raise SetupError("Enter the daemon's port as a number from 1 to 65535.")
         if not isinstance(device_name, str) or not _DEVICE_NAME.match(device_name):
             raise SetupError("The device name must be printable ASCII of at most 32 characters.")
+        if type(wifi) is not bool:
+            raise SetupError("Say whether the Presto's Wi-Fi should be set: true or false.")
         payload = build_payload(snapshot, host, port, self._token, device_name,
-                                self.release, settings=settings, now=self._clock())
+                                self.release, settings=settings, now=self._clock(),
+                                wifi="set" if wifi else "keep")
         code = new_unlock_code()
         envelope = build_handoff(payload, code)
         handoff_id = secrets.token_hex(16)
@@ -506,6 +512,7 @@ class SetupService:
                 "label": snapshot["revision"][:REVISION_CHARS],
                 "daemon": {"host": host, "port": port},
                 "device_name": device_name,
+                "wifi": wifi,
                 "downloads": {
                     "script": "/api/admin/presto-setup/%s/script" % handoff_id,
                     "handoff": "/api/admin/presto-setup/%s/handoff" % handoff_id},

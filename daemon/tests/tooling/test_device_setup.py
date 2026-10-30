@@ -330,6 +330,37 @@ class SetupServiceTests(unittest.TestCase):
         with self.assertRaises(device_setup.SetupError):
             self.service(token="").create("192.168.1.50", 8787)
 
+    def test_the_wifi_choice_is_carried_inside_the_sealed_handoff(self):
+        service = self.service()
+        for ticked, expected in ((True, "set"), (False, "keep")):
+            with self.subTest(ticked=ticked):
+                prepared = service.create("192.168.1.50", 8787, wifi=ticked)
+                self.assertEqual(prepared["wifi"], ticked)
+                opened = device_setup.open_handoff(service.handoff(prepared["handoff_id"]),
+                                                   prepared["unlock_code"])
+                self.assertEqual(opened["device"]["wifi"], expected)
+
+    def test_the_wifi_is_set_unless_the_admin_says_otherwise(self):
+        service = self.service()
+        prepared = service.create("192.168.1.50", 8787)
+        self.assertTrue(prepared["wifi"])
+        opened = device_setup.open_handoff(service.handoff(prepared["handoff_id"]),
+                                           prepared["unlock_code"])
+        self.assertEqual(opened["device"]["wifi"], "set")
+
+    def test_the_wifi_choice_must_be_a_real_boolean(self):
+        service = self.service()
+        for bad in ("no", "false", 0, 1, None, [], "keep"):
+            with self.subTest(value=bad), self.assertRaises(device_setup.SetupError):
+                service.create("192.168.1.50", 8787, wifi=bad)
+
+    def test_a_payload_with_an_unknown_wifi_choice_is_refused(self):
+        for bad in ("maybe", "", None, True, "SET"):
+            with self.subTest(value=bad):
+                value = payload()
+                value["device"] = dict(value["device"], wifi=bad)
+                with self.assertRaises(device_setup.SetupError):
+                    device_setup.validate_payload(value)
 
 class PackagingParityTests(unittest.TestCase):
     def test_editable_checkout_ignores_stale_staged_bundle(self):

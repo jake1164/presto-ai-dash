@@ -135,6 +135,26 @@ class SetupDownloadTests(SetupServerBase):
         self.assertEqual(body["daemon"], {"host": "192.168.1.50", "port": 8787})
         self.assertNotIn(ADMIN_TOKEN, json.dumps(body))
 
+    def test_the_wifi_checkbox_reaches_the_handoff(self):
+        for sent, expected in ((None, "set"), (True, "set"), (False, "keep")):
+            with self.subTest(sent=sent):
+                data = {"host": "192.168.1.50", "port": 8787}
+                if sent is not None:
+                    data["wifi"] = sent
+                status, _, body = self.request(SETUP_PATH, "POST", data)
+                self.assertEqual(status, 201)
+                self.assertEqual(body["wifi"], sent is not False)
+                opened = device_setup.open_handoff(self.service.handoff(body["handoff_id"]),
+                                                   body["unlock_code"])
+                self.assertEqual(opened["device"]["wifi"], expected)
+
+    def test_a_wifi_choice_that_is_not_a_boolean_is_refused(self):
+        for bad in ("no", 0, None, "keep", []):
+            with self.subTest(value=bad):
+                status, _, _ = self.request(SETUP_PATH, "POST",
+                                            {"host": "192.168.1.50", "port": 8787, "wifi": bad})
+                self.assertEqual(status, 400)
+
     def test_bad_bodies_are_refused_without_a_handoff(self):
         path = SETUP_PATH
         self.assertEqual(self.request(path, "POST", {"host": "192.168.1.5"}, raw=b"{}")[0], 400)

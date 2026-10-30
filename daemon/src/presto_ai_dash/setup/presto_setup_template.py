@@ -46,6 +46,8 @@ CONFIG_PATH = "/ai_dash_files/config.py"
 SECRETS_PATH = "/secrets.py"
 HANDOFF_NAME = "presto-setup.enc"
 REVISION_TARGET = "/ai_dash_files/revision.txt"
+# Present only on a Presto that was moved to the bootstrap and A/B app slots.
+BOOT_ENTRY = "/ai_dash_boot.py"
 
 MARKER = "PRESTO_SETUP:"
 MAX_ENVELOPE_BYTES = 8192
@@ -265,8 +267,12 @@ def validate_payload(payload):
             not token.isascii() or any(char.isspace() for char in token)):
         raise SetupStopped("The setup file's device token is not usable.")
     device = payload["device"]
-    if not isinstance(device, dict) or set(device) != {"name", "settings"}:
+    # "wifi" says whether to collect the Wi-Fi network ("set") or keep the one on
+    # the Presto ("keep"). A file prepared by an older daemon has no such key.
+    if not isinstance(device, dict) or set(device) - {"wifi"} != {"name", "settings"}:
         raise SetupStopped("The setup file's device settings are not usable.")
+    if "wifi" in device and device["wifi"] not in ("set", "keep"):
+        raise SetupStopped("The setup file's Wi-Fi choice is not usable.")
     if (not isinstance(device["name"], str) or not device["name"].isascii() or
             not 1 <= len(device["name"]) <= 32 or
             any(not " " <= char <= "~" for char in device["name"])):
@@ -670,15 +676,24 @@ def ask_settings(device, payload, requested_name, ask, say):
     """Decide what to keep; nothing is read that does not have to be."""
     config_exists = device.exists(CONFIG_PATH)
     secrets_exists = device.exists(SECRETS_PATH)
+    wifi = payload["device"].get("wifi")
+    if wifi == "keep" and not secrets_exists:
+        raise SetupStopped(NO_WIFI_MESSAGE)
     existing = config_state(device) if config_exists else {}
     replace_config = True
     if config_exists:
         say("This Presto already has /ai_dash_files/config.py.")
         replace_config = yes(ask("Replace its daemon address, token and device ID "
                                  "(the existing file is kept until the new one verifies)? [y/N] "))
-    replace_secrets = not secrets_exists
-    if secrets_exists:
-        replace_secrets = yes(ask("Replace the Wi-Fi settings in /secrets.py? [y/N] "))
+    if wifi == "set":
+        replace_secrets = True
+    elif wifi == "keep":
+        replace_secrets = False
+    else:
+        # A setup file from an older daemon does not say, so ask as before.
+        replace_secrets = not secrets_exists
+        if secrets_exists:
+            replace_secrets = yes(ask("Replace the Wi-Fi settings in /secrets.py? [y/N] "))
     ssid = password = None
     if replace_secrets:
         ssid = ask("Wi-Fi network name (SSID, 2.4 GHz): ").strip()
@@ -820,6 +835,8 @@ def run(arguments, device_factory, ask, say):
     completed = False
     try:
         machine = probe_board(device)
+        if device.exists(BOOT_ENTRY):
+            raise SetupStopped(SLOT_DEVICE_MESSAGE)
         plan = ask_settings(device, payload, arguments.name, ask, say)
         preview(payload, plan, port, machine, say)
         if not yes(ask("Type yes to install: ")):
@@ -839,6 +856,23 @@ def run(arguments, device_factory, ask, say):
         device.close()
         if wrote and not completed:
             say("The encrypted setup file was kept, so you can run this script again.")
+
+
+NO_WIFI_MESSAGE = (
+    "The admin page was set not to change the Wi-Fi, but this Presto has no Wi-Fi "
+    "settings (/secrets.py), and it cannot reach the daemon without a network. Nothing "
+    "was written. Prepare the download again with 'Set the Wi-Fi network on the "
+    "Presto' ticked.")
+
+
+SLOT_DEVICE_MESSAGE = (
+    "This Presto already uses the bootstrap and A/B app slots, which this setup script "
+    "does not manage: it would install a second, older copy of the app beside them. "
+    "Nothing was written. To point it at a different daemon, run: presto-ai-dash "
+    "set-daemon --port <port> --daemon-host <daemon address>. To change its Wi-Fi "
+    "network, run: presto-ai-dash set-wifi --port <port> --ssid <network name>. To "
+    "update the app, use Sync Presto (tools/presto_device.py sync) or an "
+    "over-the-air update.")
 
 
 def reach_message(reach):

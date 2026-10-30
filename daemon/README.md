@@ -35,6 +35,12 @@ pipx install --force "presto-ai-dash[device]"
 presto-ai-dash install-presto --port COM3
 ```
 
+If the daemon moves to another address, point the Presto at it with
+`presto-ai-dash set-daemon --port COM3 --daemon-host 192.168.1.50`. It checks
+that the Presto can reach the new daemon and puts the old settings back if it
+cannot. If the Wi-Fi changes, `presto-ai-dash set-wifi --port COM3 --ssid <name>`
+does the same for the network.
+
 Prefer a container? See the
 [Docker guide](https://jake1164.github.io/presto-ai-dash/getting-started/install-with-docker/).
 

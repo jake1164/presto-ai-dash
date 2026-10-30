@@ -565,7 +565,7 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
             except (ValueError, UnicodeError, RecursionError):
                 self._send(400, {"error": "invalid JSON"})
                 return
-            if (not isinstance(data, dict) or set(data) - {"host", "port", "name"} or
+            if (not isinstance(data, dict) or set(data) - {"host", "port", "name", "wifi"} or
                     not {"host", "port"} <= set(data)):
                 self._send(400, {"error": "send the daemon host and port"})
                 return
@@ -574,7 +574,8 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
                 return
             try:
                 result = setup.create(data["host"], data["port"],
-                                      device_name=data.get("name", "presto"))
+                                      device_name=data.get("name", "presto"),
+                                      wifi=data.get("wifi", True))
             except SetupUnavailable as exc:
                 self._send(409, {"error": str(exc)})
                 return

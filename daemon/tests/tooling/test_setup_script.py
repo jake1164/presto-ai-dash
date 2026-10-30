@@ -141,8 +141,9 @@ class ScriptCase(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.folder = Path(self.temp.name)
 
-    def handoff(self, code, bundle=BUNDLE, host="192.168.1.50"):
-        payload = device_setup.build_payload(bundle, host, 8787, TOKEN, "presto", "0.50.0")
+    def handoff(self, code, bundle=BUNDLE, host="192.168.1.50", wifi="set"):
+        payload = device_setup.build_payload(bundle, host, 8787, TOKEN, "presto", "0.50.0",
+                                             wifi=wifi)
         path = self.folder / device_setup.HANDOFF_NAME
         path.write_bytes(device_setup.build_handoff(payload, code))
         return path
@@ -280,12 +281,21 @@ class PayloadValidationTests(unittest.TestCase):
             "label": lambda value: value["app"].update(label="0" * 12),
             "extra": lambda value: value.update(extra=1),
             "version": lambda value: value.update(v=2),
+            "wifi choice": lambda value: value["device"].update(wifi="maybe"),
+            "wifi choice type": lambda value: value["device"].update(wifi=True),
         }
         for name, change in cases.items():
             value = json.loads(json.dumps(good))
             change(value)
             with self.subTest(name=name), self.assertRaises(module.SetupStopped):
                 module.open_handoff(self.sealed(module, value, code), code)
+        for choice in ("set", "keep"):
+            value = json.loads(json.dumps(good))
+            value["device"]["wifi"] = choice
+            self.assertEqual(module.open_handoff(self.sealed(module, value, code), code), value)
+        legacy = json.loads(json.dumps(good))
+        del legacy["device"]["wifi"]
+        self.assertEqual(module.open_handoff(self.sealed(module, legacy, code), code), legacy)
 
 
 class BoardAndPortTests(ScriptCase):
@@ -337,10 +347,10 @@ class BoardAndPortTests(ScriptCase):
 class PreservationTests(ScriptCase):
     def test_existing_private_settings_are_kept_unless_explicitly_replaced(self):
         code = device_setup.new_unlock_code()
-        path = self.handoff(code)
+        path = self.handoff(code, wifi="keep")
         device = FakeDevice(existing_install(), device_id="a" * 32, name="old-name")
         before = dict(device.files)
-        status, said = self.run_script(path, [code, "1", "n", "n", "yes"], device)
+        status, said = self.run_script(path, [code, "1", "n", "yes"], device)
         self.assertEqual(status, 0, said)
         self.assertEqual(device.files[CONFIG], before[CONFIG])
         self.assertEqual(device.files[SECRETS], before[SECRETS])
@@ -352,15 +362,91 @@ class PreservationTests(ScriptCase):
 
     def test_replacing_configuration_keeps_the_existing_device_identifier(self):
         code = device_setup.new_unlock_code()
-        path = self.handoff(code)
+        path = self.handoff(code, wifi="keep")
         device = FakeDevice(existing_install(), device_id="b" * 32, name="old-name")
-        status, said = self.run_script(path, [code, "1", "y", "n", "yes"], device)
+        status, said = self.run_script(path, [code, "1", "y", "yes"], device)
         self.assertEqual(status, 0, said)
         written = device.files[CONFIG].decode("ascii")
         self.assertIn("DEVICE_ID = '%s'" % ("b" * 32), written)
         self.assertIn("DEVICE_NAME = 'old-name'", written)
         self.assertIn("DAEMON_HOST = '192.168.1.50'", written)
         self.assertEqual(device.files[SECRETS], existing_install()[SECRETS])
+
+    def test_keeping_the_wifi_asks_nothing_and_leaves_the_file_alone(self):
+        code = device_setup.new_unlock_code()
+        path = self.handoff(code, wifi="keep")
+        device = FakeDevice(existing_install(), device_id="a" * 32, name="old-name")
+        before = dict(device.files)
+        status, said = self.run_script(path, [code, "1", "n", "yes"], device)
+        self.assertEqual(status, 0, said)
+        self.assertEqual(device.files[SECRETS], before[SECRETS])
+        blob = "\n".join(said)
+        self.assertNotIn("Wi-Fi network name", blob)
+        self.assertNotIn("Replace the Wi-Fi settings", blob)
+        self.assertIn("/secrets.py: keep the existing file", blob)
+
+    def test_keeping_the_wifi_on_a_presto_that_has_none_stops_before_writing(self):
+        code = device_setup.new_unlock_code()
+        path = self.handoff(code, wifi="keep")
+        files = existing_install()
+        del files[SECRETS]
+        device = FakeDevice(files, device_id="a" * 32, name="old-name")
+        before = dict(device.files)
+        status, said = self.run_script(path, [code, "1"], device)
+        self.assertEqual(status, 1)
+        self.assertEqual(device.files, before)
+        self.assertEqual(device.writes, [])
+        self.assertFalse(device.launched)
+        self.assertTrue(path.exists(), "the handoff is kept for the corrected download")
+        blob = "\n".join(said)
+        self.assertIn("has no Wi-Fi settings", blob)
+        self.assertIn("ticked", blob)
+
+    def test_setting_the_wifi_always_asks_even_when_a_file_exists(self):
+        code = device_setup.new_unlock_code()
+        path = self.handoff(code, wifi="set")
+        device = FakeDevice(existing_install(), device_id="a" * 32, name="old-name")
+        status, said = self.run_script(path, [code, "1", "n", "Office 2G", "new-wifi-pass", "yes"],
+                                       device)
+        self.assertEqual(status, 0, said)
+        written = device.files[SECRETS].decode("ascii")
+        self.assertIn("WIFI_SSID = 'Office 2G'", written)
+        self.assertIn("WIFI_PASSWORD = 'new-wifi-pass'", written)
+        self.assertNotIn("Replace the Wi-Fi settings", "\n".join(said))
+        self.assert_no_secret(said, "new-wifi-pass")
+
+    def test_a_setup_file_from_an_older_daemon_still_asks_as_before(self):
+        # Same app revision, so the script accepts it, but it has no Wi-Fi choice.
+        code = device_setup.new_unlock_code()
+        payload = device_setup.build_payload(BUNDLE, "192.168.1.50", 8787, TOKEN, "presto", "0.50.0")
+        del payload["device"]["wifi"]
+        with unittest.mock.patch.object(device_setup, "validate_payload", side_effect=lambda value: value):
+            data = device_setup.build_handoff(payload, code)
+        path = self.folder / device_setup.HANDOFF_NAME
+        path.write_bytes(data)
+        device = FakeDevice(existing_install(), device_id="a" * 32, name="old-name")
+        status, said = self.run_script(path, [code, "1", "n", "n", "yes"], device)
+        self.assertEqual(status, 0, said)
+        self.assertTrue(any("Replace the Wi-Fi settings" in text for text in said))
+
+    def test_a_slot_device_is_refused_before_anything_is_written(self):
+        # Setup installs the single-folder app; on a bootstrap device that would
+        # leave a second, older copy beside the slots.
+        code = device_setup.new_unlock_code()
+        path = self.handoff(code)
+        files = existing_install()
+        files["/ai_dash_boot.py"] = b"bootstrap"
+        device = FakeDevice(files, device_id="a" * 32, name="old-name")
+        before = dict(device.files)
+        status, said = self.run_script(path, [code, "1"], device)
+        self.assertEqual(status, 1)
+        self.assertEqual(device.files, before)
+        self.assertEqual(device.writes, [])
+        self.assertFalse(device.launched)
+        self.assertTrue(path.exists(), "the handoff is kept")
+        blob = "\n".join(said)
+        self.assertIn("set-daemon", blob)
+        self.assertIn("A/B app slots", blob)
 
     def test_an_unrelated_file_on_a_fresh_device_is_left_alone(self):
         code = device_setup.new_unlock_code()
@@ -374,11 +460,12 @@ class PreservationTests(ScriptCase):
 class FailureAndRetryTests(ScriptCase):
     def test_an_interrupted_transfer_rolls_back_and_keeps_the_handoff(self):
         code = device_setup.new_unlock_code()
-        path = self.handoff(code)
+        path = self.handoff(code, wifi="keep")
         device = FakeDevice(existing_install(), device_id="a" * 32, name="x",
                             fail_write="/ai_dash_files/ui.py.presto-new")
         before = dict(device.files)
-        status, said = self.run_script(path, [code, "1", "n", "n", "yes"], device)
+        status, said = self.run_script(path, [code, "1", "n", "yes"], device)
+        self.assertTrue(any("Type yes to install" in text for text in said), said)
         self.assertEqual(status, 1)
         for target, data in before.items():
             self.assertEqual(device.files.get(target), data)
@@ -387,11 +474,12 @@ class FailureAndRetryTests(ScriptCase):
 
     def test_a_corrupt_arrival_never_replaces_the_installed_app(self):
         code = device_setup.new_unlock_code()
-        path = self.handoff(code)
+        path = self.handoff(code, wifi="keep")
         device = FakeDevice(existing_install(), device_id="a" * 32, name="x",
                             corrupt={"/ai_dash_files/cards.py.presto-new"})
         before = dict(device.files)
-        status, said = self.run_script(path, [code, "1", "n", "n", "yes"], device)
+        status, said = self.run_script(path, [code, "1", "n", "yes"], device)
+        self.assertTrue(any("Type yes to install" in text for text in said), said)
         self.assertEqual(status, 1)
         for target in BUNDLE["files"]:
             self.assertEqual(device.files[target], before[target])
@@ -399,11 +487,12 @@ class FailureAndRetryTests(ScriptCase):
 
     def test_a_failed_commit_restores_every_file_it_moved(self):
         code = device_setup.new_unlock_code()
-        path = self.handoff(code)
+        path = self.handoff(code, wifi="keep")
         device = FakeDevice(existing_install(), device_id="a" * 32, name="x",
                             fail_rename="/ai_dash_files/cards.py")
         before = dict(device.files)
-        status, said = self.run_script(path, [code, "1", "n", "n", "yes"], device)
+        status, said = self.run_script(path, [code, "1", "n", "yes"], device)
+        self.assertTrue(any("Type yes to install" in text for text in said), said)
         self.assertEqual(status, 1)
         for target in BUNDLE["files"]:
             self.assertEqual(device.files[target], before[target])
@@ -411,11 +500,11 @@ class FailureAndRetryTests(ScriptCase):
 
     def test_the_same_download_finishes_a_retry_and_leaves_no_staging_files(self):
         code = device_setup.new_unlock_code()
-        path = self.handoff(code)
+        path = self.handoff(code, wifi="keep")
         device = FakeDevice(existing_install(), device_id="a" * 32, name="x")
         device.files["/ai_dash_files/ui.py.presto-new"] = b"left behind"
         device.files["/ai_dash_files/home.py.presto-prev"] = b"left behind"
-        status, said = self.run_script(path, [code, "1", "n", "n", "yes"], device)
+        status, said = self.run_script(path, [code, "1", "n", "yes"], device)
         self.assertEqual(status, 0, said)
         leftovers = [path for path in device.files
                      if path.endswith((".presto-new", ".presto-prev"))]

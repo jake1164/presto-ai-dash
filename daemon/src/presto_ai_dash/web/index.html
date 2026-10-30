@@ -174,6 +174,17 @@
           <label for="setup-name">Name this Presto reports (optional)</label>
           <input id="setup-name" maxlength="32" autocomplete="off" spellcheck="false"
                  placeholder="presto">
+          <label class="check" id="setup-wifi-label"><input id="setup-wifi" type="checkbox" checked>
+            Set the Wi-Fi network on the Presto</label>
+          <p class="note" id="setup-wifi-note">The setup script asks for the network name and
+            password on the USB computer. The Wi-Fi password is never typed into this page.</p>
+          <div id="setup-wifi-warning" class="wifi-required" role="alert" hidden>
+            <strong>Wi-Fi is required</strong>
+            <span>The Presto cannot reach this daemon, show anything or be updated without a
+              Wi-Fi network. Leave this box ticked unless this Presto already joins your network.
+              With it unticked, the setup script keeps the Wi-Fi already on the Presto, and stops
+              without writing anything if there is none.</span>
+          </div>
           <div class="actions">
             <button type="button" id="prepare-presto-setup">Prepare download</button>
           </div>

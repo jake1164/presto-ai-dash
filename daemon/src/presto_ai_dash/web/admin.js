@@ -30,6 +30,8 @@
   let busy = false;
   let dragging = null;
   let ingestState = null, tokenReveal = null, displayState = null, demoState = null;
+  // What the Set up a Presto section may offer for this daemon build.
+  let setupState = null, setupPrepared = null;
   let demoReadVersion = 0;
   let alertsState = null;
   // The master switch: alerts on or off for every service. It is kept apart
@@ -68,6 +70,7 @@
     "status": {page: "guides/admin-page.md", anchor: "status"},
     "settings-panel": {page: "guides/admin-page.md", anchor: "settings"},
     "home-display": {page: "guides/home-display.md", anchor: "the-setting"},
+    "set-up-presto": {page: "getting-started/set-up-the-presto.md", anchor: "the-guided-setup"},
     "remote-reports": {page: "concepts/remote-reports.md", anchor: "turning-it-on"},
     "demo-mode": {page: "guides/admin-page.md", anchor: "demo-mode"},
     "remote-token": {page: "guides/remote-collectors.md", anchor: "rotating-and-revoking"},
@@ -200,27 +203,11 @@
   // A missing value is a dash, never the word "undefined".
   const NO_VALUE = "—";
 
-  function diagValue(diag, key) {
-    if (!diag) return NO_VALUE;
-    const value = diag[key];
-    if (value === undefined || value === null || value === "") return NO_VALUE;
-    return String(value);
-  }
-
   function diagWithUnit(diag, key, unit) {
     if (!diag) return NO_VALUE;
     const value = diag[key];
     if (value === undefined || value === null || value === "") return NO_VALUE;
     return String(value) + " " + unit;
-  }
-
-  function diagError(diag) {
-    if (!diag) return NO_VALUE;
-    const err = diag.err;
-    const stage = diag.st;
-    if (!err && !stage) return NO_VALUE;
-    if (err && stage) return err + " (" + stage + ")";
-    return err || stage;
   }
 
   function diagUptime(seconds) {
@@ -234,12 +221,66 @@
     return minutes + "m";
   }
 
+  // Which clients' failure lists are open, so the page's own refresh does not close them.
+  const openFailures = new Set();
+
+  function failureWhat(event) {
+    const what = [event.err, event.st ? "(" + event.st + ")" : ""].filter(Boolean).join(" ");
+    return what || "a failed fetch";
+  }
+
+  function failureDetail(client, columns) {
+    const row = el("tr", "failure-detail");
+    const cell = el("td");
+    cell.colSpan = columns;
+    const list = el("ul", "failure-list");
+    // An older daemon sends no events at all: that is "none recorded", not an error.
+    for (const event of (client.events || []).slice().reverse()) {
+      list.append(el("li", "", whenText(event.at) + " \u2014 " + event.count
+        + (event.count === 1 ? " failure: " : " failures: ") + failureWhat(event)
+        + (event.first ? " (before the daemon first saw this device)" : "")));
+    }
+    cell.append(list, el("p", "note",
+      "Each time is when the daemon heard about the failures, not when they happened: a device "
+      + "that cannot reach the daemon cannot say so at the time."));
+    row.append(cell);
+    row.hidden = !openFailures.has(client.name + "|" + client.address);
+    return row;
+  }
+
+  function failureCell(client, detail) {
+    const count = (client.diag || {}).n;
+    const cell = el("td");
+    if (count === undefined || count === null) {
+      cell.textContent = NO_VALUE;
+      return cell;
+    }
+    const events = client.events || [];
+    if (!events.length) {
+      cell.textContent = String(count);
+      return cell;
+    }
+    const key = client.name + "|" + client.address;
+    const button = el("button", "linklike", String(count));
+    button.type = "button";
+    button.title = "Show when the daemon heard about these failures";
+    button.setAttribute("aria-expanded", String(!detail.hidden));
+    button.addEventListener("click", () => {
+      detail.hidden = !detail.hidden;
+      if (detail.hidden) openFailures.delete(key); else openFailures.add(key);
+      button.setAttribute("aria-expanded", String(!detail.hidden));
+    });
+    cell.append(button, el("span", "note", " \u00b7 last " + agoText(events[events.length - 1].at)));
+    return cell;
+  }
+
   function buildClientTable(clients) {
-    const table = el("table", "grid compact");
+    const table = el("table", "grid compact clients");
     const head = el("thead");
     const headRow = el("tr");
-    for (const header of ["Name", "Address", "Last seen", "Fetches", "Revision",
-                          "Last error", "Failures", "Free", "Signal", "Uptime", "State"]) {
+    const headers = ["Name", "Address", "Last seen", "Fetches", "Revision",
+                     "Failures", "Free", "Signal", "Uptime", "State"];
+    for (const header of headers) {
       headRow.append(el("th", "", header));
     }
     head.append(headRow);
@@ -247,27 +288,33 @@
     for (const client of clients) {
       const diag = client.diag || {};
       const line = el("tr");
-      const cells = [
-        client.name,
+      const detail = failureDetail(client, headers.length);
+      const before = [
+        client.name === "unknown" ? "(no name)" : client.name,
         client.address,
         whenText(client.last_seen) + " (" + agoText(client.last_seen) + ")",
         String(client.fetches),
-        client.revision,
-        diagError(diag),
-        diagValue(diag, "n"),
+        client.revision === "unknown" ? "\u2014" : client.revision,
+      ];
+      const after = [
         diagWithUnit(diag, "free", "KB"),
         diagWithUnit(diag, "rssi", "dBm"),
         diagUptime(diag.up),
         client.connected ? "connected" : "not connected",
       ];
-      for (const cell of cells) line.append(el("td", "", cell));
+      for (const cell of before) line.append(el("td", "", cell));
+      line.append(failureCell(client, detail));
+      for (const cell of after) line.append(el("td", "", cell));
       body.append(line);
+      if ((client.events || []).length) body.append(detail);
     }
     table.append(head, body);
     const wrapper = el("div", "table-wrap");
     wrapper.append(table);
     wrapper.append(el("p", "note",
-      "A device that cannot reach the daemon cannot report a problem here, so check \"Last seen\" first. Last error is the device's most recent failure since it last started; Failures counts them since then."));
+      "A device that cannot reach the daemon cannot report a problem here, so check \"Last seen\" first. "
+      + "Failures counts the fetches the device has failed since it last started; click the number to see "
+      + "when the daemon heard about them."));
     return wrapper;
   }
 
@@ -320,7 +367,12 @@
       catch (_) { window.location.hash = TAB_HASHES[tab]; }
     }
     if (tab === "status") refreshStatus();
-    if (tab === "settings") { refreshConfig(); loadAlerts(); }
+    if (tab === "settings") { refreshConfig(); loadAlerts(); loadPrestoSetup(); }
+  }
+  // Unlocking opens a tab while the sign-in still holds ``busy``, so that tab's first
+  // load is skipped. Load it again once the sign-in has finished.
+  function loadOpenTab() {
+    if (unlocked) showTab(activeTab, false);
   }
   function moveTabFocus(from, step) {
     const index = TABS.indexOf(from);
@@ -409,6 +461,110 @@
     element("overflow-rows").disabled = !!displayState?.locked_by_environment;
     element("display-lock").hidden = !displayState?.locked_by_environment;
     element("display-hint").hidden = !!displayState?.locked_by_environment;
+  }
+
+  // -- Set up a Presto -------------------------------------------------------
+
+  async function loadPrestoSetup() {
+    // A separate call, so the section reflects this running build without a reload.
+    try {
+      setupState = await request("/api/admin/presto-setup");
+      renderPrestoSetup();
+    } catch (_) { /* keep the last known state */ }
+  }
+
+  function renderPrestoSetup() {
+    const available = !!setupState?.available;
+    // Only claim the build has no app files when the daemon actually said so;
+    // a read that has not succeeded yet must not look like a broken build.
+    element("setup-unavailable").hidden = !(setupState && !available);
+    element("setup-temporary-token").hidden = !setupState?.token_temporary;
+    element("prepare-presto-setup").disabled = !available;
+    for (const id of ["setup-host", "setup-port", "setup-name", "setup-wifi"]) element(id).disabled = !available;
+    // Unticking the box must be impossible to miss: Wi-Fi is what makes the Presto work.
+    const wifiOn = element("setup-wifi").checked;
+    element("setup-wifi-warning").hidden = wifiOn;
+    element("setup-wifi-label").classList.toggle("wifi-off", !wifiOn);
+    if (!setupState?.daemon) return;
+    if (!element("setup-host").value) element("setup-host").value = setupState.daemon.host || "";
+    if (!element("setup-port").value) element("setup-port").value = String(setupState.daemon.port || 8787);
+    const suggested = (setupState.daemon.suggested || []).join(", ");
+    element("setup-host-note").textContent = suggested
+      ? "Suggested for this daemon: " + suggested + ". Use the address the Presto can reach; never localhost or a container's internal address."
+      : "Use the daemon computer's LAN address, not localhost and not a container's internal address.";
+  }
+
+  async function preparePrestoSetup() {
+    if (busy) return;
+    busy = true; element("prepare-presto-setup").disabled = true;
+    try {
+      const data = { host: element("setup-host").value.trim(), port: Number(element("setup-port").value) };
+      const name = element("setup-name").value.trim();
+      if (name) data.name = name;
+      data.wifi = element("setup-wifi").checked;
+      const result = await request("/api/admin/presto-setup", "POST", data);
+      setupPrepared = result;
+      element("copy-setup-code").textContent = "Copy";
+      element("setup-unlock-code").textContent = result.unlock_code;
+      element("download-setup-script").href = result.downloads.script;
+      element("download-setup-handoff").href = result.downloads.handoff;
+      element("setup-summary").textContent = "Presto AI Dash " + result.release
+        + ", app revision " + result.label + ", for daemon " + result.daemon.host
+        + ":" + result.daemon.port + "."
+        + (result.wifi ? " The setup script will ask for the Wi-Fi network and password."
+                       : " Wi-Fi is not being set: the Presto must already have Wi-Fi settings.");
+      element("setup-downloads").hidden = false;
+      // The result appears below the form: hide the button that made it, so it is
+      // clear the click worked, and bring the result into view.
+      element("setup-actions").hidden = true;
+      element("setup-downloads").scrollIntoView({ behavior: "smooth", block: "nearest" });
+      startSetupDownloads();
+      message("Setup download ready. Copy the unlock code now: it is shown once.");
+    } catch (error) { message(error.message, true); }
+    finally { busy = false; renderPrestoSetup(); }
+  }
+
+  function startSetupDownloads() {
+    // Both files, one after the other, so nobody has to find and click two links.
+    // A browser may ask once to allow several downloads; the links stay on the
+    // page in case it blocks one.
+    ["download-setup-script", "download-setup-handoff"].forEach((id, index) => {
+      setTimeout(() => {
+        const link = element(id);
+        const href = link.getAttribute("href");
+        if (!href) return;
+        const trigger = document.createElement("a");
+        trigger.href = href;
+        trigger.download = link.getAttribute("download") || "";
+        trigger.hidden = true;
+        document.body.append(trigger);
+        trigger.click();
+        trigger.remove();
+      }, index * 400);
+    });
+  }
+
+  // One click makes the next download from the form as it is now (change the form
+  // first for different settings). The old result stays until the new one is ready.
+  async function prepareAnotherSetup() {
+    await preparePrestoSetup();
+  }
+
+  let copiedTimer = null;
+  async function copySetupCode() {
+    const text = element("setup-unlock-code").textContent || "";
+    if (!text) return;
+    const button = element("copy-setup-code");
+    try {
+      await navigator.clipboard.writeText(text);
+      message("Setup unlock code copied.");
+      // The message is up at the top of the page; say it where the eye already is.
+      button.textContent = "Copied";
+      clearTimeout(copiedTimer);
+      copiedTimer = setTimeout(() => { button.textContent = "Copy"; }, 2000);
+    } catch (_) {
+      message("Select the code and copy it.", true);
+    }
   }
   // The reason the reader sees in words when the master switch is off.
   // It is text, not only a colour, so it is never missed.
@@ -1699,6 +1855,276 @@
     clearTimeout(logTimer); logShown = LOG_STEP;
     logTimer = setTimeout(() => refreshLog().catch((error) => message(error.message, true)), 300);
   });
+  // -- Presto devices and the daemon release ------------------------------
+  // Both are read-only. A device record is the daemon's durable view of one
+  // Presto; the release block is a cached registry result. Neither is a
+  // reason to run anything, and neither can clear a warning on its own.
+  function revisionText(value) {
+    if (!value || !value.revision) return "unknown";
+    return value.scheme + " " + String(value.revision).slice(0, 12);
+  }
+  function deviceStateLabel(device) {
+    const update = device.update || {};
+    return (update.state || "unknown") + (update.reason ? " (" + update.reason + ")" : "");
+  }
+  function deviceAdvice(device) {
+    const reason = (device.update || {}).reason;
+    if (reason === "usb_update_required") {
+      return "The installed app does not match the app this daemon serves. Update it over USB: " +
+        "Settings, Set up a Presto, run presto_setup.py on a computer plugged into the Presto.";
+    }
+    if (reason === "revision_uncomparable") {
+      return "The reported and expected revisions cannot be compared. Check the device over USB " +
+        "and run the setup utility to repair it.";
+    }
+    if (reason === "bundle_unavailable") {
+      return "The daemon cannot read its own Presto app bundle, so it cannot say what the device " +
+        "should run. Reinstall the daemon from a release wheel or image.";
+    }
+    if (reason === "registry_full") {
+      return "The daemon already keeps the maximum of 64 devices, so this one is not recorded.";
+    }
+    if (reason === "state_unavailable") {
+      return "The daemon cannot read its device records. Check the database and the log.";
+    }
+    if (reason) return "Reported by the device: " + reason + ". See the log for the same code.";
+    return "The installed app matches this daemon's. This is the device's own report, not a USB check.";
+  }
+  function factsList(pairs) {
+    const list = el("dl", "facts");
+    for (const [name, value] of pairs) {
+      list.append(el("dt", "", name), el("dd", "", String(value)));
+    }
+    return list;
+  }
+  function renderDeviceAttempts(box, detail) {
+    const attempts = detail.attempts || [];
+    if (!attempts.length) {
+      box.append(el("p", "note", "No update attempt has ever been recorded for this device."));
+      return;
+    }
+    box.append(buildTable(
+      ["Attempt", "Status", "Issued", "Started", "Finished", "Phase", "Error", "Recovery"],
+      attempts.map(attempt => [
+        "#" + attempt.attempt_no, attempt.status, whenText(attempt.issued_at),
+        whenText(attempt.started_at), whenText(attempt.finished_at),
+        attempt.last_phase || "—", attempt.error_code || "—", attempt.recovery || "—"])));
+  }
+  async function loadDeviceDetail(deviceId, box) {
+    try {
+      const detail = await request("/api/admin/devices/" + deviceId);
+      renderDeviceAttempts(box, detail);
+    } catch (error) {
+      box.replaceChildren(el("p", "note", error.message));
+    }
+  }
+  const REMOVE_DEVICE_REASONS = {
+    device_online: "That Presto is online, so its record would come straight back. Remove a "
+      + "record only after the Presto has gone quiet.",
+    not_found: "That record is already gone.",
+  };
+
+  async function removeDevice(device) {
+    if (busy || !window.confirm("Remove the record of " + device.name + "? Nothing on the Presto "
+      + "changes. If it reports again it is listed as a new device, without this history.")) return;
+    busy = true;
+    try {
+      await request("/api/admin/devices/" + encodeURIComponent(device.device_id), "DELETE");
+      message("Removed the record of " + device.name + ".");
+    } catch (error) {
+      message(REMOVE_DEVICE_REASONS[error.message] || error.message, true);
+    } finally { busy = false; }
+    await refreshStatus();
+  }
+
+  function removeDeviceControl(device) {
+    const box = el("div", "actions");
+    const button = el("button", "", "Remove this record");
+    button.type = "button";
+    button.title = "Forget this Presto on this daemon. The Presto itself is not changed.";
+    button.addEventListener("click", () => removeDevice(device));
+    box.append(button);
+    return box;
+  }
+
+  function buildDeviceList(devices) {
+    const wrap = el("div", "device-list");
+    for (const device of devices) {
+      const update = device.update || {};
+      const block = el("details", update.needs_attention ? "device needs-attention" : "device");
+      const summary = el("summary");
+      summary.append(el("strong", "", device.name + " "),
+        el("span", "note", device.connected ? "online" : "offline"),
+        el("span", "note", " · " + revisionText(device.reported) + " installed, " +
+          revisionText(device.expected) + " expected"),
+        el("span", "note", " · " + deviceStateLabel(device)));
+      block.append(summary);
+      block.append(el("p", "note", deviceAdvice(device)));
+      const body = el("div", "");
+      body.append(factsList([
+        ["Device ID", device.device_id],
+        ["Connection", device.connected ? "online" : "last seen " + whenText(device.last_seen_at) +
+          (device.last_seen_is_checkpoint ? " (a checkpoint; no report since this daemon started)" : "")],
+        ["Installed", revisionText(device.reported)],
+        ["Expected", revisionText(device.expected)],
+        ["Bootstrap", device.bootstrap_version === null ? "none (legacy install)" :
+          "v" + device.bootstrap_version],
+        ["Capabilities", (device.capabilities || []).join(", ") || "none"],
+        ["Update state", deviceStateLabel(device)],
+        ["Attempts", (update.attempts_started || 0) + " of " + (update.attempt_limit || 3)],
+        ["Automatic update", update.ota_enabled ? "enabled" : "not enabled in this build"],
+        ["USB observation", device.usb_observation ? "recorded" :
+          "none; this row is the device's own report"],
+        ["Last recovery", update.last_recovery_at
+          ? whenText(update.last_recovery_at) + " (" + (update.last_recovery_kind || "unknown") + ")"
+          : "never"],
+      ]));
+      const attemptsBox = el("div", "");
+      body.append(attemptsBox);
+      if (!device.connected) body.append(removeDeviceControl(device));
+      block.append(body);
+      // The attempt history is fetched only when someone opens the row.
+      block.addEventListener("toggle", () => {
+        if (block.open && attemptsBox.dataset.loaded !== "1") {
+          attemptsBox.dataset.loaded = "1";
+          loadDeviceDetail(device.device_id, attemptsBox);
+        }
+      });
+      wrap.append(block);
+    }
+    return wrap;
+  }
+  function renderDevices() {
+    const box = element("status-devices");
+    box.replaceChildren();
+    const devices = (statusState && statusState.devices) || [];
+    const attention = (statusState && statusState.device_attention_count) || 0;
+    if (!devices.length) {
+      box.append(el("p", "note", "No Presto has reported a device ID yet. Run the setup utility " +
+        "in Settings, or update an existing device over USB, and it appears here."));
+      return;
+    }
+    box.append(el("p", attention ? "banner" : "note", attention
+      ? attention + (attention === 1 ? " device needs attention" : " devices need attention")
+      : "Every recorded device reports the application this daemon serves."));
+    box.append(buildDeviceList(devices));
+  }
+  const RELEASE_ERRORS = {
+    timeout: "the registry did not answer in time",
+    network_error: "the registry could not be reached",
+    http_error: "the registry answered with an error",
+    rate_limited: "the registry asked for fewer requests; it will be asked again later",
+    auth_challenge: "the registry's sign-in step was not what was expected",
+    invalid_metadata: "the registry's answer could not be understood",
+    incomplete_listing: "the registry's list of releases could not be read to the end",
+    no_eligible_release: "the registry lists no usable release",
+    running_version_unknown: "the running version is not a numbered release",
+    state_unavailable: "the saved result could not be read",
+  };
+  const REGISTRY_NAMES = {pypi: "PyPI (pypi.org)", ghcr: "GitHub Container Registry (ghcr.io)",
+    development: "none: this is a development build"};
+  function releaseStateText(release) {
+    const found = release.latest ? " (last result: " + release.latest + ")" : "";
+    switch (release.state) {
+      case "disabled":
+        return release.channel === "development"
+          ? "not checked: this is a development build, not a published release"
+          : "not checked: release checks are switched off";
+      case "unknown": return "no check has finished yet";
+      case "checking": return "checking now";
+      case "current":
+        return release.running_note === "version_ambiguous"
+          ? "no newer release was found (this copy cannot be confirmed as the final release; see below)"
+          : "up to date: no newer release was found";
+      case "available": return "a newer release is available: " + release.latest;
+      case "stale": return "not recently checked: the last successful check is over 48 hours old" + found;
+      case "error":
+        return "could not check: " + (RELEASE_ERRORS[release.error] || "the check failed") + found;
+      default: return release.state;
+    }
+  }
+  let releaseWatch = null;
+  function watchRelease(tries = 12) {
+    // Poll the cached result while a queued check runs; it is a read only.
+    clearTimeout(releaseWatch);
+    releaseWatch = setTimeout(async () => {
+      await refreshStatus();
+      const release = statusState && statusState.release;
+      if (release && release.checking && tries > 0) watchRelease(tries - 1);
+    }, 2500);
+  }
+  async function checkForUpdates(button) {
+    button.disabled = true;
+    try {
+      const result = await request("/api/admin/releases/check", "POST", {});
+      message(result.status === "coalesced" ? "A check is already running." : "Checking for updates.");
+      await refreshStatus();
+      watchRelease();
+    } catch (error) {
+      const text = {
+        check_throttled: "A check started less than a minute ago. Try again shortly.",
+        rate_limited: "The registry asked to be left alone for a while. The daemon will try again later.",
+        release_checks_disabled: "This installation does not check for releases.",
+      }[error.message] || error.message;
+      message(text, true);
+      button.disabled = false;
+    }
+  }
+  function renderRelease() {
+    const box = element("status-release");
+    box.replaceChildren();
+    const release = statusState && statusState.release;
+    if (!release) {
+      box.append(el("p", "note", "No release information."));
+      return;
+    }
+    const available = release.state === "available";
+    if (available) {
+      box.append(el("p", "banner", "A newer Presto AI Dash is available: " + release.running +
+        " -> " + release.latest + ". Nothing is installed for you; follow the steps below."));
+    } else if (release.state === "error" || release.state === "stale") {
+      box.append(el("p", "note", "This installation is not confirmed to be up to date."));
+    }
+    const facts = [
+      ["Running", release.running],
+      ["Registry", REGISTRY_NAMES[release.channel] || release.channel],
+      ["State", releaseStateText(release)],
+      ["Newest eligible", release.latest || "—"],
+      ["Last checked", release.checked_at ? whenText(release.checked_at) : "never"],
+      ["Last attempt", release.last_attempt_at ? whenText(release.last_attempt_at) : "never"],
+    ];
+    if (release.next_check_at && release.can_check) facts.push(["Next check", whenText(release.next_check_at)]);
+    box.append(factsList(facts));
+    if (release.source_url && /^https:\/\//.test(release.source_url)) {
+      const link = el("a", "", available ? "Release details" : "Official release page");
+      link.href = release.source_url; link.target = "_blank"; link.rel = "noopener noreferrer";
+      const line = el("p", "note"); line.append(link); box.append(line);
+    }
+    if (release.running_note === "version_ambiguous") {
+      box.append(el("p", "note", "Version " + release.running + " was also used by early release " +
+        "candidates, before candidates carried their own number. This page cannot tell which one " +
+        "this copy is, and does not claim it is the final release. If you installed it before the " +
+        "final release existed, use the named install command below."));
+    }
+    if (release.can_check) {
+      const row = el("p", "");
+      const button = el("button", "", release.checking ? "Checking…" : "Check for updates");
+      button.type = "button"; button.disabled = !!release.checking;
+      button.addEventListener("click", () => checkForUpdates(button));
+      row.append(button); box.append(row);
+      if (release.checking) watchRelease();
+    }
+    const instructions = release.instructions || {};
+    if (instructions.note) box.append(el("p", "note", instructions.note));
+    for (const group of instructions.groups || []) {
+      box.append(el("h4", "", group.title));
+      for (const step of group.steps) {
+        box.append(step.kind === "command" ? copyCell(step.text) : el("p", "note", step.text));
+      }
+    }
+    if (instructions.verify) box.append(el("p", "note", "Then: " + instructions.verify));
+  }
+
   function renderStatus() {
     const state = statusState;
     if (!state) return;
@@ -1716,6 +2142,8 @@
     for (const [name, value] of facts) {
       daemon.append(el("dt", "", name), el("dd", "", String(value)));
     }
+    renderDevices();
+    renderRelease();
     const clients = state.clients || [];
     const clientBox = element("status-clients");
     clientBox.replaceChildren();
@@ -1803,6 +2231,16 @@
     ingestState = null; tokenReveal = null; displayState = null;
     demoState = null;
     ++demoReadVersion;
+    // A setup unlock code must not survive a locked page.
+    setupState = null; setupPrepared = null;
+    element("setup-downloads").hidden = true; element("setup-unlock-code").textContent = "";
+    element("setup-actions").hidden = false;
+    element("setup-host").value = ""; element("setup-name").value = "";
+    element("setup-wifi").checked = true; element("setup-wifi-warning").hidden = true;
+    element("setup-wifi-label").classList.remove("wifi-off");
+    for (const id of ["download-setup-script", "download-setup-handoff"]) {
+      element(id).removeAttribute("href");
+    }
     alertsState = null; masterOn = true; lastMasterOn = null;
     serviceAlertStates.clear(); serviceAlertDrafts.clear(); serviceAlertLoading.clear();
     statusState = null; configState = null; expanded.clear();
@@ -1820,6 +2258,7 @@
     await loadDemo();
     await loadDisplay();
     await loadAlerts();
+    await loadPrestoSetup();
     element("source-type").replaceChildren(...catalog.map((type) => {
         const option = document.createElement("option"); option.value = type.id;
         option.textContent = type.name; return option;
@@ -1882,6 +2321,7 @@
       await unlock();
     } catch (error) { lock(); message(error.message, true); }
     finally { busy = false; element("unlock").disabled = false; }
+    loadOpenTab();
   });
   element("logout").addEventListener("click", async () => {
     if (busy) return;
@@ -1918,6 +2358,10 @@
   element("demo-enabled").addEventListener("change", () => setDemoEnabled(element("demo-enabled").checked));
   element("demo-callout-button").addEventListener("click", () => setDemoEnabled(true));
   element("demo-banner-off").addEventListener("click", () => setDemoEnabled(false));
+  element("prepare-presto-setup").addEventListener("click", preparePrestoSetup);
+  element("setup-wifi").addEventListener("change", renderPrestoSetup);
+  element("copy-setup-code").addEventListener("click", copySetupCode);
+  element("prepare-another-setup").addEventListener("click", prepareAnotherSetup);
   element("overflow-rows").addEventListener("change", async () => {
     if (busy) { renderDisplay(); return; }
     busy = true;
@@ -2024,6 +2468,7 @@
       message(error.status === 401 ? "Enter the admin token shown at startup." : error.message,
         error.status !== 401);
     } finally { busy = false; element("unlock").disabled = false; }
+    loadOpenTab();
   }
   restoreLogin();
   mountHelp();

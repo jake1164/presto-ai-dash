@@ -121,6 +121,17 @@ main > .panel { min-width: 0; }
 .grid th { color: #7ce6da; font-weight: 600; }
 .grid.compact th, .grid.compact td { white-space: nowrap; }
 .grid.compact th:last-child, .grid.compact td:last-child { white-space: normal; }
+/* Keep the clients table's short columns on one line. The last one, State, used to be
+   allowed to wrap, and when the table was wide the browser squeezed it to a single
+   letter: "connected" ran down the page. */
+@media (min-width: 601px) {
+  .grid.compact.clients th:last-child, .grid.compact.clients td:last-child { white-space: nowrap; }
+}
+/* The number that opens a client's list of failures, and the list. */
+.linklike { background: none; border: 0; padding: 0; font: inherit; color: #7ce6da;
+  text-decoration: underline; cursor: pointer; }
+.grid.compact .failure-detail td { white-space: normal; background: #101a2b; }
+.failure-list { margin: 4px 0 6px 18px; padding: 0; }
 .facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 10px 0 0; }
 .facts dt { color: #7ce6da; font-size: .88rem; }
 .facts dd { margin: 0; color: #e3edf8; font-size: .9rem; }
@@ -184,6 +195,12 @@ main > .panel { min-width: 0; }
   padding: 2px 9px; margin: 0; display: inline-block; }
 .setting-body .scope-badge { display: inline-block; margin-top: 10px; }
 .warning { font-size: .85rem; color: #fcd34d; border-left: 3px solid #fbbf24; padding-left: 12px; }
+/* The same amber as the other warnings: noticeable, not alarming. */
+.wifi-required { margin: 12px 0; padding: 10px 14px; background: #2a2130; color: #fcd34d;
+  border: 1px solid #8a6a3a; border-left: 4px solid #fbbf24; border-radius: 8px;
+  font-size: .9rem; line-height: 1.45; }
+.wifi-required strong { display: block; margin-bottom: 2px; font-size: 1rem; }
+.check.wifi-off { color: #fcd34d; }
 
 @media (max-width: 760px) { main { grid-template-columns: 1fr; } body { padding: 18px; } header { align-items: flex-start; } }
 @media (max-width: 600px) {
@@ -207,3 +224,20 @@ main > .panel { min-width: 0; }
 .remote-status .note { margin: 0 0 6px; }
 .remote-link { color: #7ce6da; }
 #collector-info .note { margin: 10px 0 0; }
+
+/* Set up a Presto: the one-time unlock code, beside its Copy button. */
+.copy-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0 14px; }
+.copy-row code { font-size: 1.02rem; letter-spacing: .06em; background: #0c1526;
+  border: 1px solid #2a3b53; border-radius: 8px; padding: 8px 12px; word-break: break-all; }
+.copy-row button { min-height: 40px; }
+
+/* Presto devices: one expandable row each, attention called out. */
+.device-list { display: flex; flex-direction: column; gap: 10px; }
+.device { background: #0c1526; border: 1px solid #2a3b53; border-radius: 10px; padding: 12px 14px; }
+.device.needs-attention { border-color: #ac8a62; }
+.device summary { cursor: pointer; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.device summary .note { margin: 0; }
+.device[open] summary { margin-bottom: 10px; }
+.device .facts { margin: 0 0 10px; }
+.commands { margin: 6px 0 0; padding-left: 20px; font-family: ui-monospace, monospace; font-size: .85rem; }
+.commands li { margin: 2px 0; }

@@ -7,6 +7,7 @@
 > - Seven source types are implemented, including Codex, Claude, OpenCode Go and Ollama Cloud; remote collectors push readings over the ingest route.
 > - The optional Docker image is built; the tray runner and binaries are not.
 > - The admin listener binds to loopback by default and can be bound elsewhere with an allowed-host list. The Presto app also has `popup.py` (pop-to-top rules).
+> - Corrections (2026-10-29): the daemon also serves two authenticated device-app routes, `GET /api/v1/device-app/manifest` and `GET /api/v1/device-app/file/<canonical name>`, which expose only the running daemon's own `slot-v1` bundle for a permitted update. Operational Presto OTA is implemented but disabled (`daemon.presto_ota_enabled` defaults to false), and the installed device layout is still the legacy one.
 
 # Architecture
 
@@ -32,6 +33,42 @@ and verifies those app bytes on the device while preserving its configuration
 and firmware. PSL reports its source revision and the dated last USB check,
 so working-source changes after deployment are visible. Code parity does not
 assert identical Wi-Fi, memory, CPU, sound or LED hardware behavior.
+
+### Device setup and build identity
+
+Installing a device must not need a checkout. The authenticated admin page's
+`/api/admin/presto-setup` routes serve two artifacts for the build that is
+actually running:
+
+- `presto_setup.py`, rendered by `device_setup.render_setup_script` from the
+template in `presto_ai_dash/setup/` plus the verified public bundle, so it
+imports nothing from this package and runs on a computer with only Python,
+`cryptography` and `mpremote`;
+- `presto-setup.enc`, a versioned envelope (`HKDF-SHA256` from a 160-bit
+one-time code into `AES-256-GCM`, fresh salt and nonce) holding the reachable
+daemon address, the expected app revision and the persistent shared device
+token. The unlock code is displayed once in the page and is in neither
+download; the admin token is never included.
+
+`device_install.app_snapshot()` is the single source of the app bytes: a
+release wheel and the container image both carry `presto_ai_dash/presto_app/`
+staged through `tools/presto_bundle.py` (`tools/build_release.py` and
+`docker/stage_app.py`), and a source checkout falls back to the same inventory
+plus `presto/`. `release.release_version()` reports the running artifact's
+identity: `DASH_RELEASE_VERSION` when the image was built from a tag
+(`0.50.0-rc4`), otherwise the package version, which names the same release in
+PEP 440 form (`0.50.0rc4`); the release workflow refuses a tag whose version
+does not match.
+
+The layout on the device is unchanged: `/ai_dash.py`, the modules in
+`/ai_dash_files/`, the generated `revision.txt`, and the private
+`config.py`/`secrets.py` outside the replaceable app files. The revision is the
+**legacy-v1** aggregate that includes the launcher, displayed as its first 12
+hexadecimal characters. A stable random `DEVICE_ID` is written into the private
+config so later work can group telemetry without relying on a name or address.
+The gated A/B bootstrap and its separate `slot-v1` revision are not implemented;
+moving an existing device to them is a deliberate one-time USB migration using
+this setup utility, not a Wi-Fi update.
 
 ```text
                  +-------------------+

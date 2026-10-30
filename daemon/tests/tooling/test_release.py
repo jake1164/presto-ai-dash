@@ -26,12 +26,31 @@ class TagTests(unittest.TestCase):
         self.version = project
         self.assertEqual(project, package, "pyproject.toml and __version__ must agree")
 
-    def test_release_and_prerelease_tags_match_the_version(self):
-        self.assertEqual(build_release.check_tag("v" + self.version), self.version)
-        self.assertEqual(build_release.check_tag("v%s-rc1" % self.version), self.version)
+    def test_the_checked_in_version_has_a_tag(self):
+        base = self.version.split("rc")[0]
+        tag = "v" + base if base == self.version else "v%s-rc%s" % (base, self.version.split("rc")[1])
+        self.assertEqual(build_release.check_tag(tag), self.version)
+
+    def test_a_tag_names_one_pep_440_version(self):
+        self.assertEqual(build_release.tag_version("v0.50.0"), "0.50.0")
+        self.assertEqual(build_release.tag_version("v0.50.0-rc4"), "0.50.0rc4")
+        self.assertEqual(build_release.tag_version("v0.50.0-rc04"), "0.50.0rc4")
+        self.assertEqual(build_release.tag_version("v1.2.3-b2"), "1.2.3b2")
+
+    def test_a_release_and_its_candidates_need_their_own_versions(self):
+        with patch.object(build_release, "declared_versions", return_value=("0.50.0rc4",) * 2):
+            self.assertEqual(build_release.check_tag("v0.50.0-rc4"), "0.50.0rc4")
+            for tag in ("v0.50.0", "v0.50.0-rc3", "v0.50.1-rc4"):
+                with self.assertRaises(ValueError, msg=tag):
+                    build_release.check_tag(tag)
+        with patch.object(build_release, "declared_versions", return_value=("0.50.0",) * 2):
+            self.assertEqual(build_release.check_tag("v0.50.0"), "0.50.0")
+            with self.assertRaises(ValueError):
+                build_release.check_tag("v0.50.0-rc4")
 
     def test_other_tags_are_refused(self):
-        for tag in ("v9.9.9", self.version, "v1.2", "latest", "v%s;rm" % self.version):
+        for tag in ("v9.9.9", self.version, "v1.2", "latest", "v%s;rm" % self.version,
+                    "v0.50.0-test", "v0.50.0-rc", "v0.50.0-rc1.post1"):
             with self.assertRaises(ValueError, msg=tag):
                 build_release.check_tag(tag)
 
@@ -69,6 +88,24 @@ class BundledAppTests(unittest.TestCase):
             device_install.bundled_snapshot(Path(self.temp.name) / "absent")
         self.assertIn("release wheel", str(caught.exception))
 
+    def test_every_staged_file_is_declared_as_package_data(self):
+        # The staged folders are not in git, so only package-data puts them in the
+        # wheel. A file no pattern covers is left out and the release check fails.
+        import fnmatch
+        import tomllib
+        project = tomllib.loads((ROOT / "daemon" / "pyproject.toml").read_text(encoding="utf-8"))
+        patterns = project["tool"]["setuptools"]["package-data"]["presto_ai_dash"]
+        package = Path(self.temp.name)
+        staged = [path.relative_to(package).as_posix()
+                  for path in package.rglob("*") if path.is_file()]
+        self.assertTrue(any(name.startswith("presto_app_slot/") for name in staged))
+        self.assertTrue(any(name.startswith("presto_app_boot/") for name in staged))
+        for name in staged:
+            with self.subTest(name=name):
+                self.assertTrue(any(fnmatch.fnmatchcase(name, pattern) and
+                                    name.count("/") == pattern.count("/")
+                                    for pattern in patterns), name)
+
 
 class WheelCheckTests(unittest.TestCase):
     def setUp(self):
@@ -76,18 +113,33 @@ class WheelCheckTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.bundle = build_release.stage(ROOT, Path(self.temp.name) / "stage")
 
-    def wheel(self, extra=(), drop=None):
+    def wheel(self, extra=(), drop=None, drop_template=False):
         path = Path(self.temp.name) / "x.whl"
         with zipfile.ZipFile(path, "w") as archive:
             for target, data in self.bundle["files"].items():
                 if target != drop:
                     archive.writestr("presto_ai_dash/presto_app" + target, data)
+            # The same wheel carries the slot and bootstrap layouts.
+            for folder, part in (("presto_app_slot", self.bundle.get("slot")),
+                                 ("presto_app_boot", self.bundle.get("bootstrap"))):
+                for target, data in (part or {"files": {}})["files"].items():
+                    archive.writestr("presto_ai_dash/%s/%s" % (folder, target.lstrip("/")),
+                                     data)
+            if not drop_template:
+                template = (ROOT / "daemon" / "src" / "presto_ai_dash" / "setup"
+                            / "presto_setup_template.py")
+                archive.writestr("presto_ai_dash/setup/presto_setup_template.py",
+                                 template.read_bytes())
             for name in extra:
                 archive.writestr(name, b"x")
         return path
 
     def test_a_complete_clean_wheel_passes(self):
         build_release.check_wheel(self.wheel(extra=["presto_ai_dash/config.py"]), self.bundle)
+
+    def test_a_wheel_without_the_setup_template_fails(self):
+        with self.assertRaisesRegex(ValueError, "presto_setup_template"):
+            build_release.check_wheel(self.wheel(drop_template=True), self.bundle)
 
     def test_a_missing_app_file_fails(self):
         with self.assertRaises(ValueError):

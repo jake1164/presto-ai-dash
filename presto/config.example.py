@@ -22,6 +22,19 @@ DEVICE_NAME = "presto"
 # actually runs.
 DEVICE_REVISION = ""
 
+# The persistent device identifier, 32 lowercase hexadecimal characters. The
+# setup utility generates one and keeps it outside the replaceable app files,
+# so a repair keeps the identity the daemon already knows. It groups this
+# device's reports; it is not a credential, and anyone holding the shared token
+# could present any value. Leave it empty to report as a legacy client: the
+# daemon then shows this device in its in-memory client list only.
+DEVICE_ID = ""
+
+# Where the durable count of application starts is kept. It must be outside
+# /ai_dash_files, which a repair replaces, because it is how the daemon tells a
+# later report from an earlier one. A lost counter needs a USB identity repair.
+BOOT_COUNTER_FILE = "/ai_dash_boot.txt"
+
 # Seconds between polls when the daemon is reachable.
 POLL_INTERVAL = 15
 

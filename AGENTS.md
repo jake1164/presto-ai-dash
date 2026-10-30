@@ -11,6 +11,9 @@ touchscreen. Start with `README.md`; `docs/milestones.md` says what is built.
 - `presto/` runs on MicroPython. Only `main.py` and `ui.py` may import `presto`,
   `machine`, `picographics` or `picovector` (`test_presto_structure.py` enforces it);
   `ui.py` currently imports none, so draw through the `display` object it is given.
+  The production `presto/bootstrap/boot.py` has one approved exception: it may
+  import `machine` to arm the watchdog before importing candidate code and cache
+  that module for rollback/reset. It must not import other hardware modules.
   Bitmap fonts only. Keep on-screen text ASCII.
 - Never read, print, commit or paste the contents of `dash.toml`, `dash.db`,
   `dash.db.key`, `presto/config.py` or `presto/secrets.py`. They hold tokens and keys.

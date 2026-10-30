@@ -136,6 +136,48 @@ EMPTY_HINT = "Open the admin page"
 EMPTY_HINT_MORE = "on the daemon host"
 EMPTY_ACCENT = "yellow"
 
+# The shared lifecycle/release dock. One place on Home and on every service
+# card, normal or expanded: the bottom right, to the right of the Home overflow
+# column and above the footer bands (STALE/DEMO at 208, the mute chip at 218,
+# the page dots at 228). The drawn icon keeps the usual 8-pixel right margin;
+# the tap area is wider than the icon and reaches the screen edge, so a
+# fingertip finds it. When neither a device problem nor a fresh release notice
+# exists, nothing is drawn and the space is released again.
+LIFECYCLE_ICON = 10
+LIFECYCLE_DOCK_W = 32
+LIFECYCLE_DOCK_H = 24
+LIFECYCLE_DOCK_Y = 184
+LIFECYCLE_ICON_Y = 188
+# The gap the Home overflow column keeps from the dock's left edge.
+LIFECYCLE_DOCK_GAP = 4
+# The two meanings, and nothing else: a yellow warning for something a person
+# must act on, a blue arrow for a newer daemon release.
+LIFECYCLE_WARN_RGB = (255, 190, 40)
+LIFECYCLE_RELEASE_RGB = (70, 150, 255)
+
+# A compact triangle, close to the adjacent 8-pixel text height. Keep the
+# larger dock for touch, without giving the icon the visual weight of a row.
+LIFECYCLE_WARN_SHAPE = (
+    (4, 0, 2, 2), (3, 2, 4, 2), (2, 4, 6, 2), (1, 6, 8, 2), (0, 8, 10, 2),
+)
+LIFECYCLE_WARN_CUT = (
+    (4, 3, 2, 3),     # the stem
+    (4, 7, 2, 1),     # the dot
+)
+# An upward arrow: the release notice.
+LIFECYCLE_ARROW_SHAPE = (
+    (4, 0, 2, 2), (3, 2, 4, 2), (2, 4, 6, 2), (1, 6, 8, 1), (4, 6, 2, 4),
+)
+
+# The information view a tap on the dock opens. Read-only: it starts no
+# update, spends no retry and dismisses no warning.
+LIFECYCLE_VIEW_TITLE = "Device notice"
+LIFECYCLE_VIEW_RELEASE = "Daemon release"
+LIFECYCLE_VIEW_CLOSE = "TAP TO CLOSE"
+LIFECYCLE_VIEW_TOP = 52
+LIFECYCLE_VIEW_LINE_H = 14
+LIFECYCLE_VIEW_MAX_LINES = 8
+
 
 def bar_layout(count):
     """The bar heights of a row and the gap between them.
@@ -287,6 +329,110 @@ def _footer_width(display, width, demo, x=MARGIN + 6):
     if not demo:
         return None
     return max(0, demo_chip_rect(display, width)[0] - 8 - x)
+
+
+def lifecycle_icon_x(width=240):
+    """The icon's left edge: the usual 8-pixel visual right margin."""
+    return width - MARGIN - LIFECYCLE_ICON
+
+
+def lifecycle_dock(width=240):
+    """The shared tap area: (x, y, w, h), flush to the bottom-right edge."""
+    return (width - LIFECYCLE_DOCK_W, LIFECYCLE_DOCK_Y, LIFECYCLE_DOCK_W,
+            LIFECYCLE_DOCK_H)
+
+
+def lifecycle_hit(x, y, width=240, height=240):
+    """Whether a touch is on the shared dock.
+
+    It is checked before Home row navigation, page-dot navigation and the
+    card's tap-to-expand, so the same tap always means the same thing. The
+    area does not overlap the bell (top right), the page dots (the last 24
+    pixels) or the mute chip (y 218).
+    """
+    if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+        return False
+    left, top, box_width, box_height = lifecycle_dock(width)
+    return left <= x < left + box_width and top <= y < top + box_height
+
+
+def lifecycle_kind(notice):
+    """The icon a notice asks for: "warning", "release", or None.
+
+    A device problem wins the one dock; the opened view then lists both the
+    problem and any release, rather than blinking two icons.
+    """
+    if not isinstance(notice, dict):
+        return None
+    if notice.get("warning"):
+        return "warning"
+    if notice.get("release"):
+        return "release"
+    return None
+
+
+def draw_lifecycle_dock(display, palette, kind, width=240):
+    """The shared indicator: a yellow warning or a blue release arrow.
+
+    Nothing is drawn when there is no notice, which gives the space back to
+    the list and the card content.
+    """
+    if kind not in ("warning", "release"):
+        return None
+    x = lifecycle_icon_x(width)
+    y = LIFECYCLE_ICON_Y
+    if kind == "warning":
+        display.set_pen(palette.pen(LIFECYCLE_WARN_RGB))
+        for dx, dy, box_width, box_height in LIFECYCLE_WARN_SHAPE:
+            display.rectangle(x + dx, y + dy, box_width, box_height)
+        # The exclamation is cut out in the background colour, so it reads on
+        # every card regardless of the accent behind it.
+        display.set_pen(palette.pen(BACKGROUND))
+        for dx, dy, box_width, box_height in LIFECYCLE_WARN_CUT:
+            display.rectangle(x + dx, y + dy, box_width, box_height)
+    else:
+        display.set_pen(palette.pen(LIFECYCLE_RELEASE_RGB))
+        for dx, dy, box_width, box_height in LIFECYCLE_ARROW_SHAPE:
+            display.rectangle(x + dx, y + dy, box_width, box_height)
+    return (x, y, LIFECYCLE_ICON, LIFECYCLE_ICON)
+
+
+def draw_lifecycle_view(display, palette, notice, width=240, height=240, demo=False):
+    """The read-only view a tap on the dock opens.
+
+    The device problem comes first, then any daemon release. Every line comes
+    from the fixed table in ``lifecycle.py``: nothing from the payload is
+    drawn as text. Opening this view starts no update, spends no retry and
+    dismisses no warning.
+    """
+    kind = lifecycle_kind(notice)
+    if kind is None:
+        return False
+    accent = LIFECYCLE_WARN_RGB if kind == "warning" else LIFECYCLE_RELEASE_RGB
+    display.set_pen(palette.pen(BACKGROUND))
+    display.clear()
+    display.set_pen(palette.pen(accent))
+    display.rectangle(0, 0, 5, height)
+
+    display.set_font("bitmap8")
+    title = LIFECYCLE_VIEW_TITLE if kind == "warning" else LIFECYCLE_VIEW_RELEASE
+    _text(display, palette, title, MARGIN + 6, TITLE_Y, INK, scale=2,
+          max_chars=TITLE_MAX)
+
+    lines = notice.get("lines") if isinstance(notice.get("lines"), list) else []
+    display.set_font("bitmap6")
+    y = LIFECYCLE_VIEW_TOP
+    for line in lines[:LIFECYCLE_VIEW_MAX_LINES]:
+        _text(display, palette, line, MARGIN + 6, y, INK_DIM, scale=1,
+              max_chars=DETAIL_MAX)
+        y += LIFECYCLE_VIEW_LINE_H
+
+    display.set_font("bitmap6")
+    _text(display, palette, LIFECYCLE_VIEW_CLOSE, MARGIN + 6, 210, INK_FAINT,
+          scale=1, max_chars=FOOTER_MAX, max_width=_footer_width(display, width, demo, MARGIN + 6))
+    if demo:
+        _draw_demo_chip(display, palette, width, height)
+    return True
 
 
 def _draw_bell(display, palette, x, y, rgb, slashed=False, crossed=False):
@@ -554,12 +700,16 @@ def _draw_compact_local_row(display, palette, row, y, row_width, stale):
     _text(display, palette, detail, 14 + row_width - detail_w, text_y, rgb, scale=1)
 
 
-def build_home_layout(display, rows, setting=None, width=240):
+def build_home_layout(display, rows, setting=None, width=240, dock=False):
     """The Home layout for these rows: the list region and the strip band.
 
     The names are measured with the display's own font metrics, in the font
     the strip is drawn in, so the layout and the drawing always agree. The
     measurement is the drawing's, not a guess at character counts.
+
+    ``dock`` is true while the shared lifecycle/release indicator is shown: the
+    list then stops above it and the strip's text column stops short of it, so
+    no row and no hidden name is ever drawn under the icon.
     """
     from home import DEFAULT_OVERFLOW_ROWS, HomeLayout, LIST_X
 
@@ -570,7 +720,9 @@ def build_home_layout(display, rows, setting=None, width=240):
         display.set_font("bitmap8")
         return display.measure_text(text, 1)
 
-    return HomeLayout(rows, setting, measure, width - LIST_X - MARGIN)
+    return HomeLayout(rows, setting, measure, width - LIST_X - MARGIN,
+                      lifecycle_dock(width)[0] if dock else None,
+                      LIFECYCLE_DOCK_Y if dock else None)
 
 
 def _draw_strip(display, palette, layout, scroll, stale):
@@ -610,7 +762,7 @@ def _draw_strip(display, palette, layout, scroll, stale):
 
 def draw_sources(display, palette, rows, index, total, status="offline",
                  muted=False, width=240, height=240, scroll=0, stale=False,
-                 layout=None, mute_text=None, demo=False):
+                 layout=None, mute_text=None, demo=False, notice=None):
     """Live Home: the accounts in the saved order, quota rows and local ones."""
     from alerts import rgb_for_accent
     from cards import accent_for
@@ -667,6 +819,7 @@ def draw_sources(display, palette, rows, index, total, status="offline",
         display.rectangle(width - 5, SOURCE_TOP + (region - thumb) * scroll // limit,
                           2, thumb)
     _draw_strip(display, palette, layout, scroll, stale)
+    draw_lifecycle_dock(display, palette, lifecycle_kind(notice), width)
     display.set_font("bitmap6")
     if stale:
         _text(display, palette, "STALE - retrying", 14, 210, INK_DIM, scale=1,
@@ -832,7 +985,8 @@ def _draw_tiles(display, palette, tiles, x, y, width):
 def draw_card(display, palette, card, index, total, muted=False,
               width=240, height=240, stale=False, alerts=None, message=None,
               quota=None, marks=None, detail=None, tiles=None, loading=False,
-              failed=False, detail_open=False, mute_text=None, demo=False):
+              failed=False, detail_open=False, mute_text=None, demo=False,
+              notice=None):
     """Draw one card.
 
     ``index``/``total`` drive the page dots at the bottom. ``muted`` dims the
@@ -959,8 +1113,11 @@ def draw_card(display, palette, card, index, total, muted=False,
               scale=1)
         y += 12
 
-    # Detail lines
-    room = max(0, (CARD_BOTTOM - y) // CARD_DETAIL_H)
+    # Detail lines. The shared dock owns the bottom-right corner, so the lines
+    # stop above it while a notice is showing; the existing "+N more (tap)"
+    # line keeps the rest of the detail reachable.
+    card_bottom = LIFECYCLE_DOCK_Y if lifecycle_kind(notice) else CARD_BOTTOM
+    room = max(0, (card_bottom - y) // CARD_DETAIL_H)
     count = min(CARD_DETAIL_LINES, room)
     display.set_font("bitmap6")
     for line in lines[:count]:
@@ -984,6 +1141,7 @@ def draw_card(display, palette, card, index, total, muted=False,
               scale=1, max_width=footer_width)
     if demo:
         _draw_demo_chip(display, palette, width, height)
+    draw_lifecycle_dock(display, palette, lifecycle_kind(notice), width)
     _draw_dots(display, palette, index, total, accent_rgb, width, height)
 
     # Mute indicator: the chip says how long the mute has left.

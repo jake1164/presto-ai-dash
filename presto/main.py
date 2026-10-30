@@ -30,6 +30,7 @@ except ImportError:
 from alerts import AlertTracker, led_brightness, led_pattern, worst_accent
 from cards import (clean_id, error_card, normalise_status, offline_card, overall_status,
                    parse_cards, parse_lines, parse_tiles)
+import lifecycle
 from gestures import (
     LONG_PRESS,
     SWIPE_LEFT,
@@ -45,11 +46,14 @@ from net import (
     StatusError,
     Unauthorised,
     NetworkUnavailable,
+    current_device_id,
+    current_revision_hex,
 )
 from popup import PopToTop
 from ticks import Uptime
 from ui import (Palette, bell_hit, build_home_layout, dot_hit, draw_boot,
-                draw_card, draw_sources, draw_message)
+                draw_card, draw_lifecycle_view, draw_sources, draw_message,
+                lifecycle_hit)
 
 
 # How long a detail view stays open before returning to the card.
@@ -64,6 +68,157 @@ ALERT_HOLD_MS = 20000
 ALERT_MESSAGE_MS = 4000
 # The messages are drawn in the detail line's font, which fits 34 characters.
 ALERT_MESSAGE_MAX = 34
+
+# Set by the bootstrap (``presto/bootstrap/boot.py``) when this app runs from an
+# A/B slot: the durable journal and this start's context. It stays None for the
+# legacy launcher, which has neither a slot nor a journal, so an old install
+# never claims a slot it does not have.
+BOOT_CONTEXT = None
+
+
+# The board has no battery-backed clock: every hard reset restarts the RTC at
+# 2021-01-01 (measured), which fails the updater's TLS date gate. A warm reset
+# keeps RAMFS, so the app carries the time across its own restart here.
+CLOCK_CARRY = '/ramfs/ai_dash_clock.txt'
+# What the RTC reads at a hard reset: 2021-01-01T00:00:00Z.
+RESET_EPOCH = 1609459200
+
+
+def _mount_ramfs():
+    """Mount RAMFS; the stock launcher has usually mounted it already."""
+    try:
+        import psram
+        psram.mkramfs()
+    except Exception:
+        # A second mount raises EPERM (measured). That is not a failure.
+        pass
+
+
+def _carry_clock():
+    """Leave a usable wall-clock time for the app after a warm reset."""
+    try:
+        from updater import MIN_USABLE_EPOCH
+        now = int(time.time())
+        if now >= MIN_USABLE_EPOCH:
+            with open(CLOCK_CARRY, 'w') as handle:
+                handle.write('%d' % now)
+    except Exception:
+        pass
+
+
+def _restore_clock():
+    """Set an unusable RTC from the time carried across a warm reset.
+
+    Only a reset clock is changed, never a usable one. The seconds the RTC has
+    counted since the reset are added back, so the result is close to right.
+    The carried value is used once.
+    """
+    try:
+        from updater import MIN_USABLE_EPOCH
+        now = int(time.time())
+        if now >= MIN_USABLE_EPOCH:
+            return
+        _mount_ramfs()
+        try:
+            with open(CLOCK_CARRY, 'r') as handle:
+                text = handle.read(16)
+        except OSError:
+            return
+        try:
+            import os
+            os.remove(CLOCK_CARRY)
+        except OSError:
+            pass
+        carried = int(text)
+        if not MIN_USABLE_EPOCH <= carried < 2147483647:
+            return
+        if RESET_EPOCH <= now < MIN_USABLE_EPOCH:
+            carried += now - RESET_EPOCH
+        _set_clock(carried)
+        print("AI Dash: clock restored after reset")
+    except Exception:
+        pass
+
+
+def _set_clock(epoch):
+    """Set the RTC to a unix time."""
+    import machine
+    value = time.gmtime(epoch)
+    machine.RTC().datetime((value[0], value[1], value[2], value[6],
+                            value[3], value[4], value[5], 0))
+
+
+def _reboot():
+    """Restart the board so the bootstrap enters the staged slot.
+
+    The bootstrap owns the choice of slot; the app only records the candidate
+    in the journal first, so a power cut here still leaves a recoverable state.
+    The handoff and clock are best effort: the reset happens either way, and
+    without the handoff the next launch still finds the candidate.
+    """
+    try:
+        import machine
+    except Exception:
+        return
+    if BOOT_CONTEXT is not None:
+        _mount_ramfs()
+        try:
+            with open('/ramfs/launch.txt', 'w') as handle:
+                handle.write('ai_dash_boot.py')
+        except Exception:
+            pass
+        _carry_clock()
+    time.sleep_ms(50)
+    machine.reset()
+
+
+class _FlashWindow(object):
+    """Internal-flash writes, made with the display's core1 scan-out stopped.
+
+    Measured on the deployed firmware (October 29, 2026): once ``Presto()``
+    starts its core1 display driver, the first internal-flash write never
+    returns, and the watchdog resets the board. With core1 stopped the same
+    write takes milliseconds. Every journal save and slot write the running
+    app makes goes through this window; nothing may draw inside it. Windows
+    nest, and only the outermost one stops and restarts the display.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    def __enter__(self):
+        self.app._flash_depth += 1
+        if self.app._flash_depth == 1:
+            self.app._pause_display()
+        return self
+
+    def __exit__(self, kind, value, trace):
+        self.app._flash_depth -= 1
+        if self.app._flash_depth == 0:
+            self.app._resume_display()
+        return False
+
+
+def _manifest_error(exc):
+    """The failure code for a manifest fetch that raised ``exc``.
+
+    A blocked report stops automatic updates until someone acts, so only a
+    certificate or protocol failure may be one. A timeout or a dropped
+    connection is reported as the retryable failure it is. MicroPython raises
+    mbedTLS errors as OSError with a negative code and network errors with a
+    positive one; CPython's certificate error is a ValueError too.
+    """
+    # asyncio.TimeoutError, not the builtin: MicroPython defines it in asyncio, and
+    # on CPython 3.11+ it is the builtin TimeoutError.
+    if isinstance(exc, asyncio.TimeoutError):
+        return "transfer_timeout"
+    if isinstance(exc, OSError) and not isinstance(exc, ValueError):
+        code = exc.args[0] if exc.args else None
+        if not isinstance(code, int) or code > 0:
+            return "connection_lost"
+    return "transport_untrusted"
+
+
 SAVE_FAILED_MESSAGE = "COULD NOT SAVE - DAEMON OFFLINE"
 ALERTS_OFF_MESSAGE = "ALERTS OFF FOR ALL - SEE ADMIN"
 
@@ -122,6 +277,70 @@ class App(object):
         # The device tells the daemon what it can about itself, so the Status
         # tab can say why a device is unhappy without a serial cable.
         self.client.diag_provider = self._diag_state
+        # The lifecycle report: which app revision this device runs, which
+        # boot and report this is, and that it is not updating its own app.
+        # A device without a generated identity sends none of it, and the
+        # daemon keeps its legacy name-and-revision view.
+        self.device_id = current_device_id()
+        self.seq = 0
+        context = BOOT_CONTEXT if isinstance(BOOT_CONTEXT, dict) else None
+        self.journal = None
+        self._activation = None
+        self._store = None
+        # OTA remains inert unless an explicit, matching-firmware TLS profile
+        # is provisioned outside the replaceable slots. Configure it only
+        # after the bootstrap journal and real filesystem are available.
+        self.ota = None
+        self._watchdog = context.get("watchdog") if context else None
+        self._confirmation_started = _now_ms() if self._watchdog is not None else 0
+        self._transfer = None
+        self._ota_prepare_task = None
+        self._ota_slot = None
+        self._ota_reset = None
+        # The display pause around flash writes (see _FlashWindow).
+        self._flash_depth = 0
+        self._display_stopped = False
+        self.slot = None
+        self.bootstrap = None
+        self.boot_confirmed = True
+        self.app_scheme = lifecycle.SCHEME
+        if context is not None and isinstance(context.get("context"), dict):
+            # Running from a slot: the bootstrap owns the durable boot count,
+            # so this app must not keep a second one.
+            self.journal = context.get("journal")
+            self.slot = context["context"].get("slot")
+            self.bootstrap = context["context"].get("bootstrap")
+            self.boot_confirmed = bool(context["context"].get("boot_confirmed"))
+            self.boot = int(context["context"].get("boot") or 1)
+            self.app_scheme = lifecycle.SCHEME_SLOT
+            try:
+                import activation
+                self._activation = activation
+                self._store = activation.FileStore()
+            except Exception:
+                # A missing journal module costs the slot report, never the
+                # dashboard: the daemon then just sees an ordinary revision.
+                self._activation = None
+        else:
+            # The counter is a flash write, and Presto() has already started the
+            # display driver. Without the window that first write never returns
+            # and the screen stays on "Starting..." (see _FlashWindow).
+            if self.device_id:
+                with _FlashWindow(self):
+                    self.boot = lifecycle.bump_boot(getattr(config, "BOOT_COUNTER_FILE", None))
+            else:
+                self.boot = 1
+        self.client.lifecycle_provider = self._lifecycle_headers
+        # A board with no clock battery restarts at 2021; the daemon proves the
+        # real time with a nonce, and only while the clock is unusable.
+        self._time_nonce = None
+        self.client.time_nonce_provider = self._clock_nonce
+        if self.journal is not None:
+            # The TLS date gate needs a real clock; a candidate's own restart
+            # carried it across the reset.
+            _restore_clock()
+            import ota_transport
+            ota_transport.configure(self)
 
         self.gestures = GestureRecogniser(
             long_press_ms=self.long_press_ms,
@@ -182,6 +401,10 @@ class App(object):
         self.wifi_drops = 0
         self.started_at = None
         self._last_screen = None
+        # The shared bottom-right indicator: what the daemon says this device
+        # or its release needs, and whether the read-only view is open.
+        self.lifecycle_notice = None
+        self.lifecycle_open = False
         # The kind of error the main loop last raised, so it is shown once.
         self._loop_error = None
 
@@ -229,6 +452,19 @@ class App(object):
         self.cards = cards
         self.error = error
         self.demo = payload.get("demo") is True
+        # What the shared bottom-right indicator should show: a device problem,
+        # a daemon release, both, or nothing. An absent or unusable extension
+        # means nothing, so an older daemon costs the screen nothing.
+        self.lifecycle_notice = lifecycle.notice(payload)
+        if error is None:
+            # A complete answer is the only evidence of health this app has;
+            # it is what turns a staged slot into the confirmed one.
+            self._maybe_confirm(payload)
+            self._ota_offer(payload)
+        if self.lifecycle_open and self.lifecycle_notice is None:
+            # The condition cleared while the view was open: go back to the
+            # card the user was on.
+            self.lifecycle_open = False
         if error is None:
             self.last_good_at = self.uptime.ms()
             # The rows carry the structured quota of every service, so a
@@ -243,7 +479,8 @@ class App(object):
             # strip takes its band out of the list, and the band is
             # decided by the layout, not by the scroll position.
             self.home_layout = build_home_layout(self.display, self.live_rows or [],
-                                                 overflow_rows(payload), self.width)
+                                                 overflow_rows(payload), self.width,
+                                                 dock=bool(self.lifecycle_notice))
             self.home_scroll.set_height(self.home_layout.total, SOURCE_TOP,
                                         SOURCE_HEIGHT, self.home_layout.region)
         self.index = next((i for i, card in enumerate(cards) if card.id == selected), 0)
@@ -465,6 +702,7 @@ class App(object):
             self._note_failure(reason)
             self._poll_failed("Daemon offline", reason)
             return False
+        self._apply_clock(payload)
         saved = self._display_state()
         try:
             self._set_payload(payload)
@@ -481,6 +719,46 @@ class App(object):
         self.connection_error = None
         self.fail_count = 0
         return True
+
+    def _clock_usable(self):
+        from updater import MIN_USABLE_EPOCH
+        return time.time() >= MIN_USABLE_EPOCH
+
+    def _clock_nonce(self):
+        """A fresh nonce to ask the daemon for the time, only while it is needed."""
+        if self._clock_usable():
+            self._time_nonce = None
+            return None
+        import clockproof
+        self._time_nonce = clockproof.new_nonce()
+        return self._time_nonce
+
+    def _apply_clock(self, payload):
+        """Set a reset clock from the daemon's authenticated time, then enable OTA.
+
+        Only while the clock is unusable, only for the reply to this device's
+        own nonce (used once), and only when the HMAC under the shared token
+        verifies, so a forged or replayed reply changes nothing. A clock that
+        is already real is never touched. The updater is built at start-up
+        only if the clock was real then, so it is built here once it is.
+        """
+        nonce, self._time_nonce = self._time_nonce, None
+        if nonce is None or not isinstance(payload, dict) or self._clock_usable():
+            return
+        try:
+            import clockproof
+            from updater import MIN_USABLE_EPOCH
+            epoch = clockproof.verify(self.client.token, nonce,
+                                      payload.get(clockproof.PAYLOAD_KEY), MIN_USABLE_EPOCH)
+            if epoch is None:
+                return
+            _set_clock(epoch)
+            print("AI Dash: clock set from daemon")
+            if self.ota is None and self.journal is not None:
+                import ota_transport
+                ota_transport.configure(self)
+        except Exception as exc:
+            print("AI Dash: clock not set (%s)" % type(exc).__name__)
 
     def _display_state(self):
         """What a payload replaces, so a refresh that fails can be put back."""
@@ -499,6 +777,262 @@ class App(object):
         self.fail_total += 1
         print("AI Dash: fetch failed (%d): %s; %s" %
               (self.fail_count, reason, " | ".join(self._diag_lines())))
+
+    def _lifecycle_headers(self):
+        """The device ID and the lifecycle report for one status poll, or None.
+
+        ``seq`` counts the reports of this run in RAM; ``boot`` is the durable
+        count of application starts. Nothing is sent for a device with no
+        generated identity, and nothing is sent when the report cannot be
+        built: a malformed header would cost the whole poll its lifecycle
+        data, which is worse than saying nothing.
+        """
+        if not self.device_id:
+            return None
+        self.seq += 1
+        text = lifecycle.build(self.device_id, self.boot, self.seq,
+                               current_revision_hex(),
+                               bootstrap=self.bootstrap, slot=self.slot,
+                               boot_confirmed=self.boot_confirmed,
+                               caps=["ota-v1"] if self.ota is not None and self.ota.readiness() is None else [],
+                               scheme=self.app_scheme,
+                               update=self._update_block())
+        if text is None:
+            return None
+        return (self.device_id, text)
+
+    def _update_block(self):
+        """What this device is doing to its own app, from the durable journal.
+
+        With no journal there is no updater, so the block is idle. A retained
+        terminal attempt keeps reporting until the daemon settles it, because a
+        reboot must not turn a failure into a clean idle report.
+        """
+        if self._activation is not None and self.journal is not None:
+            try:
+                return self._activation.update_block(self.journal)
+            except Exception:
+                return None
+        return None
+
+    def _ota_offer(self, payload):
+        """Stage a permitted update, if there is an updater to do it with.
+
+        ``self.ota`` is only created by ``updater.make_updater`` with a
+        verified TLS transport, a provisioned trust root and the measured
+        firmware capabilities. Missing provisioning leaves this inert.
+        When it does run it only starts a transfer: the bytes are
+        verified by hash before anything becomes a candidate.
+        """
+        if (self.ota is None or self._transfer is not None or self.journal is None
+                or self._ota_prepare_task is not None):
+            return
+        device = payload.get("device_lifecycle") if isinstance(payload, dict) else None
+        command = device.get("command") if isinstance(device, dict) else None
+        if not isinstance(command, dict) or command.get("kind") != "start_update":
+            return
+        if command.get("manifest_path") != "/api/v1/device-app/manifest":
+            return
+        for name in ("transfer", "pending", "failure", "success"):
+            recorded = self.journal.get(name)
+            if recorded and recorded.get("attempt") == command.get("attempt"):
+                return
+        if self.journal.get("pending") is not None:
+            return
+        try:
+            import updater
+            error = self.ota.readiness()
+            if error:
+                self._ota_failed(command, error, blocked=True)
+                return
+            if hasattr(self.ota.transport, 'manifest_async'):
+                print('AI Dash: update manifest scheduled')
+                self._ota_prepare_task = asyncio.create_task(self._prepare_ota_async(command))
+                return
+            manifest_text = self.ota.transport.manifest(command.get("manifest_path"))
+            self._prepare_ota(command, manifest_text)
+        except Exception as exc:
+            print("AI Dash: update could not be staged (%s)" % type(exc).__name__)
+            self._transfer = None
+
+    async def _prepare_ota_async(self, command):
+        try:
+            text = await self.ota.transport.manifest_async(command['manifest_path'])
+            print('AI Dash: update manifest received')
+            self._prepare_ota(command, text)
+        except Exception as exc:
+            print('AI Dash: update manifest failed (%s)' % type(exc).__name__)
+            error = _manifest_error(exc)
+            self._ota_failed(command, error, blocked=error == 'transport_untrusted')
+        finally:
+            self._ota_prepare_task = None
+
+    def _prepare_ota(self, command, manifest_text):
+        try:
+            self.ota.journal = self.journal
+            transfer, error = self.ota.prepare(command, manifest_text, self.slot)
+            if error:
+                self._ota_failed(command, error, blocked=True)
+                return
+            if transfer.manifest["revision"] == current_revision_hex():
+                return
+            self._ota_slot = "b" if self.slot == "a" else "a"
+            accepted = self._activation.begin_transfer(self.journal, self._ota_slot,
+                transfer.manifest["revision"], command["generation"], command["attempt"], command["id"])
+            with _FlashWindow(self):
+                self._activation.save(self._store, accepted)
+            print('AI Dash: update transfer recorded')
+            self.journal = accepted
+            self._transfer = transfer
+        except Exception as exc:
+            print("AI Dash: update could not be staged (%s)" % type(exc).__name__)
+            self._transfer = None
+
+    def _ota_failed(self, command, error, blocked=False):
+        try:
+            value = self._activation.record_failure(self.journal,
+                "blocked" if blocked else "failed", error, command["target_revision"],
+                command["generation"], command["attempt"])
+            with _FlashWindow(self):
+                self._activation.save(self._store, value)
+            self.journal = value
+        except Exception:
+            pass
+
+    def _ota_tick(self):
+        """Advance a staged transfer by one bounded chunk per frame.
+
+        The display keeps updating between steps: one step is at most one
+        1024-byte read into RAM. Verified files reach flash in a batch inside
+        one display pause (see _FlashWindow); the last batch also verifies
+        the slot from flash and records the candidate, and the board restarts
+        into it.
+        """
+        transfer = self._transfer
+        if transfer is None:
+            return
+        try:
+            if not transfer.done and not transfer.flash_due:
+                transfer.step()
+            if not transfer.done and not transfer.flash_due:
+                return
+            staged = False
+            with _FlashWindow(self):
+                if not transfer.done:
+                    if transfer.downloaded and self.journal["transfer"]["phase"] != "verifying":
+                        verifying = dict(self.journal)
+                        verifying["transfer"] = dict(self.journal["transfer"], phase="verifying")
+                        self._activation.save(self._store, verifying)
+                        self.journal = verifying
+                    print("AI Dash: update writing slot " + self._ota_slot)
+                    transfer.flash(self._service_watchdog)
+                if transfer.done:
+                    self._transfer = None
+                    staged = self._finish_transfer(transfer)
+            if staged:
+                print("AI Dash: update staged in slot " + self._ota_slot)
+                reset = self._ota_reset or _reboot
+                reset()
+        except Exception as exc:
+            print("AI Dash: update step failed (%s)" % type(exc).__name__)
+            self._transfer = None
+
+    def _finish_transfer(self, transfer):
+        """Record a finished transfer; True when a candidate is ready to enter.
+
+        Called inside a flash window.
+        """
+        try:
+            import json
+            self._store.write('/ai_dash_state/ota-metrics.json',
+                              json.dumps(transfer.metrics).encode())
+        except Exception:
+            pass
+        if transfer.error is not None:
+            print("AI Dash: update staging stopped (%s)" % transfer.error)
+            accepted = self.journal.get("transfer")
+            if accepted:
+                self._ota_failed({"target_revision": accepted["target"],
+                    "generation": accepted["generation"], "attempt": accepted["attempt"]}, transfer.error)
+            return False
+        if self._activation is None:
+            return False
+        accepted = self.journal["transfer"]
+        candidate = self._activation.begin_candidate(self.journal, self._ota_slot,
+            transfer.manifest["revision"], accepted["generation"], accepted["attempt"], accepted["command"])
+        self._activation.save(self._store, candidate)
+        self.journal = candidate
+        return True
+
+    def _pause_display(self):
+        """Stop the core1 display scan-out so internal flash can be written.
+
+        The native object's own finaliser stops core1 (measured: about 15 ms).
+        A stand-in display without one has nothing to stop.
+        """
+        native = getattr(self.presto, "presto", None)
+        stop = getattr(native, "__del__", None)
+        if stop is None:
+            return
+        stop()
+        self._display_stopped = True
+
+    def _resume_display(self):
+        """Restart the scan-out with a new native object of the same kind.
+
+        It draws from the same static framebuffer, so the existing PicoGraphics
+        surface stays valid (measured: about 370 ms). A second finaliser call
+        on the old object is a no-op on this firmware (measured), so letting it
+        be collected is safe. If the display cannot be restarted the board is
+        reset rather than left drawing to a stopped driver.
+        """
+        if not self._display_stopped:
+            return
+        try:
+            native = self.presto.presto
+            replacement = type(native)(full_res=self.full_res, palette=False)
+            self.presto.presto = replacement
+            if getattr(self.presto, "buffer", None) is not None:
+                self.presto.buffer = memoryview(replacement)
+            self._display_stopped = False
+            self._needs_redraw = True
+        except Exception as exc:
+            print("AI Dash: display restart failed (%s)" % type(exc).__name__)
+            _reboot()
+
+    def _maybe_confirm(self, payload):
+        """Write the durable healthy marker once this app has proved itself.
+
+        Two paths reach here. A daemon-issued attempt needs the acknowledgment
+        that only arrives with a complete, validated status answer; a local
+        activation (a USB install) has no attempt and confirms on its first
+        successful poll. Writing the marker is what makes a reboot keep the
+        new slot instead of rolling back to the old one.
+        """
+        if self._activation is None or self.journal is None:
+            return
+        pending = self.journal.get("pending")
+        if not pending or pending.get("slot") != self.slot:
+            return
+        revision = current_revision_hex()
+        if not revision or pending["target"] != revision:
+            # This is not the app the activation staged, so it must not confirm
+            # it: the target is the exact revision, not a prefix or a label.
+            return
+        if pending.get("attempt") is not None:
+            device = payload.get("device_lifecycle") if isinstance(payload, dict) else None
+            ack = device.get("confirm_attempt_id") if isinstance(device, dict) else None
+            if ack != pending["attempt"]:
+                return
+        try:
+            confirmed = self._activation.confirm(self.journal, pending.get("target"))
+            with _FlashWindow(self):
+                self._activation.save(self._store, confirmed)
+            self.journal = confirmed
+            self.boot_confirmed = True
+            print("AI Dash: slot %s confirmed" % self.slot)
+        except Exception as exc:
+            print("AI Dash: slot confirmation could not be stored (%s)" % type(exc).__name__)
 
     def _diag_state(self):
         """Everything the device knows about itself, in one dict.
@@ -725,14 +1259,39 @@ class App(object):
         self._needs_redraw = True
         return True
 
+    def _lifecycle_tap(self):
+        """A tap on the shared dock opens the read-only information view.
+
+        It is checked before the bell, the page dots, Home rows and the card's
+        tap-to-expand, so one area always means one thing. It starts no update,
+        spends no retry and dismisses no warning; those are admin actions.
+        """
+        if self._connection_screen() is not None or not self.lifecycle_notice:
+            return False
+        if not lifecycle_hit(self._touch_x, self._touch_y, self.width, self.height):
+            return False
+        self.lifecycle_open = True
+        self._needs_redraw = True
+        return True
+
+    def _close_lifecycle(self):
+        self.lifecycle_open = False
+        self._needs_redraw = True
+
     def _handle_gestures(self, gestures):
         for gesture in gestures:
             if gesture == SWIPE_LEFT:
+                self.lifecycle_open = False
                 self._next_card()
             elif gesture == SWIPE_RIGHT:
+                self.lifecycle_open = False
                 self._prev_card()
             elif gesture == TAP:
-                if self._bell_tap():
+                if self.lifecycle_open:
+                    self._close_lifecycle()
+                elif self._lifecycle_tap():
+                    pass
+                elif self._bell_tap():
                     pass
                 elif self._tap_navigates():
                     pass
@@ -764,8 +1323,9 @@ class App(object):
             self.popup.touch(now)
         previous_offset = self.home_scroll.offset
         self.home_scroll.update(state, self._touch_x, self._touch_y,
-                                enabled=self._current_card().id == "dash" and
-                                self._connection_screen() is None)
+                                enabled=(self._current_card().id == "dash" and
+                                         self._connection_screen() is None and
+                                         not self.lifecycle_open))
         if self.home_scroll.offset != previous_offset:
             # The user scrolled: that also cancels a pending return.
             self.popup.scrolled(now)
@@ -826,6 +1386,9 @@ class App(object):
             draw_message(self.display, self.palette, screen[0], screen[1],
                          detail=["Retrying..."] + self._diag_lines() +
                          ["RESET returns to carousel"], demo=self.demo)
+        elif self.lifecycle_open and self.lifecycle_notice:
+            draw_lifecycle_view(self.display, self.palette, self.lifecycle_notice,
+                                self.width, self.height, demo=self.demo)
         elif card.id == "dash" and self.live_rows is not None:
             draw_sources(self.display, self.palette, self.live_rows,
                          self.index, len(self.cards), status=card.status,
@@ -833,7 +1396,7 @@ class App(object):
                          scroll=self.home_scroll.offset, stale=bool(self.connection_error),
                          layout=self.home_layout,
                          mute_text=self.alerts.mute_label(),
-                         demo=self.demo)
+                         demo=self.demo, notice=self.lifecycle_notice)
         else:
             row = self.card_rows.get(card.id)
             detail = self.card_details.get(card.id)
@@ -854,6 +1417,7 @@ class App(object):
                 detail_open=self.detail_open,
                 mute_text=self.alerts.mute_label(),
                 demo=self.demo,
+                notice=self.lifecycle_notice,
             )
 
         self.presto.update()
@@ -900,6 +1464,11 @@ class App(object):
         self._poll_failed("Connecting...", "Joining Wi-Fi")
         asyncio.run(self._run_live())
 
+    def _service_watchdog(self):
+        if self._watchdog is not None:
+            if self.boot_confirmed or _ticks_diff(_now_ms(), self._confirmation_started) < 180000:
+                self._watchdog.feed()
+
     def _tick(self):
         """One pass of the main loop: touch, timers, and a redraw if needed.
 
@@ -908,6 +1477,8 @@ class App(object):
         pass instead of a copy of it.
         """
         try:
+            self._service_watchdog()
+            self._ota_tick()
             self._handle_gestures(self._poll_touch())
             self._poll_popup()
             if self._expire_alerts():
@@ -915,7 +1486,16 @@ class App(object):
             if self._last_screen != self._connection_screen():
                 self._needs_redraw = True
             if self.detail_open and _ticks_diff(_now_ms(), self.detail_opened_at) > DETAIL_TIMEOUT_MS:
-                self._close_detail()
+                # Not while the lifecycle view is open: closing it must return
+                # to the card exactly as the user left it.
+                if not self.lifecycle_open:
+                    self._close_detail()
+            if self.lifecycle_open and self._connection_screen() is not None:
+                # A full-screen connecting/offline/error screen owns the
+                # display and hides the dock with it, so the view goes too.
+                # The local record of the problem is kept either way.
+                self.lifecycle_open = False
+                self._needs_redraw = True
             if self._needs_redraw:
                 self._update_leds()
                 self._render()
@@ -940,17 +1520,28 @@ class App(object):
 
 
 def main():
+    import machine
+    sys.modules["machine"] = machine
     from presto import Presto
 
     presto = Presto(full_res=bool(getattr(config, "FULL_RES", False)))
-    display = presto.display
-    palette = Palette(display)
+    try:
+        display = presto.display
+        palette = Palette(display)
 
-    draw_boot(display, palette, "Starting...")
-    presto.update()
+        draw_boot(display, palette, "Starting...")
+        presto.update()
 
-    app = App(presto)
-    app.run()
+        app = App(presto)
+        app.run()
+    except BaseException:
+        # The bootstrap records a crashed candidate in flash, which cannot be
+        # written while the display runs (see _FlashWindow).
+        try:
+            presto.presto.__del__()
+        except Exception:
+            pass
+        raise
 
 
 if __name__ == "__main__":

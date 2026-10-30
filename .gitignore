@@ -11,6 +11,8 @@ venv/
 
 # The Presto app copied into the package at release time (tools/build_release.py)
 daemon/src/presto_ai_dash/presto_app/
+daemon/src/presto_ai_dash/presto_app_slot/
+daemon/src/presto_ai_dash/presto_app_boot/
 
 # Daemon runtime state
 *.db

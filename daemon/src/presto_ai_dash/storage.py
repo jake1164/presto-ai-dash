@@ -91,7 +91,7 @@ def _token_digest(token):
 
 
 class Storage:
-    SCHEMA_VERSION = 9
+    SCHEMA_VERSION = 11
     # Live browser sessions the admin page keeps; the oldest go first.
     ADMIN_SESSION_LIMIT = 25
     MAX_HISTORY_LIMIT = 1000
@@ -216,6 +216,112 @@ class Storage:
             self._conn.execute("DELETE FROM source_instances WHERE type = 'fake'")
             self._conn.execute("DELETE FROM snapshots WHERE source_id = 'fake'")
             self._conn.execute("PRAGMA user_version = 9")
+            # v10: durable device identity and update state, so an unresolved
+            # problem survives a daemon or container restart. Only what the
+            # protocol needs is stored: no diagnostics, no addresses, no
+            # credentials, no provider data.
+            self._conn.execute("""CREATE TABLE IF NOT EXISTS devices (
+                device_id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                first_seen_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                scheme TEXT,
+                revision TEXT,
+                bootstrap_version INTEGER,
+                capabilities_json TEXT NOT NULL,
+                slot TEXT,
+                boot_confirmed INTEGER NOT NULL CHECK (boot_confirmed IN (0, 1)),
+                boot INTEGER NOT NULL CHECK (boot >= 1),
+                seq INTEGER NOT NULL CHECK (seq >= 1),
+                report_json TEXT NOT NULL,
+                update_state TEXT NOT NULL,
+                reason TEXT,
+                attention_latched INTEGER NOT NULL DEFAULT 0
+                    CHECK (attention_latched IN (0, 1)),
+                active_generation_id TEXT,
+                active_attempt_id TEXT,
+                state_revision INTEGER NOT NULL DEFAULT 1 CHECK (state_revision >= 1),
+                recovery_request_id TEXT,
+                recovery_requested_at TEXT,
+                recovery_after_boot INTEGER,
+                recovery_after_seq INTEGER,
+                recovery_target_scheme TEXT,
+                recovery_target_revision TEXT,
+                last_recovery_at TEXT,
+                last_recovery_kind TEXT
+            )""")
+            self._conn.execute("""CREATE TABLE IF NOT EXISTS device_update_budgets (
+                generation_id TEXT PRIMARY KEY,
+                device_id TEXT NOT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
+                target_scheme TEXT NOT NULL,
+                target_revision TEXT NOT NULL,
+                attempts_started INTEGER NOT NULL DEFAULT 0
+                    CHECK (attempts_started BETWEEN 0 AND 3),
+                status TEXT NOT NULL
+                    CHECK (status IN ('active', 'exhausted', 'succeeded', 'superseded')),
+                next_attempt_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""")
+            self._conn.execute("""CREATE TABLE IF NOT EXISTS device_update_attempts (
+                attempt_id TEXT PRIMARY KEY,
+                generation_id TEXT NOT NULL
+                    REFERENCES device_update_budgets(generation_id) ON DELETE CASCADE,
+                command_id TEXT NOT NULL UNIQUE,
+                attempt_no INTEGER NOT NULL CHECK (attempt_no BETWEEN 1 AND 3),
+                status TEXT NOT NULL CHECK (status IN (
+                    'queued', 'started', 'confirming', 'succeeded', 'failed',
+                    'blocked', 'unconfirmed', 'cancelled')),
+                issued_at TEXT NOT NULL,
+                started_at TEXT,
+                attempt_deadline TEXT,
+                confirmation_deadline TEXT,
+                confirmation_acked_at TEXT,
+                finished_at TEXT,
+                last_phase TEXT,
+                error_code TEXT,
+                retryable INTEGER NOT NULL DEFAULT 0 CHECK (retryable IN (0, 1)),
+                recovery TEXT,
+                UNIQUE(generation_id, attempt_no)
+            )""")
+            self._conn.execute("""CREATE TABLE IF NOT EXISTS device_admin_requests (
+                device_id TEXT NOT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
+                request_key TEXT NOT NULL,
+                body_sha256 TEXT NOT NULL,
+                response_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                PRIMARY KEY (device_id, request_key)
+            )""")
+            self._conn.execute("""CREATE TABLE IF NOT EXISTS daemon_release_cache (
+                channel TEXT PRIMARY KEY,
+                running TEXT NOT NULL,
+                latest TEXT,
+                checked_at TEXT,
+                last_attempt_at TEXT,
+                state TEXT NOT NULL,
+                error_code TEXT,
+                source_url TEXT
+            )""")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_devices_last_seen "
+                               "ON devices(last_seen_at)")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_device_budgets_device "
+                               "ON device_update_budgets(device_id, status)")
+            # One live automatic budget per device, whatever else is retained.
+            self._conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_device_budgets_active "
+                               "ON device_update_budgets(device_id) WHERE status = 'active'")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_device_budgets_retry "
+                               "ON device_update_budgets(status, next_attempt_at)")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_device_attempts_generation "
+                               "ON device_update_attempts(generation_id, attempt_no)")
+            self._conn.execute("CREATE INDEX IF NOT EXISTS idx_device_admin_requests_created "
+                               "ON device_admin_requests(device_id, created_at)")
+            # Version 11: a registry's "ask again after" time survives a restart.
+            columns = {row[1] for row in self._conn.execute(
+                "PRAGMA table_info(daemon_release_cache)")}
+            if "retry_after_at" not in columns:
+                self._conn.execute(
+                    "ALTER TABLE daemon_release_cache ADD COLUMN retry_after_at TEXT")
+            self._conn.execute("PRAGMA user_version = 11")
             self._conn.commit()
         except Exception:
             self._conn.rollback()
@@ -922,6 +1028,251 @@ class Storage:
             updated_at=_read_time(row["updated_at"]),
             metrics=json.loads(row["metrics"]), alerts=json.loads(row["alerts"]),
             error=row["error"])
+
+    # -- device lifecycle --------------------------------------------------
+    #
+    # These rows hold only what the lifecycle protocol needs. Diagnostics,
+    # addresses, provider data, the shared token and private configuration
+    # never reach them: the in-memory client registry stays the place for
+    # ordinary "who polled" information.
+
+    @staticmethod
+    def _write_row(table, key_columns, record):
+        """Insert or update one row from a dict, inside the caller's lock.
+
+        A plain ``INSERT OR REPLACE`` would delete the old row first, and the
+        delete would cascade into budgets and attempts. So an existing row is
+        updated in place, leaving its children alone.
+        """
+        names = list(record)
+        updates = ", ".join("%s = excluded.%s" % (name, name) for name in names
+                            if name not in key_columns)
+        sql = "INSERT INTO %s (%s) VALUES (%s)" % (
+            table, ", ".join(names), ", ".join("?" for _ in names))
+        if updates:
+            sql += " ON CONFLICT(%s) DO UPDATE SET %s" % (", ".join(key_columns), updates)
+        else:  # pragma: no cover - a record of only key columns changes nothing
+            sql += " ON CONFLICT(%s) DO NOTHING" % ", ".join(key_columns)
+        return sql
+
+    def device(self, device_id):
+        """One durable device row, or None."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM devices WHERE device_id = ?", (device_id,)).fetchone()
+        return dict(row) if row is not None else None
+
+    def devices(self):
+        """Every durable device, by ID: the order the admin page shows."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM devices ORDER BY device_id").fetchall()
+        return [dict(row) for row in rows]
+
+    def device_count(self):
+        with self._lock:
+            return self._conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
+
+    def delete_device(self, device_id):
+        """Remove one device's record. Its budgets, attempts and saved requests go with it.
+
+        The other three tables reference the device ``ON DELETE CASCADE``, and
+        foreign keys are enforced on this connection. Returns whether a row was removed.
+        """
+        with self._lock:
+            try:
+                cursor = self._conn.execute(
+                    "DELETE FROM devices WHERE device_id = ?", (device_id,))
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+            return cursor.rowcount > 0
+
+    def save_device(self, record):
+        """Write one device row, and nothing else, in one transaction."""
+        with self._lock:
+            try:
+                self._conn.execute(
+                    self._write_row("devices", ("device_id",), record),
+                    [record[name] for name in record])
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def save_device_report(self, device_record, budget=None, attempt=None,
+                           admin_request=None, expected_revision=None):
+        """Write a device and its budget/attempt rows in one transaction.
+
+        ``budget`` may be one row or a list. A list is written in order, which
+        matters when an exhausted budget is superseded and its replacement is
+        created in the same report: the unique active-budget index is checked
+        per statement.
+        """
+        budgets = budget if isinstance(budget, list) else [budget]
+        attempts = attempt if isinstance(attempt, list) else [attempt]
+        with self._lock:
+            try:
+                if expected_revision is not None:
+                    self._conn.execute("BEGIN IMMEDIATE")
+                    current = self._conn.execute(
+                        "SELECT state_revision FROM devices WHERE device_id = ?",
+                        (device_record["device_id"],)).fetchone()
+                    if current is None or current[0] != expected_revision:
+                        raise ConfigurationConflict("device state changed")
+                self._conn.execute(
+                    self._write_row("devices", ("device_id",), device_record),
+                    [device_record[name] for name in device_record])
+                for row in budgets:
+                    if row is None:
+                        continue
+                    self._conn.execute(
+                        self._write_row("device_update_budgets", ("generation_id",), row),
+                        [row[name] for name in row])
+                for row in attempts:
+                    if row is None:
+                        continue
+                    self._conn.execute(
+                        self._write_row("device_update_attempts", ("attempt_id",), row),
+                        [row[name] for name in row])
+                if admin_request is not None:
+                    names = ("device_id", "request_key", "body_sha256", "response_json", "created_at")
+                    self._conn.execute(
+                        "INSERT INTO device_admin_requests (" + ",".join(names) +
+                        ") VALUES (?,?,?,?,?)", tuple(admin_request[name] for name in names))
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def active_budget(self, device_id):
+        """The one live automatic budget for a device, or None."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM device_update_budgets WHERE device_id = ? AND status = 'active'",
+                (device_id,)).fetchone()
+        return dict(row) if row is not None else None
+
+    def device_budgets(self, device_id):
+        """Every retained budget for a device, newest first."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM device_update_budgets WHERE device_id = ? "
+                "ORDER BY created_at DESC, rowid DESC", (device_id,)).fetchall()
+        return [dict(row) for row in rows]
+
+    def device_attempts(self, device_id, limit=32):
+        """The newest attempts for a device, newest first."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT a.* FROM device_update_attempts a "
+                "JOIN device_update_budgets b ON b.generation_id = a.generation_id "
+                "WHERE b.device_id = ? ORDER BY a.issued_at DESC, a.rowid DESC LIMIT ?",
+                (device_id, int(limit))).fetchall()
+        return [dict(row) for row in rows]
+
+    def device_attempt(self, attempt_id):
+        """One attempt row, or None."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM device_update_attempts WHERE attempt_id = ?",
+                (attempt_id,)).fetchone()
+        return dict(row) if row is not None else None
+
+    def save_device_budget(self, record):
+        """Write one budget row in its own transaction."""
+        with self._lock:
+            try:
+                self._conn.execute(
+                    self._write_row("device_update_budgets", ("generation_id",), record),
+                    [record[name] for name in record])
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def save_device_attempt(self, record):
+        """Write one attempt row in its own transaction."""
+        with self._lock:
+            try:
+                self._conn.execute(
+                    self._write_row("device_update_attempts", ("attempt_id",), record),
+                    [record[name] for name in record])
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def device_admin_request(self, device_id, request_key):
+        """A saved admin mutation result, or None. Deduplicates a retried click."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM device_admin_requests WHERE device_id = ? AND request_key = ?",
+                (device_id, request_key)).fetchone()
+        return dict(row) if row is not None else None
+
+    def save_device_admin_request(self, record):
+        """Remember one admin mutation result; the first write wins."""
+        with self._lock:
+            try:
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO device_admin_requests "
+                    "(device_id, request_key, body_sha256, response_json, created_at) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (record["device_id"], record["request_key"], record["body_sha256"],
+                     record["response_json"], record["created_at"]))
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def prune_device_admin_requests(self, cutoff):
+        """Forget deduplication records older than a stored UTC timestamp."""
+        with self._lock:
+            try:
+                removed = self._conn.execute(
+                    "DELETE FROM device_admin_requests WHERE created_at < ?",
+                    (_stored_time(cutoff),)).rowcount
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+        return removed
+
+    def release_cache(self, channel):
+        """The cached daemon-release result for one channel, or None."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM daemon_release_cache WHERE channel = ?", (channel,)).fetchone()
+        return dict(row) if row is not None else None
+
+    def save_release_cache(self, record):
+        """Write the cached daemon-release result for its channel."""
+        with self._lock:
+            try:
+                self._conn.execute(
+                    self._write_row("daemon_release_cache", ("channel",), record),
+                    [record[name] for name in record])
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
+
+    def clear_release_checking(self):
+        """A restart ends any check that was in flight when the process stopped.
+
+        ``checking`` describes a running task; a row left in that state by a
+        stopped process would claim a check that is not happening.
+        """
+        with self._lock:
+            try:
+                self._conn.execute(
+                    "UPDATE daemon_release_cache SET state = 'unknown' WHERE state = 'checking'")
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
 
 
 class ConfigurationConflict(ValueError):

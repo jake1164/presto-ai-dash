@@ -76,8 +76,21 @@
       <p class="note">Everything here is read-only. It refreshes every 10 seconds while this tab is open and the browser tab is in the foreground.</p>
       <h3>Daemon</h3>
       <dl id="status-daemon" class="facts"></dl>
+      <h3>Presto devices</h3>
+      <p class="note">Every Presto the daemon keeps a durable record for, by the device ID its
+        setup created. The installed revision is what the device says about itself; it is not a
+        USB hash check, and a mismatch here asks for a USB update. A device that only sends a
+        client name and a revision appears under Clients below instead.</p>
+      <div id="status-devices"></div>
+      <h3>Daemon release</h3>
+      <p class="note">Whether a newer published daemon exists, from the one registry this
+        installation uses (PyPI for pip and pipx, GitHub Container Registry for the Docker image).
+        The daemon checks in the background about once a day. Opening this page contacts no
+        registry, and nothing here upgrades anything; Check for updates asks the daemon to look
+        again now.</p>
+      <div id="status-release"></div>
       <h3>Clients</h3>
-      <p class="note">Every device that fetches the status endpoint. Clients behind NAT, a reverse proxy or Docker Desktop can share one address, so two clients with the same name and address cannot be told apart. Nothing about a client is stored.</p>
+      <p class="note">Every device that fetches the status endpoint. Clients behind NAT, a reverse proxy or Docker Desktop can share one address, so two clients with the same name and address cannot be told apart. A client that has not fetched for a day is forgotten. Nothing about a client is stored.</p>
       <div id="status-clients"></div>
       <h3>Accounts</h3>
       <div id="status-accounts"></div>
@@ -130,6 +143,81 @@
           <p id="display-lock" class="note" hidden>Fixed by <code>DASH_OVERFLOW_ROWS</code> in this
             daemon's environment (in Docker, the <code>.env</code> file). Remove that variable to
             change it here.</p>
+        </div>
+      </details>
+
+      <details class="setting" id="presto-setup-setting">
+        <summary><span class="setting-title">Set up a Presto</span>
+          <span class="scope-badge">Applies to one device</span></summary>
+        <div class="setting-body">
+          <p class="guide-slot" data-help="set-up-presto" data-help-label="Set up a Presto guide"></p>
+          <p class="note">Install the dashboard on a Presto plugged into a computer by USB.
+            You need no copy of this project: this page gives you the exact app this daemon
+            serves, plus a one-time encrypted setup file with the daemon address and device
+            token. Do this once for each Presto. The setup script asks for Wi-Fi locally, so
+            a Wi-Fi password is never typed into this page. A Presto that already updates its
+            app over the air keeps its app: for it, the script changes only the settings.</p>
+          <p id="setup-unavailable" class="warning" hidden>This daemon has no Presto app files
+            to install. Use a release wheel or the container image; a source-only install
+            without the <code>presto/</code> folder cannot prepare a download.</p>
+          <p id="setup-temporary-token" class="warning" hidden>This daemon generated a new
+            device token at startup, so the Presto will lose access when the daemon restarts.
+            Set <code>daemon.shared_token</code> in the configuration first, then prepare a new
+            download.</p>
+          <label for="setup-host">Daemon address the Presto can reach</label>
+          <input id="setup-host" maxlength="253" autocomplete="off" spellcheck="false"
+                 placeholder="192.168.1.50">
+          <p class="note" id="setup-host-note">Use the daemon computer's LAN address, not
+            localhost and not a container's internal address.</p>
+          <label for="setup-port">Daemon device port</label>
+          <input id="setup-port" type="number" min="1" max="65535" step="1" inputmode="numeric"
+                 value="8787">
+          <label for="setup-name">Name this Presto reports (optional)</label>
+          <input id="setup-name" maxlength="32" autocomplete="off" spellcheck="false"
+                 placeholder="presto">
+          <label class="check" id="setup-wifi-label"><input id="setup-wifi" type="checkbox" checked>
+            Set the Wi-Fi network on the Presto</label>
+          <p class="note" id="setup-wifi-note">The setup script asks for the network name and
+            password on the USB computer. The Wi-Fi password is never typed into this page.</p>
+          <div id="setup-wifi-warning" class="wifi-required" role="status" hidden>
+            <strong>Wi-Fi is needed</strong>
+            <span>The Presto cannot reach this daemon without a Wi-Fi network. Untick this only
+              if the Presto already joins your network: the setup script then keeps the Wi-Fi it
+              has, and stops without changing anything if it has none.</span>
+          </div>
+          <div class="actions" id="setup-actions">
+            <button type="button" id="prepare-presto-setup">Prepare download</button>
+          </div>
+          <div id="setup-downloads" hidden>
+            <p class="warning" id="setup-download-warning">Your browser may say
+              <strong>presto_setup.py could harm your device</strong>. It says that about any
+              program file, so it is expected: choose <strong>Keep</strong>. The file is plain
+              Python text you can open and read first. It came from this page a moment ago and
+              holds no password or token: those are in the encrypted file, which only the code
+              below opens. If you did not just press Prepare download, choose Delete.</p>
+            <h4>Setup unlock code</h4>
+            <p class="note">Type this code into the setup script on the USB computer. It is
+              not inside either download, and it is shown only once. If it is lost, prepare a
+              new download; the device token is not changed either way.</p>
+            <div class="copy-row">
+              <code id="setup-unlock-code"></code>
+              <button type="button" id="copy-setup-code">Copy</button>
+            </div>
+            <ol class="note">
+              <li>Your browser has downloaded <a id="download-setup-script" href="#" download="presto_setup.py">presto_setup.py</a>
+                and <a id="download-setup-handoff" href="#" download="presto-setup.enc">presto-setup.enc</a>.
+                If it asked to allow several downloads, allow them. If one did not arrive, use these links.</li>
+              <li>Put both files in one folder on the computer the Presto is plugged into.</li>
+              <li>Run <code>python presto_setup.py</code> there and type the code when asked.
+                The script installs the app (a Presto that already updates its app over the air
+                keeps its app and gets only its settings), keeps or replaces the device's own
+                settings, and deletes the encrypted file when setup succeeds.</li>
+            </ol>
+            <p class="note" id="setup-summary"></p>
+            <div class="actions">
+              <button type="button" id="prepare-another-setup">Prepare another download</button>
+            </div>
+          </div>
         </div>
       </details>
 

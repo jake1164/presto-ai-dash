@@ -36,6 +36,11 @@ If the computer's address changes - a new DHCP lease, a different network -
 the device has to be updated. A fixed address for the daemon, or a DHCP
 reservation in the router, avoids that.
 
+To update it, open **Set up a Presto** on the daemon's admin page, prepare a
+download with the new address, and run the script on the computer the Presto is
+plugged into: see
+[Moving a Presto to a different daemon](../getting-started/set-up-the-presto.md#moving-a-presto-to-a-different-daemon).
+
 ## 3. Can the device reach the port?
 
 From any other machine on the same LAN:
@@ -121,23 +126,29 @@ parse".
 The admin page's **Status** tab lists every client that fetched the status
 endpoint: its name, its address, when it last fetched, how often, and the
 app revision it reports. A client that has not been seen for three poll
-intervals is shown as *not connected*.
+intervals is shown as *not connected*, and one that has not been seen for a
+day is forgotten, so an old row clears itself.
 
 If the Presto is listed there and fetching normally, the problem is on the
 device's network side, not in the daemon.
 
 ### The device's own columns
 
-The same table carries five more columns, filled in from what the device
+The same table carries four more columns, filled in from what the device
 reported about itself in its `X-Presto-Diag` header:
 
 | Column | What it says |
 | --- | --- |
-| **Last error** | The type of the last failed fetch and where it stopped, for example `OSError 110 (conn)`. It stays after the device recovers, and it is cleared when the device restarts, so it always belongs to the device's current run |
-| **Failures** | How many times the fetch has failed since the device was switched on |
+| **Failures** | How many times the fetch has failed since the device was switched on. When it is above zero it is a link: click it to see each time the daemon heard about new failures, with the kind of error and where it stopped, for example `OSError 110 (conn)`, and "last 4m ago" beside it says how recent the latest was |
 | **Free** | The free heap on the device, in KiB |
 | **Signal** | The Wi-Fi signal, in dBm |
 | **Uptime** | How long the app has been running |
+
+A failure is dated by when the daemon **heard** about it, not when it happened: a
+device that cannot reach the daemon cannot say so at the time, so the news arrives
+with its next successful poll. A number that is still above zero after the device
+has recovered is history, not a current fault: it counts failures since the device
+started, and a restart sets it back to zero.
 
 A dash means the device did not report that value. It is not an error: an
 older device, or one that has never polled, sends nothing.
@@ -161,7 +172,7 @@ client "presto" reported a fetch problem: err=OSError 110 st=conn n=3
 | Symptom | Cause |
 | --- | --- |
 | **Unauthorised** | `SHARED_TOKEN` on the device does not match `daemon.shared_token` |
-| **No network** | The SSID or the password in `/secrets.py` is wrong, or the network is 5 GHz only |
+| **No network** | The SSID or the password in `/secrets.py` is wrong, the network is 5 GHz only, or the Wi-Fi changed. Run **Set up a Presto** from the admin page with the Wi-Fi box ticked: see [Changing the Wi-Fi network](../getting-started/set-up-the-presto.md#changing-the-wi-fi-network) |
 | The daemon is up but the port is closed | A firewall on the daemon machine. Allow the private LAN |
 | The device works, then stops after a while | Look at the router's client list and the DHCP lease |
 

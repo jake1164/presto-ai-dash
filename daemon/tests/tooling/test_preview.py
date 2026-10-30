@@ -5,6 +5,7 @@ import os
 import struct
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from types import SimpleNamespace
@@ -24,6 +25,19 @@ from presto_bundle import app_files, snapshot  # noqa: E402
 
 
 class PreviewTests(unittest.TestCase):
+    def test_preview_cannot_report_a_configured_physical_device_identity(self):
+        configured = SimpleNamespace(DEVICE_ID="a" * 32)
+        with patch.dict(sys.modules, {"config": configured}):
+            app_module, preview_net = render._load_app_modules()
+            with patch.object(app_module.lifecycle, "bump_boot") as bump_boot:
+                app = app_module.App(render.FakePresto(Framebuffer()))
+            self.assertEqual(preview_net.current_client_name(), "psl")
+            self.assertIsNone(app.device_id)
+            self.assertIsNone(app._lifecycle_headers())
+            self.assertEqual(app.client.lifecycle_headers("/api/v1/status"), {})
+            bump_boot.assert_not_called()
+            self.assertEqual(configured.DEVICE_ID, "a" * 32)
+
     def test_source_loader_uses_snapshot_bytes_even_if_the_file_changes(self):
         with tempfile.TemporaryDirectory() as folder:
             path = os.path.join(folder, "helper.py")
@@ -290,6 +304,146 @@ class FakeRunner:
 
     def snapshot(self, after, timeout=0):
         return {"frame": 1, "led": self.led, "error": None, "demo": self.demo}
+
+
+class DaemonSettingsTests(unittest.TestCase):
+    """PSL follows the daemon being debugged, not whatever presto/config.py names."""
+
+    TOKEN = "psl-test-token-0123456789-abcdef"
+
+    def setUp(self):
+        self.folder = tempfile.TemporaryDirectory()
+        self.addCleanup(self.folder.cleanup)
+        # The daemon reads DASH_* settings too; a developer's own must not leak in.
+        environment = {key: value for key, value in os.environ.items()
+                       if not key.startswith("DASH_")}
+        patcher = patch.dict(os.environ, environment, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def write(self, text):
+        path = os.path.join(self.folder.name, "dash.toml")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+        return path
+
+    def test_a_bind_everything_host_becomes_loopback(self):
+        path = self.write('[daemon]\nhost = "0.0.0.0"\nport = 9123\nshared_token = "%s"\n' % self.TOKEN)
+        settings, note = live.daemon_settings(path)
+        self.assertEqual(settings, {"DAEMON_HOST": "127.0.0.1", "DAEMON_PORT": 9123,
+                                    "SHARED_TOKEN": self.TOKEN})
+        self.assertIsNone(note)
+
+    def test_the_default_host_and_port_are_the_daemons_own(self):
+        settings, _note = live.daemon_settings(self.write('[daemon]\nshared_token = "%s"\n' % self.TOKEN))
+        self.assertEqual(settings["DAEMON_HOST"], "127.0.0.1")
+        self.assertEqual(settings["DAEMON_PORT"], 8787)
+
+    def test_a_specific_host_is_kept(self):
+        path = self.write('[daemon]\nhost = "192.168.1.5"\nshared_token = "%s"\n' % self.TOKEN)
+        self.assertEqual(live.daemon_settings(path)[0]["DAEMON_HOST"], "192.168.1.5")
+
+    def test_the_environment_overrides_the_file_as_it_does_for_the_daemon(self):
+        path = self.write('[daemon]\nshared_token = "%s"\n' % self.TOKEN)
+        with patch.dict(os.environ, {"DASH_SHARED_TOKEN": "from-the-environment-0123456789",
+                                     "DASH_PORT": "9555"}):
+            settings, _note = live.daemon_settings(path)
+        self.assertEqual(settings["SHARED_TOKEN"], "from-the-environment-0123456789")
+        self.assertEqual(settings["DAEMON_PORT"], 9555)
+
+    def test_without_a_token_the_address_is_used_and_the_reason_is_given(self):
+        # The daemon invents a different token at every start, so there is none to follow.
+        settings, note = live.daemon_settings(self.write('[daemon]\nport = 9123\n'))
+        self.assertEqual(settings, {"DAEMON_HOST": "127.0.0.1", "DAEMON_PORT": 9123})
+        self.assertIn("daemon.shared_token", note)
+
+    def test_an_unusable_file_keeps_the_old_address_and_never_echoes_a_token(self):
+        weak = "short"
+        for label, text in (("weak token", '[daemon]\nshared_token = "%s"\n' % weak),
+                            ("not toml", "this is = = not toml\n[")):
+            with self.subTest(case=label):
+                settings, note = live.daemon_settings(self.write(text))
+                self.assertIsNone(settings)
+                self.assertIn("presto/config.py", note)
+                self.assertNotIn(weak + '"', note)
+        settings, note = live.daemon_settings(os.path.join(self.folder.name, "missing.toml"))
+        self.assertIsNone(settings)
+        self.assertIn("presto/config.py", note)
+
+    def test_the_runner_applies_them_over_the_apps_own_settings(self):
+        class Stopped(Exception):
+            pass
+
+        class Config:
+            DAEMON_HOST = "toontown.example"
+            DAEMON_PORT = 1
+            SHARED_TOKEN = "old"
+            POLL_INTERVAL = 15
+
+        class FakeMain:
+            config = Config
+            __presto_revision__ = "test"
+
+            @staticmethod
+            def App(presto):
+                raise Stopped()
+
+        runner = live.Runner(daemon={"DAEMON_HOST": "127.0.0.1", "DAEMON_PORT": 9123,
+                                     "SHARED_TOKEN": "new"})
+        with patch.object(live.render, "_load_app_modules", return_value=(FakeMain, None)):
+            runner._run(threading.Event())
+        self.assertEqual((Config.DAEMON_HOST, Config.DAEMON_PORT, Config.SHARED_TOKEN),
+                         ("127.0.0.1", 9123, "new"))
+        self.assertEqual(Config.POLL_INTERVAL, 15, "settings it was not given are left alone")
+
+    def test_the_line_under_the_screen_says_where_it_is_polling_and_never_shows_a_token(self):
+        class Config:
+            DAEMON_HOST = "192.168.1.9"
+            DAEMON_PORT = 8800
+            SHARED_TOKEN = "a-token-that-must-not-appear"
+
+        own = live.Runner()
+        self.assertEqual(own._label(Config), {"address": "192.168.1.9:8800", "source": "presto/config.py"})
+        followed = live.Runner(daemon={"DAEMON_HOST": "127.0.0.1"}, source="dash.toml")
+        self.assertEqual(followed._label(Config)["source"], "dash.toml")
+        self.assertNotIn("token", json.dumps(own._label(Config)))
+
+    def test_the_label_copes_with_a_missing_address_and_an_odd_port(self):
+        class Bare:
+            pass
+
+        class Odd:
+            DAEMON_HOST = "10.0.0.2"
+            DAEMON_PORT = "not a number"
+
+        self.assertIsNone(live.Runner()._label(Bare))
+        self.assertEqual(live.Runner()._label(Odd)["address"], "10.0.0.2:not a number")
+        class Defaulted:
+            DAEMON_HOST = "10.0.0.2"
+        self.assertEqual(live.Runner()._label(Defaulted)["address"], "10.0.0.2:8787")
+
+    def test_the_state_carries_it_and_demo_mode_has_none(self):
+        self.assertIn("daemon", live.Runner(demo=True).snapshot(after=-1, timeout=0))
+        self.assertIsNone(live.Runner(demo=True).snapshot(after=-1, timeout=0)["daemon"])
+
+    def test_the_page_prints_it(self):
+        self.assertIn("polling", live.PAGE)
+        self.assertIn("state.daemon.address", live.PAGE)
+
+    def test_without_a_daemon_configuration_the_app_keeps_its_own_settings(self):
+        self.assertEqual(live.Runner().daemon, {})
+
+    def test_vs_code_gives_the_preview_the_same_file_as_the_daemon(self):
+        with open(os.path.join(presto_path.REPO_ROOT, ".vscode", "launch.json"),
+                  encoding="utf-8") as handle:
+            launch = json.load(handle)
+        configs = {entry["name"]: entry["args"] for entry in launch["configurations"]}
+
+        def config_of(args):
+            return args[args.index("--config") + 1]
+
+        daemon = config_of(configs["Daemon + admin page (no browser; used by the compound)"])
+        self.assertEqual(config_of(configs["Presto preview only"]), daemon)
 
 
 class PageTemplateTests(unittest.TestCase):

@@ -80,7 +80,8 @@ if they change, so an upgrade is deliberate.
 
 ## Packages the daemon installs
 
-The daemon needs `cryptography` (and, through it, `cffi` and `pycparser`); the
+The daemon needs `cryptography` (and, through it, `cffi` and `pycparser`) and
+`packaging` (Apache-2.0 or BSD-2-Clause, for release version ordering); the
 optional device tools need `mpremote`. They are installed from PyPI, not copied
 into this repository, and each carries its own licence files in its
 `.dist-info` folder. The Docker image keeps those folders, so the licences of

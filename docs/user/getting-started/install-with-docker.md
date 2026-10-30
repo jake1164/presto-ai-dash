@@ -199,6 +199,13 @@ release, so the two commands above are the whole upgrade. Each release also keep
 example `0.50.0`. To stay on one version, set `DASH_IMAGE` in `.env`, for example
 `DASH_IMAGE=ghcr.io/jake1164/presto-ai-dash:0.50.0`.
 
+The daemon tells you when a newer release is out (the admin page's Status tab, and a blue
+arrow on the Presto). It asks only the GitHub Container Registry, compares against the exact
+release your running image carries, and never pulls or restarts anything. If you pinned
+`DASH_IMAGE`, change it to the version the page names first; a pull on its own only downloads the
+image, and the container keeps running the old one until `docker compose up -d dash` recreates it.
+A release candidate image is never what `latest` points to.
+
 To build the image from a checkout instead of pulling it:
 
 ```bash

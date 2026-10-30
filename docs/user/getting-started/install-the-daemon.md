@@ -25,7 +25,10 @@ pipx install presto-ai-dash
 presto-ai-dash --version
 ```
 
-To upgrade later, run `pipx upgrade presto-ai-dash`.
+To upgrade later, run `pipx upgrade presto-ai-dash`. The admin page's Status tab and a blue
+arrow on the Presto tell you when a newer release is out; neither upgrades anything. A release
+candidate is not picked up by `pipx upgrade`: name it, for example
+`pipx install --force "presto-ai-dash==0.50.0rc5"`.
 
 `pip install presto-ai-dash` works as well, inside a virtual environment you
 made yourself. If the `presto-ai-dash` command is not on your path, every

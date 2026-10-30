@@ -16,8 +16,11 @@ You need:
   network;
 - the Presto, plugged into a Windows, macOS or Linux computer by a
   **data-capable** USB cable;
-- Python 3 on that computer. The setup script explains how to add the two
-  packages it needs (`cryptography` and `mpremote`) if they are missing.
+- Python 3 on that computer. The setup script needs two packages
+  (`cryptography` and `mpremote`). If they are missing, it offers to install
+  them into a private, temporary environment, which it deletes when it
+  finishes; answer **Y**. `pipx run presto_setup.py` and `uv run presto_setup.py`
+  do the same without asking.
 
 ### One process for every case
 
@@ -31,7 +34,7 @@ computer. The script looks at the Presto and does what is needed.
 | Set up a new Presto | The steps below |
 | Re-initialise a Presto | The same steps |
 | Change the Wi-Fi network or password | The same steps, with **Set the Wi-Fi network on the Presto** ticked |
-| Move a Presto to a new daemon (the database and settings stay where they are) | The same steps on the **new** daemon's admin page; answer `y` to replace the daemon address and token |
+| Move a Presto to a new daemon (the database and settings stay where they are) | The same steps on the **new** daemon's admin page; the script changes only the daemon address and token |
 
 On a new or single-folder Presto the script installs the app and writes the
 settings. On a Presto that already updates its app over the air, it leaves the
@@ -74,6 +77,14 @@ files by itself, and the page shows:
   handoff, in case your browser blocked one. A browser may ask once whether to
   allow several downloads: allow it.
 
+**Your browser may warn about `presto_setup.py`.** Edge, Chrome and others say
+something like "presto_setup.py could harm your device. Do you want to keep it
+anyway?", because it is a program file. That is expected: choose **Keep**. The
+file is plain Python text you can open and read before you run it. It holds no
+password or token, because those are in `presto-setup.enc`, which only the
+unlock code opens. Keep it only if you pressed **Prepare download** a moment
+ago; if you did not, delete it.
+
 To prepare another download, for example with different settings, press
 **Prepare another download**.
 
@@ -93,20 +104,24 @@ python presto_setup.py
 
 On macOS or Linux, use `python3` if that is how Python 3 is named. The script:
 
-1. asks for the unlock code, with the input hidden, and decrypts the setup file
-   **in memory**. Nothing is written to the device, and no temporary plaintext
-   file is created on the computer;
-2. lists the USB serial devices and asks you to choose one. It never picks a
-   board by itself;
-3. checks that the chosen device is a Pimoroni Presto **before** writing
-   anything, and stops if it is not;
+1. asks for the unlock code and decrypts the setup file **in memory**. The code
+   is not shown as you type: each character, including each one of a paste,
+   appears as a `*`, so you can tell the paste worked. Nothing is written to
+   the device, and no temporary plaintext file is created on the computer;
+2. finds the USB serial device. If exactly one is connected it uses that one and
+   says so; if there are several it lists them and asks you to choose by number,
+   because it never guesses between boards;
+3. checks that the device is a Pimoroni Presto **before** writing anything, and
+   stops if it is not;
 4. asks for your Wi-Fi network name and password locally (hidden) when you left
    **Set the Wi-Fi network on the Presto** ticked, even if the Presto already has
    some, and tells you what will change. It only goes to the Presto's own
-   `/secrets.py`. If you unticked the box, it keeps the Wi-Fi already on the
-   Presto and asks nothing;
-5. shows a summary, then installs the app, verifies every file by SHA-256, and
-   puts the previous app back if a write fails;
+   `/secrets.py`. The password is shown as `*` too. If you unticked the box, it
+   keeps the Wi-Fi already on the Presto and asks nothing;
+5. shows a summary of exactly what will change, and asks one question,
+   **Continue? [Y/n]**. Press Enter to go ahead, or `n` to stop with nothing
+   written. It then installs the app, verifies every file by SHA-256, and puts
+   the previous app back if a write fails;
 6. starts AI Dash and checks from the device that it can reach the daemon.
 
 On success it deletes `presto-setup.enc` and says so. On any failure it keeps
@@ -115,10 +130,14 @@ the file, explains what to check, and lets you run the same command again.
 ### 4. What it keeps
 
 - **Firmware and Pimoroni's stock launcher** are never touched.
-- **Existing device settings are kept** unless you answer yes to replacing
-  them. The one exception is the Wi-Fi, which follows the box you ticked or
-  unticked on the admin page. Replacing `/ai_dash_files/config.py` keeps the device's existing random
-  device identifier; a new device gets one.
+- **Existing device settings are kept.** On a Presto that already has
+  `/ai_dash_files/config.py`, the script changes only the daemon address and the
+  device token in it. Every other setting, comment, the device name and the
+  random device identifier stay, so there is nothing to ask. A new device gets
+  a new file, with a new identifier. If the existing file is not in the usual
+  shape (it does not parse, or sets the daemon twice), the summary says it will
+  write a new one instead. The Wi-Fi is the exception, and follows the box you
+  ticked or unticked on the admin page.
 - **Other files on the device** are left alone. On a device that already runs
   AI Dash, app modules from an older build are retired.
 
@@ -126,7 +145,8 @@ the file, explains what to check, and lets you run the same command again.
 
 | What you see | What to do |
 | --- | --- |
-| `needs two Python packages` | Run the `pip install` line the script prints, then run it again. |
+| `unexpected error (RuntimeError in ..., line 123)` | The script names the kind of error and where it happened, never its text, so nothing secret is printed. The setup file was kept: run the script again, and include that line if you report it. |
+| `needs two Python packages` | You declined the private environment, or it could not be built (it needs the internet and Python's `venv` module). Run the `pip install` line the script prints, then run it again. |
 | `No USB serial device was found` | Use a data cable, not a charge-only one. Press **RESET** on the Presto. List ports with `python -m mpremote connect list`. |
 | `not a Pimoroni Presto` | The chosen port is another board. Run the script again and choose the Presto. |
 | `unlock code did not open` | Copy the code again from the admin page (all 32 letters and digits), or prepare a new download. |

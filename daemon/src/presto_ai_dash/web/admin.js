@@ -496,6 +496,7 @@
 
   function prepareAnotherSetup() {
     setupPrepared = null;
+    element("copy-setup-code").textContent = "Copy";
     element("setup-downloads").hidden = true; element("setup-unlock-code").textContent = "";
     for (const id of ["download-setup-script", "download-setup-handoff"]) {
       element(id).removeAttribute("href");
@@ -504,12 +505,18 @@
     element("prepare-presto-setup").focus();
   }
 
+  let copiedTimer = null;
   async function copySetupCode() {
     const text = element("setup-unlock-code").textContent || "";
     if (!text) return;
+    const button = element("copy-setup-code");
     try {
       await navigator.clipboard.writeText(text);
       message("Setup unlock code copied.");
+      // The message is up at the top of the page; say it where the eye already is.
+      button.textContent = "Copied";
+      clearTimeout(copiedTimer);
+      copiedTimer = setTimeout(() => { button.textContent = "Copy"; }, 2000);
     } catch (_) {
       message("Select the code and copy it.", true);
     }

@@ -12,10 +12,12 @@ file is removed only after the device reached the daemon.
 import ast
 import base64
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -92,6 +94,9 @@ class FakeDevice:
             self.files[after] = self.files.pop(before)
             return b""
         raise AssertionError("unexpected device script: " + text[:60])
+
+    def read(self, path):
+        return bytes(self.files[path])
 
     def exists(self, path):
         return path in self.files
@@ -170,6 +175,8 @@ class ScriptCase(unittest.TestCase):
 
     def run_script(self, path, answers, device, arguments=()):
         module = rendered_module()
+        # What is plugged into this computer must not decide whether a test passes.
+        module.list_ports = lambda: [("COM3", "USB Serial Device")]
         said, asked = [], list(answers)
 
         def ask(text, secret=False):
@@ -196,7 +203,7 @@ class FirstTimeTests(ScriptCase):
         code = device_setup.new_unlock_code()
         path = self.handoff(code)
         device = FakeDevice()
-        status, said = self.run_script(path, [code, "1", "Home Wi-Fi", "s3cret-pass", "yes"],
+        status, said = self.run_script(path, [code, "Home Wi-Fi", "s3cret-pass", "yes"],
                                        device)
         self.assertEqual(status, 0)
         # The app, its revision and both private files are on the device now.
@@ -220,7 +227,7 @@ class FirstTimeTests(ScriptCase):
     def test_the_device_identifier_is_stable_random_and_outside_the_app_files(self):
         code = device_setup.new_unlock_code()
         device = FakeDevice()
-        status, said = self.run_script(self.handoff(code), [code, "1", "net", "pw", "yes"],
+        status, said = self.run_script(self.handoff(code), [code, "net", "pw", "yes"],
                                        device)
         self.assertEqual(status, 0, said)
         written = device.files[CONFIG].decode("ascii")
@@ -251,7 +258,7 @@ class FirstTimeTests(ScriptCase):
         path = self.handoff(code)
         device = FakeDevice()
         status, said = self.run_script(
-            path, ["0000-0000-0000-0000-0000-0000-0000-0000", code, "1", "net", "pw", "yes"],
+            path, ["0000-0000-0000-0000-0000-0000-0000-0000", code, "net", "pw", "yes"],
             device)
         self.assertEqual(status, 0, said)
         self.assertTrue(device.launched)
@@ -323,7 +330,7 @@ class BoardAndPortTests(ScriptCase):
         code = device_setup.new_unlock_code()
         path = self.handoff(code)
         device = FakeDevice(board="Raspberry Pi Pico 2")
-        status, said = self.run_script(path, [code, "1"], device)
+        status, said = self.run_script(path, [code], device)
         self.assertEqual(status, 1)
         self.assertFalse(device.writes)
         self.assertFalse(device.launched)
@@ -364,40 +371,280 @@ class BoardAndPortTests(ScriptCase):
                           ("/dev/ttyACM0", "2E8A:000F MicroPython board")])
 
 
-class PreservationTests(ScriptCase):
-    def test_existing_private_settings_are_kept_unless_explicitly_replaced(self):
+class MergeConfigTests(unittest.TestCase):
+    """Only the daemon lines of a Presto's own settings change."""
+
+    def merge(self, existing, name="presto", device_id="c" * 32):
+        module = rendered_module()
+        payload = device_setup.build_payload(BUNDLE, "192.168.1.50", 8787, TOKEN, "presto", "0.50.0")
+        return module.merge_config(existing, payload, name, device_id)
+
+    def test_comments_and_other_settings_survive(self):
+        existing = (b"# tuned by hand\nPOLL_INTERVAL = 30\nDAEMON_HOST = 'x'  # old\n"
+                    b"DAEMON_PORT = 1\nSHARED_TOKEN = 'old'\nDEVICE_ID = '" + b"d" * 32 + b"'\n"
+                    b"DEVICE_NAME = 'desk'\n")
+        merged = self.merge(existing).decode()
+        self.assertIn("# tuned by hand", merged)
+        self.assertIn("POLL_INTERVAL = 30", merged)
+        self.assertIn("DEVICE_ID = '%s'" % ("d" * 32), merged)
+        self.assertIn("DEVICE_NAME = 'desk'", merged)
+        self.assertIn("DAEMON_HOST = '192.168.1.50'", merged)
+        self.assertIn("DAEMON_PORT = 8787", merged)
+        self.assertIn("SHARED_TOKEN = '%s'" % TOKEN, merged)
+        self.assertNotIn("'old'", merged)
+
+    def test_windows_line_endings_are_kept(self):
+        existing = b"POLL_INTERVAL = 30\r\nDAEMON_HOST = 'x'\r\nDEVICE_ID = '" + b"d" * 32 + b"'\r\n"
+        merged = self.merge(existing)
+        self.assertIn(b"DAEMON_HOST = '192.168.1.50'\r\n", merged)
+        self.assertIn(b"POLL_INTERVAL = 30\r\n", merged)
+
+    def test_missing_daemon_lines_are_added(self):
+        merged = self.merge(b"POLL_INTERVAL = 30\n").decode()
+        for name in ("DAEMON_HOST", "DAEMON_PORT", "SHARED_TOKEN", "DEVICE_ID", "DEVICE_NAME"):
+            self.assertEqual(merged.count(name + " ="), 1, name)
+
+    def test_files_it_will_not_guess_about_come_back_as_none(self):
+        for label, existing in (("not python", b"DAEMON_HOST = (\n"),
+                                ("duplicate", b"DAEMON_HOST = 'a'\nDAEMON_HOST = 'b'\n"),
+                                ("several lines", b"DAEMON_HOST = (\n    'a'\n)\n"),
+                                ("not text", b"\xff\xfe\x00DAEMON")):
+            with self.subTest(case=label):
+                self.assertIsNone(self.merge(existing))
+
+    def test_the_file_is_parsed_never_run(self):
+        # It came from a device, so nothing in it may execute on this computer.
+        merged = self.merge(b"raise SystemExit(7)\nimport os\nos.system('exit 9')\nPOLL_INTERVAL = 5\n")
+        self.assertIn(b"POLL_INTERVAL = 5", merged)
+
+
+class ConfirmationTests(ScriptCase):
+    """The questions a person is asked, counted."""
+
+    def asked_for(self, device, answers, wifi="keep"):
+        code = device_setup.new_unlock_code()
+        answers = [code if answer == "<code>" else answer for answer in answers]
+        path = self.handoff(code, wifi=wifi)
+        status, said = self.run_script(path, answers, device)
+        prompts = [text for text in said if text.endswith((": ", "] "))]
+        return status, said, prompts
+
+    def test_a_presto_with_settings_is_asked_for_the_code_and_one_confirmation(self):
+        status, said, prompts = self.asked_for(
+            FakeDevice(existing_install(), device_id="a" * 32), ["<code>", ""])
+        self.assertEqual(status, 0, said)
+        self.assertEqual(len(prompts), 2, prompts)
+        self.assertIn("Setup unlock code", prompts[0])
+        self.assertIn("Continue? [Y/n]", prompts[1])
+
+    def test_a_new_presto_adds_only_the_wifi_questions(self):
+        status, said, prompts = self.asked_for(
+            FakeDevice(), ["<code>", "Home", "pass-word-1", ""], wifi="set")
+        self.assertEqual(status, 0, said)
+        self.assertEqual(len(prompts), 4, prompts)
+
+    def test_enter_y_and_yes_all_continue_and_anything_else_stops(self):
+        for answer, status in (("", 0), ("y", 0), ("yes", 0), ("Y", 0), ("n", 2), ("no", 2), ("x", 2)):
+            with self.subTest(answer=answer):
+                device = FakeDevice(existing_install(), device_id="a" * 32)
+                before = dict(device.files)
+                got, said, _prompts = self.asked_for(device, ["<code>", answer])
+                self.assertEqual(got, status, said)
+                if status == 2:
+                    self.assertEqual(device.files, before, "declining writes nothing")
+                    self.assertFalse(device.launched)
+
+    def test_the_only_usb_device_is_used_without_a_question(self):
+        status, said, prompts = self.asked_for(
+            FakeDevice(existing_install(), device_id="a" * 32), ["<code>", "yes"])
+        self.assertEqual(status, 0, said)
+        self.assertTrue(any("Using the only USB device found: COM3" in text for text in said))
+        self.assertFalse(any("Choose the Presto" in text for text in prompts))
+        # It is still named in the summary the confirmation is for.
+        self.assertTrue(any(" on COM3 (" in text for text in said))
+
+    def test_nothing_is_written_to_a_board_that_is_not_a_presto_even_when_it_is_the_only_one(self):
+        device = FakeDevice(board="Raspberry Pi Pico 2")
+        status, said, _prompts = self.asked_for(device, ["<code>"])
+        self.assertEqual(status, 1)
+        self.assertFalse(device.writes)
+        self.assertTrue(any("not a Pimoroni Presto" in text for text in said))
+
+
+class MaskedInputTests(unittest.TestCase):
+    """A pasted code or password shows as asterisks, so it is clear the paste landed."""
+
+    def windows(self, keys, text="Code: "):
+        module = rendered_module()
+        queue = iter(keys)
+        fake = types.ModuleType("msvcrt")
+        fake.getwch = lambda: next(queue)
+        out = io.StringIO()
+        with unittest.mock.patch.dict(sys.modules, {"msvcrt": fake}), \
+                unittest.mock.patch("sys.stdout", out):
+            value = module._masked_windows(text)
+        return value, out.getvalue()
+
+    def test_every_character_of_a_paste_shows_as_one_asterisk(self):
+        paste = "ABCD-EFGH-" * 4
+        value, shown = self.windows(list(paste) + ["\r"])
+        self.assertEqual(value, paste)
+        self.assertEqual(shown, "Code: " + "*" * len(paste) + "\n")
+        self.assertNotIn("A", shown.replace("Code", ""))
+
+    def test_backspace_removes_one_and_arrow_keys_are_ignored(self):
+        value, shown = self.windows(["a", "b", "\b", "\xe0", "H", "c", "\r"])
+        self.assertEqual(value, "ac")
+        self.assertEqual(shown, "Code: **\b \b*\n")
+
+    def test_backspace_on_an_empty_line_does_nothing(self):
+        value, shown = self.windows(["\b", "x", "\r"])
+        self.assertEqual((value, shown), ("x", "Code: *\n"))
+
+    def test_control_c_interrupts(self):
+        with self.assertRaises(KeyboardInterrupt):
+            self.windows(["a", "\x03"])
+
+    def test_the_same_on_a_unix_terminal(self):
+        module = rendered_module()
+        restored = []
+        termios = types.ModuleType("termios")
+        termios.tcgetattr = lambda descriptor: ["saved"]
+        termios.tcsetattr = lambda descriptor, when, saved: restored.append(saved)
+        termios.TCSADRAIN = 1
+        tty = types.ModuleType("tty")
+        tty.setcbreak = lambda descriptor: None
+        stdin = io.StringIO("ab\x7fc\n")
+        stdin.fileno = lambda: 0
+        out = io.StringIO()
+        with unittest.mock.patch.dict(sys.modules, {"termios": termios, "tty": tty}), \
+                unittest.mock.patch("sys.stdin", stdin), unittest.mock.patch("sys.stdout", out):
+            value = module._masked_posix("Code: ")
+        self.assertEqual(value, "ac")
+        self.assertEqual(out.getvalue(), "Code: **\b \b*\n")
+        self.assertEqual(restored, [["saved"]], "the terminal is put back")
+
+    def test_without_a_terminal_it_falls_back_to_getpass(self):
+        module = rendered_module()
+        with unittest.mock.patch.object(module.getpass, "getpass", return_value="secret") as asked, \
+                unittest.mock.patch("sys.stdin", io.StringIO("")):
+            self.assertEqual(module.masked_input("Code: "), "secret")
+        asked.assert_called_once_with("Code: ")
+
+    def test_secret_prompts_use_it(self):
+        module = rendered_module()
+        with unittest.mock.patch.object(module, "masked_input", return_value="x") as masked:
+            self.assertEqual(module.prompt("Password: ", secret=True), "x")
+            masked.assert_called_once_with("Password: ")
+        with unittest.mock.patch("builtins.input", return_value="plain") as plain:
+            self.assertEqual(module.prompt("Name: "), "plain")
+            plain.assert_called_once_with("Name: ")
+
+
+class ErrorReportTests(ScriptCase):
+    """What is said when something goes wrong: useful, and never a secret."""
+
+    def test_an_unexpected_error_names_its_type_and_place_but_never_its_text(self):
+        code = device_setup.new_unlock_code()
+        device = FakeDevice(existing_install(), device_id="a" * 32,
+                            fail_write="/ai_dash_files/config.py.presto-new")
+        status, said = self.run_script(self.handoff(code, wifi="keep"), [code, "yes"], device)
+        self.assertEqual(status, 1)
+        blob = "\n".join(said)
+        self.assertIn("unexpected error (RuntimeError in ", blob)
+        self.assertRegex(blob, r"line \d+\)")
+        self.assertNotIn("injected USB failure", blob)
+        self.assertIn("kept", blob)
+
+    def test_a_device_error_says_what_it_is_instead_of_calling_it_unexpected(self):
+        module = rendered_module()
+        module.list_ports = lambda: [("COM3", "USB Serial Device")]
+        message = "A file could not be written to the Presto. Reconnect it and run this script again."
+
+        class Failing(FakeDevice):
+            def write(self, path, data):
+                raise module.DeviceError(message)
+
         code = device_setup.new_unlock_code()
         path = self.handoff(code, wifi="keep")
-        device = FakeDevice(existing_install(), device_id="a" * 32, name="old-name")
+        said = []
+        answers = [code, "yes"]
+        status = module.main(["--handoff", str(path)], device_factory=lambda port: Failing(existing_install(), device_id="a" * 32),
+                             ask=lambda text, secret=False: answers.pop(0), say=said.append)
+        self.assertEqual(status, 1)
+        self.assertIn(message, said)
+        self.assertFalse(any("unexpected error" in text for text in said))
+
+
+class PreservationTests(ScriptCase):
+    def test_a_presto_with_settings_keeps_all_of_them_but_the_daemon(self):
+        code = device_setup.new_unlock_code()
+        path = self.handoff(code, wifi="keep")
+        files = existing_install()
+        files[CONFIG] = (b"# my settings\nLED_BRIGHTNESS = 0.8\nDAEMON_HOST = '10.0.0.2'  # old\n"
+                         b"DEVICE_ID = '" + b"a" * 32 + b"'\nSOUND_ENABLED = False\n")
+        device = FakeDevice(files, device_id="a" * 32, name="old-name")
         before = dict(device.files)
-        status, said = self.run_script(path, [code, "1", "n", "yes"], device)
+        status, said = self.run_script(path, [code, "yes"], device)
         self.assertEqual(status, 0, said)
-        self.assertEqual(device.files[CONFIG], before[CONFIG])
+        written = device.files[CONFIG].decode("ascii")
+        for kept_line in ("# my settings", "LED_BRIGHTNESS = 0.8", "SOUND_ENABLED = False",
+                          "DEVICE_ID = '%s'" % ("a" * 32)):
+            self.assertIn(kept_line, written)
+        self.assertIn("DAEMON_HOST = '192.168.1.50'", written)
+        self.assertIn("DAEMON_PORT = 8787", written)
+        self.assertIn("SHARED_TOKEN = '%s'" % TOKEN, written)
+        self.assertNotIn("10.0.0.2", written)
         self.assertEqual(device.files[SECRETS], before[SECRETS])
         self.assertEqual(device.files["/main.py"], before["/main.py"])
-        self.assertTrue(any("keep the existing file" in text for text in said))
+        self.assertIn("Every other setting in it stays.", "\n".join(said))
         for target, data in BUNDLE["files"].items():
             self.assertEqual(device.files[target], data)
         self.assertNotIn("/ai_dash_files/old_helper.py", device.files)
 
-    def test_replacing_configuration_keeps_the_existing_device_identifier(self):
+    def test_the_identifier_and_name_already_in_the_file_are_kept_once(self):
         code = device_setup.new_unlock_code()
         path = self.handoff(code, wifi="keep")
-        device = FakeDevice(existing_install(), device_id="b" * 32, name="old-name")
-        status, said = self.run_script(path, [code, "1", "y", "yes"], device)
+        files = existing_install()
+        files[CONFIG] = (b"DAEMON_HOST = '10.0.0.2'\nDEVICE_NAME = 'desk'\n"
+                         b"DEVICE_ID = '" + b"b" * 32 + b"'\n")
+        device = FakeDevice(files, device_id="b" * 32, name="desk")
+        status, said = self.run_script(path, [code, "yes"], device)
         self.assertEqual(status, 0, said)
         written = device.files[CONFIG].decode("ascii")
+        self.assertEqual(written.count("DEVICE_ID"), 1)
+        self.assertEqual(written.count("DEVICE_NAME"), 1)
         self.assertIn("DEVICE_ID = '%s'" % ("b" * 32), written)
-        self.assertIn("DEVICE_NAME = 'old-name'", written)
-        self.assertIn("DAEMON_HOST = '192.168.1.50'", written)
-        self.assertEqual(device.files[SECRETS], existing_install()[SECRETS])
+
+    def test_a_missing_identifier_is_added_to_the_existing_file(self):
+        code = device_setup.new_unlock_code()
+        path = self.handoff(code, wifi="keep")
+        files = existing_install()
+        files[CONFIG] = b"DAEMON_HOST = '10.0.0.2'\nLED_BRIGHTNESS = 0.8\n"
+        device = FakeDevice(files)
+        status, said = self.run_script(path, [code, "yes"], device)
+        self.assertEqual(status, 0, said)
+        written = device.files[CONFIG].decode("ascii")
+        self.assertIn("LED_BRIGHTNESS = 0.8", written)
+        self.assertEqual(len(re.findall(r"DEVICE_ID = '[0-9a-f]{32}'", written)), 1)
+
+    def test_a_settings_file_of_an_unusual_shape_is_rewritten_and_the_summary_says_so(self):
+        code = device_setup.new_unlock_code()
+        path = self.handoff(code, wifi="keep")
+        files = existing_install()
+        files[CONFIG] = b"DAEMON_HOST = 'a'\nDAEMON_HOST = 'b'\n"
+        device = FakeDevice(files, device_id="a" * 32)
+        status, said = self.run_script(path, [code, "yes"], device)
+        self.assertEqual(status, 0, said)
+        self.assertIn("does not have the usual shape", "\n".join(said))
+        self.assertIn("DAEMON_HOST = '192.168.1.50'", device.files[CONFIG].decode("ascii"))
 
     def test_keeping_the_wifi_asks_nothing_and_leaves_the_file_alone(self):
         code = device_setup.new_unlock_code()
         path = self.handoff(code, wifi="keep")
         device = FakeDevice(existing_install(), device_id="a" * 32, name="old-name")
         before = dict(device.files)
-        status, said = self.run_script(path, [code, "1", "n", "yes"], device)
+        status, said = self.run_script(path, [code, "yes"], device)
         self.assertEqual(status, 0, said)
         self.assertEqual(device.files[SECRETS], before[SECRETS])
         blob = "\n".join(said)
@@ -412,7 +659,7 @@ class PreservationTests(ScriptCase):
         del files[SECRETS]
         device = FakeDevice(files, device_id="a" * 32, name="old-name")
         before = dict(device.files)
-        status, said = self.run_script(path, [code, "1"], device)
+        status, said = self.run_script(path, [code], device)
         self.assertEqual(status, 1)
         self.assertEqual(device.files, before)
         self.assertEqual(device.writes, [])
@@ -426,7 +673,7 @@ class PreservationTests(ScriptCase):
         code = device_setup.new_unlock_code()
         path = self.handoff(code, wifi="set")
         device = FakeDevice(existing_install(), device_id="a" * 32, name="old-name")
-        status, said = self.run_script(path, [code, "1", "n", "Office 2G", "new-wifi-pass", "yes"],
+        status, said = self.run_script(path, [code, "Office 2G", "new-wifi-pass", "yes"],
                                        device)
         self.assertEqual(status, 0, said)
         written = device.files[SECRETS].decode("ascii")
@@ -445,7 +692,7 @@ class PreservationTests(ScriptCase):
         path = self.folder / device_setup.HANDOFF_NAME
         path.write_bytes(data)
         device = FakeDevice(existing_install(), device_id="a" * 32, name="old-name")
-        status, said = self.run_script(path, [code, "1", "n", "n", "yes"], device)
+        status, said = self.run_script(path, [code, "n", "yes"], device)
         self.assertEqual(status, 0, said)
         self.assertTrue(any("Replace the Wi-Fi settings" in text for text in said))
 
@@ -453,7 +700,7 @@ class PreservationTests(ScriptCase):
         code = device_setup.new_unlock_code()
         path = self.handoff(code)
         device = FakeDevice({"/ai_dash_files/my_notes.py": b"mine"})
-        status, said = self.run_script(path, [code, "1", "net", "pw", "yes"], device)
+        status, said = self.run_script(path, [code, "net", "pw", "yes"], device)
         self.assertEqual(status, 0, said)
         self.assertEqual(device.files["/ai_dash_files/my_notes.py"], b"mine")
 
@@ -465,8 +712,8 @@ class FailureAndRetryTests(ScriptCase):
         device = FakeDevice(existing_install(), device_id="a" * 32, name="x",
                             fail_write="/ai_dash_files/ui.py.presto-new")
         before = dict(device.files)
-        status, said = self.run_script(path, [code, "1", "n", "yes"], device)
-        self.assertTrue(any("Type yes to install" in text for text in said), said)
+        status, said = self.run_script(path, [code, "yes"], device)
+        self.assertTrue(any("Continue? [Y/n]" in text for text in said), said)
         self.assertEqual(status, 1)
         for target, data in before.items():
             self.assertEqual(device.files.get(target), data)
@@ -479,8 +726,8 @@ class FailureAndRetryTests(ScriptCase):
         device = FakeDevice(existing_install(), device_id="a" * 32, name="x",
                             corrupt={"/ai_dash_files/cards.py.presto-new"})
         before = dict(device.files)
-        status, said = self.run_script(path, [code, "1", "n", "yes"], device)
-        self.assertTrue(any("Type yes to install" in text for text in said), said)
+        status, said = self.run_script(path, [code, "yes"], device)
+        self.assertTrue(any("Continue? [Y/n]" in text for text in said), said)
         self.assertEqual(status, 1)
         for target in BUNDLE["files"]:
             self.assertEqual(device.files[target], before[target])
@@ -492,8 +739,8 @@ class FailureAndRetryTests(ScriptCase):
         device = FakeDevice(existing_install(), device_id="a" * 32, name="x",
                             fail_rename="/ai_dash_files/cards.py")
         before = dict(device.files)
-        status, said = self.run_script(path, [code, "1", "n", "yes"], device)
-        self.assertTrue(any("Type yes to install" in text for text in said), said)
+        status, said = self.run_script(path, [code, "yes"], device)
+        self.assertTrue(any("Continue? [Y/n]" in text for text in said), said)
         self.assertEqual(status, 1)
         for target in BUNDLE["files"]:
             self.assertEqual(device.files[target], before[target])
@@ -505,7 +752,7 @@ class FailureAndRetryTests(ScriptCase):
         device = FakeDevice(existing_install(), device_id="a" * 32, name="x")
         device.files["/ai_dash_files/ui.py.presto-new"] = b"left behind"
         device.files["/ai_dash_files/home.py.presto-prev"] = b"left behind"
-        status, said = self.run_script(path, [code, "1", "n", "yes"], device)
+        status, said = self.run_script(path, [code, "yes"], device)
         self.assertEqual(status, 0, said)
         leftovers = [path for path in device.files
                      if path.endswith((".presto-new", ".presto-prev"))]
@@ -519,7 +766,7 @@ class FailureAndRetryTests(ScriptCase):
                               ("http_404", "port"), ("error", "could not reach")):
             with self.subTest(reach=reach):
                 device = FakeDevice(reach=reach)
-                status, said = self.run_script(path, [code, "1", "net", "pw", "yes"], device)
+                status, said = self.run_script(path, [code, "net", "pw", "yes"], device)
                 self.assertEqual(status, 1)
                 self.assertTrue(device.launched, "the app is started so the screen can say why")
                 self.assertTrue(path.exists(), "a failed setup keeps the handoff")
@@ -586,8 +833,117 @@ class StandaloneExecutionTests(unittest.TestCase):
                 top_level.update(alias.name.split(".")[0] for alias in node.names)
             elif isinstance(node, ast.ImportFrom) and node.level == 0:
                 top_level.add((node.module or "").split(".")[0])
-        self.assertEqual(top_level, {"argparse", "base64", "binascii", "getpass",
-                                     "hashlib", "json", "os", "re", "sys", "time"})
+        self.assertEqual(top_level, {"argparse", "ast", "base64", "binascii", "getpass",
+                                     "hashlib", "importlib", "json", "os", "re", "shutil",
+                                     "subprocess", "sys", "tempfile", "time", "traceback"})
+
+
+class PrivateEnvironmentTests(ScriptCase):
+    """Missing packages are installed into a temporary environment, with consent."""
+
+    def setUp(self):
+        super().setUp()
+        self.module = rendered_module()
+        self.env_folder = tempfile.mkdtemp(prefix="presto-test-env-")
+        self.addCleanup(shutil.rmtree, self.env_folder, True)
+
+    def run_main(self, answers, args=("--port", "COM9"), run=None, call=None, env=None):
+        said, asked = [], []
+
+        def ask(text, secret=False):
+            asked.append(text)
+            if not answers:
+                raise AssertionError("unexpected prompt: " + text)
+            return answers.pop(0)
+
+        run = run or unittest.mock.MagicMock()
+        call = call or unittest.mock.MagicMock(return_value=0)
+        started = unittest.mock.patch.dict(os.environ, env or {})
+        with started, \
+                unittest.mock.patch.object(self.module.importlib.util, "find_spec",
+                                           side_effect=lambda name, *a: None), \
+                unittest.mock.patch.object(self.module.tempfile, "mkdtemp",
+                                           return_value=self.env_folder), \
+                unittest.mock.patch.object(self.module.subprocess, "run", run), \
+                unittest.mock.patch.object(self.module.subprocess, "call", call):
+            status = self.module.main(list(args), ask=ask, say=said.append)
+        return status, said, asked, run, call
+
+    def test_it_builds_a_private_environment_and_runs_itself_inside_it(self):
+        status, said, asked, run, call = self.run_main([""], call=unittest.mock.MagicMock(return_value=0))
+        self.assertEqual(status, 0)
+        self.assertEqual(len(asked), 1)
+        self.assertIn("private, temporary environment", asked[0])
+        venv, pip = run.call_args_list[0].args[0], run.call_args_list[1].args[0]
+        self.assertEqual(venv[1:], ["-m", "venv", self.env_folder])
+        self.assertEqual(pip[1:4], ["-m", "pip", "install"])
+        for package in self.module.REQUIRED_PACKAGES:
+            self.assertIn(package, pip)
+        command = call.call_args.args[0]
+        self.assertEqual(command[0], self.module.private_environment_python(self.env_folder))
+        self.assertEqual(command[1], os.path.abspath(self.module.__file__))
+        self.assertEqual(command[2:], ["--port", "COM9"], "the same arguments, unchanged")
+        self.assertEqual(call.call_args.kwargs["env"][self.module.BOOTSTRAP_ENV], "1")
+        self.assertFalse(os.path.exists(self.env_folder), "the environment is deleted")
+
+    def test_the_exit_code_of_the_inner_run_is_the_scripts_own(self):
+        status, *_rest = self.run_main(["y"], call=unittest.mock.MagicMock(return_value=2))
+        self.assertEqual(status, 2)
+
+    def test_declining_installs_nothing_and_gives_the_manual_instructions(self):
+        for answer in ("n", "no", "x"):
+            with self.subTest(answer=answer):
+                status, said, _asked, run, call = self.run_main([answer])
+                self.assertEqual(status, 1)
+                run.assert_not_called()
+                call.assert_not_called()
+                self.assertIn("pip install", "\n".join(said))
+
+    def test_no_terminal_to_answer_on_counts_as_no(self):
+        asked = []
+
+        def ask(text, secret=False):
+            asked.append(text)
+            raise EOFError()
+
+        with unittest.mock.patch.object(self.module.importlib.util, "find_spec",
+                                        side_effect=lambda name, *a: None), \
+                unittest.mock.patch.object(self.module.subprocess, "run") as run:
+            said = []
+            status = self.module.main(["--port", "COM9"], ask=ask, say=said.append)
+        self.assertEqual(status, 1)
+        run.assert_not_called()
+        self.assertIn("pip install", "\n".join(said))
+
+    def test_a_failed_install_is_explained_and_cleaned_up(self):
+        run = unittest.mock.MagicMock(side_effect=subprocess.CalledProcessError(1, "pip"))
+        status, said, _asked, _run, call = self.run_main([""], run=run)
+        self.assertEqual(status, 1)
+        call.assert_not_called()
+        self.assertIn("could not be installed automatically", "\n".join(said))
+        self.assertIn("pip install", "\n".join(said))
+        self.assertFalse(os.path.exists(self.env_folder))
+
+    def test_a_private_environment_that_still_lacks_them_does_not_build_another(self):
+        status, said, asked, run, call = self.run_main(
+            [], env={self.module.BOOTSTRAP_ENV: "1"})
+        self.assertEqual(status, 1)
+        self.assertEqual(asked, [])
+        run.assert_not_called()
+        call.assert_not_called()
+
+    def test_the_inline_metadata_names_the_same_packages(self):
+        # `pipx run presto_setup.py` and `uv run presto_setup.py` read this block.
+        source = module_source()
+        match = re.search(r"(?m)^# /// script\n((?:#.*\n)+?)# ///$", source)
+        self.assertIsNotNone(match)
+        text = "".join(line[2:] if line.startswith("# ") else line[1:] + "\n"
+                       for line in match.group(1).splitlines(True))
+        import tomllib
+        declared = tomllib.loads(text)["dependencies"]
+        self.assertEqual(declared, list(self.module.REQUIRED_PACKAGES))
+        for package in declared:
+            self.assertIn(package, self.module.DEPENDENCY_MESSAGE)
 
 
 class DependencyTests(ScriptCase):
@@ -639,7 +995,7 @@ class SlotDeviceTests(ScriptCase):
         path = self.handoff(code, wifi="keep")
         device = FakeDevice(slot_install(), device_id="a" * 32, name="desk")
         before = dict(device.files)
-        status, said = self.run_script(path, [code, "1", "y", "yes"], device)
+        status, said = self.run_script(path, [code, "yes"], device)
         self.assertEqual(status, 0, said)
         for target, data in before.items():
             if target != CONFIG:
@@ -661,7 +1017,7 @@ class SlotDeviceTests(ScriptCase):
         # A running slot app's watchdog would reset the board mid-session.
         code = device_setup.new_unlock_code()
         device = FakeDevice(slot_install(), device_id="a" * 32, name="desk")
-        status, said = self.run_script(self.handoff(code, wifi="keep"), [code, "1", "y", "yes"], device)
+        status, said = self.run_script(self.handoff(code, wifi="keep"), [code, "yes"], device)
         self.assertEqual(status, 0, said)
         self.assertEqual(device.resets, [0], "reset once, before the first write")
         self.assertLess(device.log.index("reset"), device.log.index("config_state"))
@@ -670,14 +1026,14 @@ class SlotDeviceTests(ScriptCase):
         code = device_setup.new_unlock_code()
         device = FakeDevice(slot_install(), device_id="a" * 32, name="desk")
         status, said = self.run_script(self.handoff(code, wifi="set"),
-                                       [code, "1", "y", "Office 2G", "new-wifi-pass", "yes"], device)
+                                       [code, "Office 2G", "new-wifi-pass", "yes"], device)
         self.assertEqual(status, 0, said)
         self.assertIn("WIFI_SSID = 'Office 2G'", device.files[SECRETS].decode("ascii"))
         self.assertEqual(device.files["/ai_dash_slots/a/ai_dash_app.py"], b"slot a app")
         files = slot_install()
         del files[SECRETS]
         empty = FakeDevice(files, device_id="a" * 32, name="desk")
-        status, said = self.run_script(self.handoff(code, wifi="keep"), [code, "1"], empty)
+        status, said = self.run_script(self.handoff(code, wifi="keep"), [code], empty)
         self.assertEqual(status, 1)
         self.assertEqual(empty.writes, [])
         self.assertIn("has no Wi-Fi settings", "\n".join(said))
@@ -686,7 +1042,7 @@ class SlotDeviceTests(ScriptCase):
         code = device_setup.new_unlock_code()
         path = self.handoff(code, wifi="keep")
         device = FakeDevice(slot_install(), device_id="a" * 32, name="desk", reach="error")
-        status, said = self.run_script(path, [code, "1", "y", "yes"], device)
+        status, said = self.run_script(path, [code, "yes"], device)
         self.assertEqual(status, 1)
         self.assertTrue(device.launched, "the app is started so the screen can say why")
         self.assertTrue(path.exists(), "the handoff is kept for another try")
@@ -695,7 +1051,7 @@ class SlotDeviceTests(ScriptCase):
     def test_a_single_folder_presto_is_never_reset_and_still_gets_its_app(self):
         code = device_setup.new_unlock_code()
         device = FakeDevice(existing_install(), device_id="a" * 32, name="x")
-        status, said = self.run_script(self.handoff(code, wifi="keep"), [code, "1", "n", "yes"], device)
+        status, said = self.run_script(self.handoff(code, wifi="keep"), [code, "yes"], device)
         self.assertEqual(status, 0, said)
         self.assertEqual(device.resets, [])
         for target, data in BUNDLE["files"].items():

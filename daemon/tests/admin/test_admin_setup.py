@@ -117,6 +117,30 @@ class SetupStateTests(SetupServerBase):
                                       {"host": "192.168.1.5", "port": 8787})[0], 409)
 
 
+class SetupPageTextTests(unittest.TestCase):
+    """What the page tells people before their browser does."""
+
+    def page(self):
+        folder = Path(device_setup.__file__).parent / "web"
+        return (folder / "index.html").read_text(encoding="utf-8")
+
+    def test_it_explains_the_browsers_program_file_warning(self):
+        page = self.page()
+        warning = page[page.index('id="setup-download-warning"'):]
+        warning = warning[:warning.index("</p>")]
+        self.assertIn("could harm your device", warning)
+        self.assertIn("Keep", warning)
+        self.assertIn("Delete", warning)
+        # The explanation is on the page that makes the download, above the unlock code.
+        self.assertLess(page.index('id="setup-download-warning"'),
+                        page.index('id="setup-unlock-code"'))
+
+    def test_the_prepare_button_can_be_hidden_and_brought_back(self):
+        page = self.page()
+        self.assertIn('id="setup-actions"', page)
+        self.assertIn('id="prepare-another-setup"', page)
+
+
 class SetupDownloadTests(SetupServerBase):
     def prepare(self):
         status, _, body = self.request(SETUP_PATH, "POST",

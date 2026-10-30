@@ -631,6 +631,65 @@ available, so those paths are covered by unit tests only. The unticked-Wi-Fi cas
 was exercised on hardware; the ticked case (asking for the password) by tests only.
 A literal unplug and replug through the user's own daemon is still the user's test.
 
+### Follow-ups from the user's own test run
+
+Found while the user ran the page and script themselves on October 30.
+
+- **PSL pointed at the wrong daemon.** The Presto Simulator Lite polled the daemon
+  named in `presto/config.py`, which still named the powered-off server, so it showed
+  "Daemon offline" beside a healthy local daemon. `live.py` now takes `--config`
+  (a daemon configuration), polls that daemon's port and token (`0.0.0.0` becomes
+  loopback), and the VS Code "Presto preview only" entry passes the same
+  `dash.toml` the daemon uses. Checked against the real running daemon: the live
+  Home screen rendered. Tests in `test_preview.py`.
+- **Prepare download.** The result appeared below the button, so a click looked like
+  nothing happened. On success the button now hides, both files download by
+  themselves (the links stay as a fallback), the result scrolls into view, and a
+  *Prepare another download* button resets the form. Checked in a browser: both
+  files arrived, the script compiled, the envelope was a real handoff.
+- **The Wi-Fi warning** was softened from red capitals to the page's amber style
+  ("Wi-Fi is needed") after the user found it harsh. The over-the-air sentence moved
+  out of the Wi-Fi note into the section intro, and step 3's text no longer claims
+  the script always installs the app.
+- **Browsers warn about `presto_setup.py`.** Edge says it "could harm your device"
+  because it is a program file. The page and the guide now say this is expected,
+  to choose Keep, why the file is safe to read first, and when to delete it instead.
+- **The script needed two pip installs first, and the user ran it with a Python
+  that lacked them.** A single `.pyz` cannot carry `cryptography` (a compiled
+  package, built per operating system), so instead: when the packages are missing the
+  script asks, builds a private temporary environment, installs both from PyPI, runs
+  itself inside it and deletes it. A missing answer counts as no, and a private
+  environment that still lacks them stops rather than building another. The file also
+  carries the standard inline-dependency header, so `pipx run presto_setup.py` and
+  `uv run presto_setup.py` need no prompt. Checked end to end with the rendered script
+  and a system Python 3.13.7 that has neither package: it prompted, created the
+  environment, installed both, started itself inside it, and left nothing behind.
+  Tests in `test_setup_script.py`.
+- **Too many questions, and a masked paste.** A real run asked for the code, a port
+  number, "replace settings?" and "type yes". Now: the code, then one
+  `Continue? [Y/n]` (Enter goes ahead). An existing settings file is no longer
+  replaced: only `DAEMON_HOST`, `DAEMON_PORT` and `SHARED_TOKEN` change and every
+  other line, comment, the device name and identifier stay (the file is parsed with
+  `ast`, never run, and an unusual file falls back to a new one, which the summary
+  says). One connected USB device is used without asking, after it proves to be a
+  Presto and before anything is written; several still ask. A pasted code or Wi-Fi
+  password shows one `*` per character. The unit tests use a fixed fake port list
+  instead of whatever is plugged in. On COM3 the real script asked two questions,
+  took 13 s, kept all 20 existing setting names, added the two it lacked
+  (`DEVICE_ID`, `DEVICE_NAME`), and the Presto polled the isolated daemon.
+  The masked prompt is covered with stand-in `msvcrt`/`termios` modules, not yet on
+  a real console.
+- **The *Copy* button** now reads "Copied" for two seconds; its old confirmation was
+  a message at the top of the page, out of sight.
+- **A failure the user hit that I could not reproduce.** After `yes` the script
+  stopped with "unexpected error" and nothing was written (the Presto's settings
+  were unchanged). Pauses of 45 s and 180 s at the confirmation, on the same
+  hardware, both succeed. Two defects made it undiagnosable: the handler also
+  swallowed the script's own device errors (whose messages were written to be
+  shown), and it printed no detail at all. Device errors now show their message, and
+  an unexpected error names its type and where it happened, never its text. The next
+  failure will say what it is.
+
 ### Gates still open
 - Cold power cycle through the whole app against the user's own daemon, once it
   runs this change (the clock source itself is built and measured above). It

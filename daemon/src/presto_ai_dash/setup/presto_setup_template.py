@@ -13,8 +13,8 @@ What it does, in order:
 3. lists the USB serial devices and asks which one is the Presto - it never
    chooses a board by itself;
 4. checks the board really is a Pimoroni Presto before writing anything;
-5. keeps the device's existing settings unless you explicitly replace them,
-   and keeps a stable random device identifier outside the app files;
+5. changes only the daemon address and token in the device's existing settings,
+   keeping every other setting and its stable random device identifier;
 6. shows what will change, installs the app, verifies every file by SHA-256,
    starts the dashboard and checks that the device reaches the daemon.
 
@@ -29,16 +29,31 @@ revision has matched this script. Errors are reported as fixed text: a
 traceback, a token or a Wi-Fi password is never printed.
 """
 
+# The packages this script needs, in the form `pipx run presto_setup.py` and
+# `uv run presto_setup.py` read, so those tools set up their own environment.
+# /// script
+# dependencies = [
+#     "cryptography>=46",
+#     "mpremote>=1.24,<2",
+# ]
+# ///
+
 import argparse
+import ast
 import base64
 import binascii
 import getpass
 import hashlib
+import importlib.util
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
+import traceback
 
 SETUP_PROTOCOL = 1
 REVISION_CHARS = 12
@@ -114,6 +129,17 @@ DEPENDENCY_MESSAGE = (
     '    python -m pip install "cryptography>=46" "mpremote>=1.24,<2"\n'
     "\n"
     "The daemon itself does not need mpremote; only USB setup does.")
+
+# The same two packages, for the private environment this script can build.
+REQUIRED_PACKAGES = ("cryptography>=46", "mpremote>=1.24,<2")
+# Set in the child process, so a private environment that still lacks them stops
+# with the instructions instead of building another one.
+BOOTSTRAP_ENV = "PRESTO_SETUP_PRIVATE_ENV"
+MISSING_PACKAGES_MESSAGE = (
+    "This script needs two Python packages that are not installed on this computer:\n"
+    "cryptography, to open the setup file, and mpremote, to talk to the Presto over\n"
+    "USB. It can install them into a private, temporary environment that is deleted\n"
+    "when it finishes. Nothing else on this computer changes.")
 
 PROBE_CODE = r'''
 import os, sys, json
@@ -412,6 +438,13 @@ class MpremoteDevice:
                               "Reconnect it and run this script again.")
         return output
 
+    def read(self, path):
+        try:
+            return bytes(self.transport.fs_readfile(path))
+        except Exception:
+            raise DeviceError("A file could not be read from the Presto. Reconnect it "
+                              "and run this script again.") from None
+
     def exists(self, path):
         try:
             return bool(self.transport.fs_exists(path))
@@ -530,6 +563,11 @@ def choose_port(ports, requested, ask, say):
                 return device
         raise SetupStopped("That port is not one of the connected USB devices. "
                            "Run this script again and choose from the list.")
+    if len(ports) == 1:
+        # Nothing is written to it before it has proved to be a Presto, and the
+        # summary names it before anything is changed.
+        say("Using the only USB device found: %s  %s" % ports[0])
+        return ports[0][0]
     say("USB devices:")
     for index, (device, description) in enumerate(ports, 1):
         say("  %d. %s  %s" % (index, device, description))
@@ -741,6 +779,65 @@ def write_private(device, path, data):
         device.remove(backup)
 
 
+CONFIG_LINES = ("DAEMON_HOST", "DAEMON_PORT", "SHARED_TOKEN")
+
+
+def merge_config(existing, payload, name, device_id):
+    """The Presto's own settings file with only the daemon lines changed, or None.
+
+    Everything else in it stays: tuning, sound, brightness, comments. The file is
+    parsed, never run, because it came from a device. None means the file does not
+    have the usual shape (it does not parse, or sets a daemon line twice, or over
+    several lines), and the caller writes a fresh one instead.
+    """
+    try:
+        text = bytes(existing).decode("utf-8")
+        tree = ast.parse(text)
+    except (UnicodeError, SyntaxError, ValueError):
+        return None
+    daemon = payload["daemon"]
+    wanted = {"DAEMON_HOST": daemon["host"], "DAEMON_PORT": int(daemon["port"]),
+              "SHARED_TOKEN": daemon["token"]}
+    found = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            found.setdefault(node.targets[0].id, []).append(node)
+    lines = text.split("\n")
+    for key in wanted:
+        nodes = found.get(key, [])
+        if len(nodes) > 1 or any(node.lineno != node.end_lineno for node in nodes):
+            return None
+    additions = []
+    for key, value in wanted.items():
+        nodes = found.get(key, [])
+        line = "%s = %r" % (key, value)
+        if nodes:
+            index = nodes[0].lineno - 1
+            tail = "\r" if lines[index].endswith("\r") else ""
+            lines[index] = line + tail
+        else:
+            additions.append(line)
+    if "DEVICE_ID" not in found:
+        additions.append("DEVICE_ID = %r" % device_id)
+    if "DEVICE_NAME" not in found:
+        additions.append("DEVICE_NAME = %r" % name)
+    merged = "\n".join(lines)
+    if additions:
+        merged = merged.rstrip("\r\n") + "\n" + "\n".join(additions) + "\n"
+    try:
+        check = {}
+        for node in ast.parse(merged).body:
+            if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name) and node.targets[0].id in wanted):
+                check[node.targets[0].id] = ast.literal_eval(node.value)
+    except (SyntaxError, ValueError):
+        return None
+    if check != wanted:
+        return None
+    return merged.encode("utf-8")
+
+
 def ask_settings(device, payload, requested_name, ask, say):
     """Decide what to keep; nothing is read that does not have to be."""
     config_exists = device.exists(CONFIG_PATH)
@@ -749,11 +846,6 @@ def ask_settings(device, payload, requested_name, ask, say):
     if wifi == "keep" and not secrets_exists:
         raise SetupStopped(NO_WIFI_MESSAGE)
     existing = config_state(device) if config_exists else {}
-    replace_config = True
-    if config_exists:
-        say("This Presto already has /ai_dash_files/config.py.")
-        replace_config = yes(ask("Replace its daemon address, token and device ID "
-                                 "(the existing file is kept until the new one verifies)? [y/N] "))
     if wifi == "set":
         replace_secrets = True
     elif wifi == "keep":
@@ -774,7 +866,14 @@ def ask_settings(device, payload, requested_name, ask, say):
         name = "presto"
     kept_id = bool(existing.get("device_id"))
     device_id = existing.get("device_id") or new_device_id()
-    return {"config": replace_config, "secrets": replace_secrets,
+    # A Presto that already has settings keeps all of them: only the daemon lines
+    # change, so there is nothing to ask. A fresh file is written only when there is
+    # none, or when the existing one does not have the usual shape.
+    mode, data = "create", None
+    if config_exists:
+        data = merge_config(device.read(CONFIG_PATH), payload, name, device_id)
+        mode = "update" if data is not None else "rewrite"
+    return {"config": mode, "config_data": data, "secrets": replace_secrets,
             "ssid": ssid, "password": password, "name": name, "device_id": device_id,
             "kept_id": kept_id}
 
@@ -791,12 +890,18 @@ def preview(payload, plan, port, machine, say):
         say("  - %d app files, %.1f KiB, installed in /ai_dash_files and as /ai_dash.py,"
             % (len(BUNDLE["files"]), total / 1024.0))
         say("    verified by SHA-256 and rolled back if a write fails.")
-    if plan["config"]:
-        say('  - /ai_dash_files/config.py: replace with daemon %s:%d, name "%s", %s device ID.'
+    if plan["config"] == "update":
+        say("  - /ai_dash_files/config.py: point it at daemon %s:%d with the new device token."
+            % (daemon["host"], int(daemon["port"])))
+        say("    Every other setting in it stays.")
+    elif plan["config"] == "rewrite":
+        say('  - /ai_dash_files/config.py: write a new one for daemon %s:%d, name "%s", %s device ID.'
             % (daemon["host"], int(daemon["port"]), plan["name"],
                "existing" if plan.get("kept_id") else "new"))
+        say("    The existing file does not have the usual shape, so its other settings are not kept.")
     else:
-        say("  - /ai_dash_files/config.py: keep the existing file.")
+        say('  - /ai_dash_files/config.py: create it for daemon %s:%d, name "%s", new device ID.'
+            % (daemon["host"], int(daemon["port"]), plan["name"]))
     if plan["secrets"]:
         say("  - /secrets.py: replace with the Wi-Fi network you entered.")
     else:
@@ -808,9 +913,11 @@ def preview(payload, plan, port, machine, say):
 def apply_plan(device, payload, plan, say):
     if not plan.get("slot"):
         install_app(device, say)
-    if plan["config"]:
+    if plan["config"] == "update":
+        write_private(device, CONFIG_PATH, plan["config_data"])
+    else:
         write_private(device, CONFIG_PATH, config_text(payload, plan["name"], plan["device_id"]))
-        say("Wrote /ai_dash_files/config.py and verified it.")
+    say("Wrote /ai_dash_files/config.py and verified it.")
     if plan["secrets"]:
         write_private(device, SECRETS_PATH, secrets_text(plan["ssid"], plan["password"]))
         say("Wrote /secrets.py and verified it.")
@@ -891,6 +998,11 @@ def yes(answer):
     return str(answer).strip().lower() in ("y", "yes")
 
 
+def proceed(answer):
+    """The one confirmation before anything is written: Enter, y or yes."""
+    return str(answer).strip().lower() in ("", "y", "yes")
+
+
 def run(arguments, device_factory, ask, say):
     handoff_path = find_handoff(arguments.handoff)
     if not BUNDLE.get("revision"):
@@ -917,7 +1029,7 @@ def run(arguments, device_factory, ask, say):
         plan = ask_settings(device, payload, arguments.name, ask, say)
         plan["slot"] = slot
         preview(payload, plan, port, machine, say)
-        if not yes(ask("Type yes to install: ")):
+        if not proceed(ask("Continue? [Y/n] ")):
             raise Cancelled()
         wrote = True
         apply_plan(device, payload, plan, say)
@@ -969,9 +1081,80 @@ def remove_handoff(path, say):
     say("Removed %s. Setup is complete." % HANDOFF_NAME)
 
 
+def masked_input(text):
+    """Read a secret, showing one * per character so a paste is seen to have landed.
+
+    Falls back to ``getpass``, which shows nothing, when there is no real terminal.
+    """
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return getpass.getpass(text)
+    try:
+        return _masked_windows(text) if os.name == "nt" else _masked_posix(text)
+    except (ImportError, OSError):
+        return getpass.getpass(text)
+
+
+def _masked_windows(text):
+    import msvcrt
+    sys.stdout.write(text)
+    sys.stdout.flush()
+    typed = []
+    while True:
+        char = msvcrt.getwch()
+        if char in ("\r", "\n"):
+            break
+        if char == "\x03":
+            raise KeyboardInterrupt
+        if char in ("\x00", "\xe0"):
+            msvcrt.getwch()  # an arrow or function key sends two codes: ignore both
+            continue
+        if char == "\b":
+            if typed:
+                typed.pop()
+                sys.stdout.write("\b \b")
+                sys.stdout.flush()
+            continue
+        typed.append(char)
+        sys.stdout.write("*")
+        sys.stdout.flush()
+    sys.stdout.write("\n")
+    return "".join(typed)
+
+
+def _masked_posix(text):
+    import termios
+    import tty
+    descriptor = sys.stdin.fileno()
+    saved = termios.tcgetattr(descriptor)
+    sys.stdout.write(text)
+    sys.stdout.flush()
+    typed = []
+    try:
+        tty.setcbreak(descriptor)
+        while True:
+            char = sys.stdin.read(1)
+            if char in ("\r", "\n", ""):
+                break
+            if char == "\x03":
+                raise KeyboardInterrupt
+            if char in ("\x7f", "\b"):
+                if typed:
+                    typed.pop()
+                    sys.stdout.write("\b \b")
+                    sys.stdout.flush()
+                continue
+            typed.append(char)
+            sys.stdout.write("*")
+            sys.stdout.flush()
+    finally:
+        termios.tcsetattr(descriptor, termios.TCSADRAIN, saved)
+        sys.stdout.write("\n")
+    return "".join(typed)
+
+
 def prompt(text, secret=False):
     if secret:
-        return getpass.getpass(text)
+        return masked_input(text)
     return input(text)
 
 
@@ -986,27 +1169,82 @@ def parse_arguments(argv):
     return parser.parse_args(argv)
 
 
+def dependencies_present():
+    return all(importlib.util.find_spec(name) is not None
+               for name in ("cryptography", "mpremote"))
+
+
+def private_environment_python(folder):
+    if os.name == "nt":
+        return os.path.join(folder, "Scripts", "python.exe")
+    return os.path.join(folder, "bin", "python")
+
+
+def run_in_private_environment(argv, ask, say):
+    """Install the two packages into a temporary environment and run this script there.
+
+    Asks first. Returns the exit code of the run inside it. Nothing it installs
+    survives the run.
+    """
+    if os.environ.get(BOOTSTRAP_ENV):
+        raise SetupStopped(DEPENDENCY_MESSAGE)
+    say(MISSING_PACKAGES_MESSAGE)
+    try:
+        answer = str(ask("Install them now into a private, temporary environment? [Y/n] "))
+    except EOFError:
+        # No terminal to answer on (piped or closed input): that is a no.
+        answer = "n"
+    if answer.strip().lower() not in ("", "y", "yes"):
+        raise SetupStopped(DEPENDENCY_MESSAGE)
+    folder = tempfile.mkdtemp(prefix="presto-setup-env-")
+    try:
+        say("Creating the environment and installing the packages (this needs the "
+            "internet)...")
+        python = private_environment_python(folder)
+        try:
+            subprocess.run([sys.executable, "-m", "venv", folder], check=True,
+                           capture_output=True)
+            subprocess.run([python, "-m", "pip", "install", "--disable-pip-version-check",
+                            "--quiet", *REQUIRED_PACKAGES], check=True, capture_output=True)
+        except (OSError, subprocess.SubprocessError):
+            raise SetupStopped("The packages could not be installed automatically. That "
+                               "needs the internet and Python's venv module.\n\n"
+                               + DEPENDENCY_MESSAGE) from None
+        say("Installed. Starting the setup inside it.\n")
+        sys.stdout.flush()
+        environment = dict(os.environ)
+        environment[BOOTSTRAP_ENV] = "1"
+        return subprocess.call([python, os.path.abspath(__file__), *argv], env=environment)
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
 def main(argv=None, device_factory=None, ask=None, say=None):
-    arguments = parse_arguments(sys.argv[1:] if argv is None else list(argv))
+    argv = sys.argv[1:] if argv is None else list(argv)
+    arguments = parse_arguments(argv)
     ask = ask or prompt
     say = say or (lambda text: print(text))
     try:
+        if device_factory is None and not dependencies_present():
+            return run_in_private_environment(argv, ask, say)
         run(arguments, device_factory or open_device, ask, say)
         return 0
     except Cancelled:
         say("Nothing was written to the device.")
         return 2
-    except SetupStopped as exc:
+    except (SetupStopped, DeviceError) as exc:
         say(str(exc))
         return 1
     except KeyboardInterrupt:
         say("Setup stopped. Nothing further was written; run this script again to retry.")
         return 1
-    except Exception:
+    except Exception as exc:
         # Never print an exception's text: it can carry a path, a token or a
-        # response body. A fixed sentence and a retry is the whole answer.
-        say("Setup stopped after an unexpected error. Reconnect the Presto and run this "
-            "script again; the encrypted setup file was kept for a retry.")
+        # response body. Its type and the place it was raised say what happened.
+        frame = traceback.extract_tb(exc.__traceback__)[-1]
+        say("Setup stopped after an unexpected error (%s in %s, line %d). Reconnect the "
+            "Presto and run this script again; the encrypted setup file was kept for a "
+            "retry." % (type(exc).__name__, frame.name, frame.lineno))
         return 1
 
 

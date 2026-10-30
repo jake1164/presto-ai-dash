@@ -212,6 +212,7 @@ class TlsFixtureTests(unittest.TestCase):
             folder = Path(temporary)
             with fixtures("127.0.0.1", folder) as settings:
                 context = ssl.create_default_context(cadata=bytes.fromhex(settings["ca_der_hex"]))
+                context.minimum_version = ssl.TLSVersion.TLSv1_2
                 with socket.create_connection(("127.0.0.1", settings["valid_port"]), timeout=3) as raw:
                     with context.wrap_socket(raw, server_hostname=HOSTNAME) as stream:
                         stream.sendall(b"GET /probe HTTP/1.0\r\nHost: presto-gate.invalid\r\n\r\n")

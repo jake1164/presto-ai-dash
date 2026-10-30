@@ -801,6 +801,21 @@ class FailureAndRetryTests(ScriptCase):
             self.assertEqual(device.files[target], before[target])
         self.assertTrue(path.exists())
 
+    def test_a_corrupt_settings_file_is_caught_by_reading_it_back(self):
+        # Settings files hold the token and the Wi-Fi password, so they are compared
+        # byte for byte after the write instead of by hash.
+        code = device_setup.new_unlock_code()
+        path = self.handoff(code, wifi="set")
+        device = FakeDevice(existing_install(), device_id="a" * 32, name="x",
+                            corrupt={SECRETS + ".presto-new"})
+        before = device.files.get(SECRETS)
+        status, said = self.run_script(path, [code, "Box 2G", "wifi-pass-x", "yes"], device)
+        self.assertEqual(status, 1, said)
+        self.assertIn("did not arrive intact", "\n".join(said))
+        self.assertEqual(device.files.get(SECRETS), before)
+        self.assertNotIn(SECRETS + ".presto-new", device.files)
+        self.assert_no_secret(said, "wifi-pass-x")
+
     def test_a_failed_commit_restores_every_file_it_moved(self):
         code = device_setup.new_unlock_code()
         path = self.handoff(code, wifi="keep")
@@ -878,12 +893,20 @@ class StandaloneExecutionTests(unittest.TestCase):
         self.assertIn("presto_setup.py", result.stdout)
 
     def test_a_missing_encryption_library_is_explained_not_a_traceback(self):
-        result = self.run_script(["--handoff", "absent.enc"], isolated=True)
+        (self.folder / "present.enc").write_bytes(b"{}")
+        result = self.run_script(["--handoff", "present.enc"], isolated=True)
         self.assertEqual(result.returncode, 1, self.output(result))
         self.assertNotIn("Traceback", self.output(result))
         self.assertIn("pip install", result.stdout)
         self.assertIn("cryptography", result.stdout)
         self.assertIn("mpremote", result.stdout)
+
+    def test_a_missing_handoff_is_reported_before_any_package_is_offered(self):
+        # Without site-packages neither package is importable, as on a fresh computer.
+        result = self.run_script(["--handoff", "absent.enc"], isolated=True)
+        self.assertEqual(result.returncode, 1, self.output(result))
+        self.assertIn("The setup file could not be read", result.stdout)
+        self.assertNotIn("Install them now", result.stdout)
 
     def test_a_missing_handoff_is_reported_and_nothing_is_written(self):
         result = self.run_script(["--handoff", "absent.enc"])
@@ -902,7 +925,7 @@ class StandaloneExecutionTests(unittest.TestCase):
             elif isinstance(node, ast.ImportFrom) and node.level == 0:
                 top_level.add((node.module or "").split(".")[0])
         self.assertEqual(top_level, {"argparse", "ast", "base64", "binascii", "getpass",
-                                     "hashlib", "importlib", "json", "os", "re", "shutil",
+                                     "importlib", "json", "os", "re", "shutil",
                                      "subprocess", "sys", "tempfile", "time", "traceback"})
 
 
@@ -914,8 +937,16 @@ class PrivateEnvironmentTests(ScriptCase):
         self.module = rendered_module()
         self.env_folder = tempfile.mkdtemp(prefix="presto-test-env-")
         self.addCleanup(shutil.rmtree, self.env_folder, True)
+        # The setup file is checked before any package is offered, so these runs need one.
+        handoff_folder = tempfile.mkdtemp(prefix="presto-test-handoff-")
+        self.addCleanup(shutil.rmtree, handoff_folder, True)
+        self.handoff = os.path.join(handoff_folder, "presto-setup.enc")
+        with open(self.handoff, "wb") as handle:
+            handle.write(b"{}")
 
-    def run_main(self, answers, args=("--port", "COM9"), run=None, call=None, env=None):
+    def run_main(self, answers, args=None, run=None, call=None, env=None):
+        if args is None:
+            args = ("--port", "COM9", "--handoff", self.handoff)
         said, asked = [], []
 
         def ask(text, secret=False):
@@ -954,7 +985,8 @@ class PrivateEnvironmentTests(ScriptCase):
         command = call.call_args.args[0]
         self.assertEqual(command[0], self.module.private_environment_python(self.env_folder))
         self.assertEqual(command[1], os.path.abspath(self.module.__file__))
-        self.assertEqual(command[2:], ["--port", "COM9"], "the same arguments, unchanged")
+        self.assertEqual(command[2:], ["--port", "COM9", "--handoff", self.handoff],
+                         "the same arguments, unchanged")
         self.assertEqual(call.call_args.kwargs["env"][self.module.BOOTSTRAP_ENV], "1")
         self.assertFalse(os.path.exists(self.env_folder), "the environment is deleted")
 
@@ -982,7 +1014,8 @@ class PrivateEnvironmentTests(ScriptCase):
                                         side_effect=lambda name, *a: None), \
                 unittest.mock.patch.object(self.module.subprocess, "run") as run:
             said = []
-            status = self.module.main(["--port", "COM9"], ask=ask, say=said.append)
+            status = self.module.main(["--port", "COM9", "--handoff", self.handoff],
+                                      ask=ask, say=said.append)
         self.assertEqual(status, 1)
         run.assert_not_called()
         self.assertIn("pip install", "\n".join(said))

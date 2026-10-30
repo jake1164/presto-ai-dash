@@ -386,6 +386,14 @@ class PackagingParityTests(unittest.TestCase):
                 if path.is_file():
                     staged["/" + path.relative_to(root).as_posix()] = path.read_bytes()
             self.assertEqual(staged, BUNDLE["files"])
+            # The slot and bootstrap bundles come too, so the image serves what a
+            # wheel install does: loaded the way the daemon loads them, they match.
+            loaded = device_install.bundled_snapshot(root)
+            for part in ("slot", "bootstrap"):
+                with self.subTest(part=part):
+                    self.assertIsNotNone(BUNDLE.get(part))
+                    self.assertIsNotNone(loaded.get(part))
+                    self.assertEqual(loaded[part]["files"], BUNDLE[part]["files"])
 
     def test_the_daemon_reads_the_checkout_bundle_when_it_has_no_staged_copy(self):
         self.assertEqual(device_install.app_snapshot()["revision"], BUNDLE["revision"])

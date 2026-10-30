@@ -43,7 +43,6 @@ import ast
 import base64
 import binascii
 import getpass
-import hashlib
 import importlib.util
 import json
 import os
@@ -680,10 +679,6 @@ def new_device_id():
     return os.urandom(16).hex()
 
 
-def sha256_hex(data):
-    return hashlib.sha256(bytes(data)).hexdigest()
-
-
 # -- installing ------------------------------------------------------------
 
 def app_paths(device):
@@ -751,11 +746,15 @@ def install_app(device, say):
 
 
 def write_private(device, path, data):
-    """Write a settings file safely, with the previous one kept until verified."""
+    """Write a settings file safely, with the previous one kept until verified.
+
+    The file is read back and compared byte for byte. It is a few hundred bytes,
+    and it holds the token and the Wi-Fi password, which are never hashed.
+    """
     staging, backup = path + ".presto-new", path + ".presto-prev"
-    wanted = sha256_hex(data)
+    wanted = bytes(data)
     device.write(staging, data)
-    if device.digest(staging) != wanted:
+    if device.read(staging) != wanted:
         try:
             device.remove(staging)
         except Exception:
@@ -769,7 +768,7 @@ def write_private(device, path, data):
         device.rename(path, backup)
     try:
         device.rename(staging, path)
-        if device.digest(path) != wanted:
+        if device.read(path) != wanted:
             raise SetupStopped("A settings file did not verify. The previous one was put back.")
     except Exception:
         try:
@@ -969,6 +968,20 @@ def find_handoff(explicit):
         return here
     raise SetupStopped("No %s was found. Put it in the same folder as this script, "
                        "or pass --handoff with its path." % HANDOFF_NAME)
+
+
+def check_handoff(path):
+    """Stop now if the setup file cannot be opened.
+
+    This runs before the two packages are offered, so nobody installs them only
+    to learn that the setup file is missing.
+    """
+    try:
+        with open(path, "rb"):
+            pass
+    except OSError:
+        raise SetupStopped("The setup file could not be read. Download it again from "
+                           "the admin page.") from None
 
 
 def require_cryptography():
@@ -1254,6 +1267,7 @@ def main(argv=None, device_factory=None, ask=None, say=None):
     ask = ask or prompt
     say = say or (lambda text: print(text))
     try:
+        check_handoff(find_handoff(arguments.handoff))
         if device_factory is None and not dependencies_present():
             return run_in_private_environment(argv, ask, say)
         run(arguments, device_factory or open_device, ask, say)

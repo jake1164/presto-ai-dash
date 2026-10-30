@@ -242,6 +242,7 @@ def run(port, host, out, scenario, timeout, cut=None):
                 serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
             cert_file.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
             context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.minimum_version = ssl.TLSVersion.TLSv1_2
             context.load_cert_chain(cert_file, key_file)
             accept = download._server.get_request
             def tls_accept():

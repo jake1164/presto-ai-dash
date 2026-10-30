@@ -361,6 +361,40 @@ class SlotStagingTests(SlotAppBase):
         self.assertIsNone(app._transfer)
         self.assertEqual(activation.load(self.store)[0]["failure"]["error"], "transport_untrusted")
 
+    def manifest_failure(self, exc):
+        """What the journal records when fetching the manifest raises ``exc``."""
+        import asyncio
+        app = self.app()
+
+        async def manifest_async(path):
+            raise exc
+
+        self.transport.manifest_async = manifest_async
+        asyncio.run(app._prepare_ota_async(self.command(self.manifest())))
+        failure = activation.load(self.store)[0]["failure"]
+        return failure["phase"], failure["error"]
+
+    def test_a_brief_network_failure_before_the_manifest_can_be_retried(self):
+        # A blocked report exhausts the daemon's budget for good, so a dropped
+        # connection or a timeout must not be reported as an untrusted transport.
+        import asyncio
+        for exc, error in ((OSError(104), "connection_lost"),         # ECONNRESET
+                           (OSError(113), "connection_lost"),         # EHOSTUNREACH
+                           (OSError("incomplete OTA manifest"), "connection_lost"),
+                           (asyncio.TimeoutError(), "transfer_timeout"),
+                           (TimeoutError(), "transfer_timeout")):
+            with self.subTest(exc=repr(exc)):
+                self.assertEqual(self.manifest_failure(exc), ("failed", error))
+
+    def test_a_certificate_or_protocol_failure_stays_blocked(self):
+        import ssl
+        # MicroPython reports mbedTLS errors as OSError with a negative code;
+        # CPython's certificate error is a ValueError as well as an OSError.
+        for exc in (OSError(-9984), ssl.SSLCertVerificationError(1, "verify failed"),
+                    ValueError("OTA HTTP status rejected")):
+            with self.subTest(exc=repr(exc)):
+                self.assertEqual(self.manifest_failure(exc), ("blocked", "transport_untrusted"))
+
     def test_incompatible_bootstrap_cannot_write_slot_files(self):
         app = self.app()
         app.journal["bootstrap"] = 0

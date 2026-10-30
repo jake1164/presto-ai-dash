@@ -32,6 +32,10 @@ dependencies = ["cryptography>=46.0.0", "packaging>=24.0"]
 presto_ai_dash = ["web/*.html", "web/*.js", "web/*.css",
                   "presto_app/*.py", "presto_app/ai_dash_files/*.py",
                   "presto_app/ai_dash_files/*.txt",
+                  # The slot and bootstrap bundles, also copied in at release time.
+                  "presto_app_slot/*.py", "presto_app_slot/revision.txt",
+                  "presto_app_slot/revision.sha256",
+                  "presto_app_boot/*.py", "presto_app_boot/ai_dash_boot_files/*.py",
                   "setup/*.py"]
 
 [project.optional-dependencies]

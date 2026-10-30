@@ -88,6 +88,24 @@ class BundledAppTests(unittest.TestCase):
             device_install.bundled_snapshot(Path(self.temp.name) / "absent")
         self.assertIn("release wheel", str(caught.exception))
 
+    def test_every_staged_file_is_declared_as_package_data(self):
+        # The staged folders are not in git, so only package-data puts them in the
+        # wheel. A file no pattern covers is left out and the release check fails.
+        import fnmatch
+        import tomllib
+        project = tomllib.loads((ROOT / "daemon" / "pyproject.toml").read_text(encoding="utf-8"))
+        patterns = project["tool"]["setuptools"]["package-data"]["presto_ai_dash"]
+        package = Path(self.temp.name)
+        staged = [path.relative_to(package).as_posix()
+                  for path in package.rglob("*") if path.is_file()]
+        self.assertTrue(any(name.startswith("presto_app_slot/") for name in staged))
+        self.assertTrue(any(name.startswith("presto_app_boot/") for name in staged))
+        for name in staged:
+            with self.subTest(name=name):
+                self.assertTrue(any(fnmatch.fnmatchcase(name, pattern) and
+                                    name.count("/") == pattern.count("/")
+                                    for pattern in patterns), name)
+
 
 class WheelCheckTests(unittest.TestCase):
     def setUp(self):

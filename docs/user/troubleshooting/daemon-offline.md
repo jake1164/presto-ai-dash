@@ -129,7 +129,8 @@ parse".
 The admin page's **Status** tab lists every client that fetched the status
 endpoint: its name, its address, when it last fetched, how often, and the
 app revision it reports. A client that has not been seen for three poll
-intervals is shown as *not connected*.
+intervals is shown as *not connected*, and one that has not been seen for a
+day is forgotten, so an old row clears itself.
 
 If the Presto is listed there and fetching normally, the problem is on the
 device's network side, not in the daemon.

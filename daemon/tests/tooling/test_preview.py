@@ -396,6 +396,40 @@ class DaemonSettingsTests(unittest.TestCase):
                          ("127.0.0.1", 9123, "new"))
         self.assertEqual(Config.POLL_INTERVAL, 15, "settings it was not given are left alone")
 
+    def test_the_line_under_the_screen_says_where_it_is_polling_and_never_shows_a_token(self):
+        class Config:
+            DAEMON_HOST = "192.168.1.9"
+            DAEMON_PORT = 8800
+            SHARED_TOKEN = "a-token-that-must-not-appear"
+
+        own = live.Runner()
+        self.assertEqual(own._label(Config), {"address": "192.168.1.9:8800", "source": "presto/config.py"})
+        followed = live.Runner(daemon={"DAEMON_HOST": "127.0.0.1"}, source="dash.toml")
+        self.assertEqual(followed._label(Config)["source"], "dash.toml")
+        self.assertNotIn("token", json.dumps(own._label(Config)))
+
+    def test_the_label_copes_with_a_missing_address_and_an_odd_port(self):
+        class Bare:
+            pass
+
+        class Odd:
+            DAEMON_HOST = "10.0.0.2"
+            DAEMON_PORT = "not a number"
+
+        self.assertIsNone(live.Runner()._label(Bare))
+        self.assertEqual(live.Runner()._label(Odd)["address"], "10.0.0.2:not a number")
+        class Defaulted:
+            DAEMON_HOST = "10.0.0.2"
+        self.assertEqual(live.Runner()._label(Defaulted)["address"], "10.0.0.2:8787")
+
+    def test_the_state_carries_it_and_demo_mode_has_none(self):
+        self.assertIn("daemon", live.Runner(demo=True).snapshot(after=-1, timeout=0))
+        self.assertIsNone(live.Runner(demo=True).snapshot(after=-1, timeout=0)["daemon"])
+
+    def test_the_page_prints_it(self):
+        self.assertIn("polling", live.PAGE)
+        self.assertIn("state.daemon.address", live.PAGE)
+
     def test_without_a_daemon_configuration_the_app_keeps_its_own_settings(self):
         self.assertEqual(live.Runner().daemon, {})
 

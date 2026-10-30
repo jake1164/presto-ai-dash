@@ -1130,6 +1130,24 @@ class ReconnectTests(unittest.TestCase):
         self.assertEqual(waits[0], module.RESET_SETTLE_SECONDS,
                          "the first wait after the reset is the settle time")
 
+    def test_the_reach_check_says_it_is_the_setup_and_which_app_build_it_carries(self):
+        # Otherwise the daemon lists it as an unnamed client with an unknown revision.
+        module = rendered_module()
+        sent = []
+
+        class Recorder:
+            def run(self, code, timeout=20):
+                sent.append(bytes(code).decode("ascii"))
+                return (module.MARKER + json.dumps({"reach": "ok"})).encode("ascii")
+
+        self.assertEqual(module.check_reachability(Recorder()), "ok")
+        code = sent[0]
+        revision = BUNDLE["revision"][:12]
+        self.assertIn("X-Presto-Client: setup", code)
+        self.assertIn("X-Presto-Revision: " + revision, code)
+        self.assertNotIn("@REVISION@", code)
+        compile(code, "reach", "exec")
+
     def test_the_reach_check_forgets_the_settings_read_earlier_in_the_session(self):
         # The setup reads the old settings with `import config` in the same session, so
         # an unchanged check would test the old daemon address, not the one just written.

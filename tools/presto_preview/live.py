@@ -128,10 +128,13 @@ def daemon_settings(config_path):
 class Runner(object):
     """Owns one App thread; restarts it on demand with freshly imported code."""
 
-    def __init__(self, demo=False, scene=None, daemon=None):
+    def __init__(self, demo=False, scene=None, daemon=None, source=None):
         self.demo = demo
-        # Settings that replace the app's own daemon address and token.
+        # Settings that replace the app's own daemon address and token, and the
+        # name of the file they came from, for the line under the screen.
         self.daemon = dict(daemon or {})
+        self.daemon_source = source or "daemon configuration"
+        self.daemon_label = None
         from demo_client import DEFAULT_SCENE
         self.scene = scene or DEFAULT_SCENE
         self.network_fail = False
@@ -167,7 +170,21 @@ class Runner(object):
                     "scene": self.scene, "scenes": list(SCENES),
                     "lifecycle": self.lifecycle, "lifecycles": list(STATES),
                     "code_revision": self.code_revision,
-                    "device_sync": sync_status(self.code_revision)}
+                    "device_sync": sync_status(self.code_revision),
+                    "daemon": self.daemon_label}
+
+    def _label(self, config):
+        """Where the app is polling: the address and which file named it. No token."""
+        host = getattr(config, "DAEMON_HOST", None)
+        if not host:
+            return None
+        port = getattr(config, "DAEMON_PORT", 8787)
+        try:
+            port = int(port)
+        except (TypeError, ValueError):
+            pass
+        return {"address": "%s:%s" % (host, port),
+                "source": self.daemon_source if self.daemon else "presto/config.py"}
 
     def set_scene(self, name):
         """Jump the demo loop to a scene. Restarts, so the new offset applies."""
@@ -195,6 +212,7 @@ class Runner(object):
             main, net = render._load_app_modules(real_sleep=True)
             for name, value in self.daemon.items():
                 setattr(main.config, name, value)
+            self.daemon_label = None if self.demo else self._label(main.config)
             self.code_revision = main.__presto_revision__
             from ui import Palette, draw_boot
             display = Framebuffer()
@@ -519,8 +537,11 @@ button { font: inherit; background: #21262d; color: #c9d1d9; border: 1px solid #
         }
         notice.value = state.lifecycle || "none";
         document.getElementById("netfail").checked = state.network_fail;
+        const where = state.demo ? "" : (state.daemon
+          ? " · polling " + state.daemon.address + " (" + state.daemon.source + ")"
+          : " · no daemon address set");
         status.textContent = (state.demo ? "demo (sample data) · " + state.scene
-          : "live daemon") + " · frame " + frame +
+          : "live daemon" + where) + " · frame " + frame +
           (state.network_fail ? " · network failing" : "");
         const sync = state.device_sync || {status: "not_checked"};
         const revision = (state.code_revision || "unknown").slice(0, 12);
@@ -616,7 +637,8 @@ def main_cli(argv=None):
                      os.path.basename(args.config)), flush=True)
         if note:
             print("Presto live preview: " + note, flush=True)
-    runner = Runner(demo=args.demo, daemon=daemon)
+    runner = Runner(demo=args.demo, daemon=daemon,
+                    source=os.path.basename(args.config) if daemon else None)
     runner.restart()
     threading.Thread(target=watch, args=(runner,), daemon=True).start()
     # Loopback only: the live dash shows account names and quotas.

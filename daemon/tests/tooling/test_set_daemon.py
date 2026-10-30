@@ -448,6 +448,9 @@ class ScriptShapeTests(unittest.TestCase):
                 compile(text, name, "exec")
                 self.assertEqual(text.count("PRESTO_SYNC:"), 1)
 
+    def test_the_reach_check_says_it_is_the_setup(self):
+        self.assertIn("X-Presto-Client: setup", device_install._DAEMON_REACH)
+
     def test_the_reach_check_cycles_the_radio_and_bounds_every_wait(self):
         text = device_install._DAEMON_REACH
         self.assertIn("wlan.active(False)", text)

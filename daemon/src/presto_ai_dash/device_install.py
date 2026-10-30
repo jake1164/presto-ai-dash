@@ -892,6 +892,7 @@ try:
             link.settimeout(8)
             link.connect(socket.getaddrinfo(config.DAEMON_HOST, int(config.DAEMON_PORT))[0][-1])
             link.send(b'GET /api/v1/status?cards=lazy HTTP/1.0\r\nHost: presto\r\n'
+                      b'X-Presto-Client: setup\r\n'
                       b'Authorization: Bearer ' + config.SHARED_TOKEN.encode() + b'\r\n\r\n')
             head = b''
             while b'\r\n' not in head and len(head) < 128:

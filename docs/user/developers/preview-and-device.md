@@ -28,6 +28,11 @@ the preview always follows the daemon you started beside it. If the daemon has
 no `shared_token` set it invents a new one at every start, which the preview
 cannot know, so it says so and keeps the token from `presto/config.py`.
 
+The line under the screen says where it is polling, for example
+`live daemon · polling 127.0.0.1:8787 (dash.toml)`: the address and which file
+named it (`dash.toml` when you pass `--config`, `presto/config.py` otherwise),
+never the token. Demo mode says it has no daemon.
+
 It binds to `127.0.0.1` only. The live view shows real account names and
 quotas, so do not expose it and do not paste a screenshot of it anywhere
 external.

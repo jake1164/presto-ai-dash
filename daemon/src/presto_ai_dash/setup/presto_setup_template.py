@@ -209,6 +209,7 @@ try:
             link.settimeout(8)
             link.connect(socket.getaddrinfo(config.DAEMON_HOST, int(config.DAEMON_PORT))[0][-1])
             link.send(b'GET /api/v1/status?cards=lazy HTTP/1.0\r\nHost: presto\r\n'
+                      b'X-Presto-Client: setup\r\nX-Presto-Revision: @REVISION@\r\n'
                       b'Authorization: Bearer ' + config.SHARED_TOKEN.encode() + b'\r\n\r\n')
             head = b''
             while b'\r\n' not in head and len(head) < 128:
@@ -622,7 +623,10 @@ def config_state(device):
 
 def check_reachability(device):
     """Run the app's own read on the device and report a fixed result code."""
-    state = marker_json(device.run(REACH_CODE.encode("ascii"), timeout=180), "connection")
+    # The daemon lists whoever fetches its status: say this is the setup, and which
+    # app build it carries, instead of appearing as an unnamed client.
+    code = REACH_CODE.replace("@REVISION@", str(BUNDLE.get("revision") or "")[:REVISION_CHARS])
+    state = marker_json(device.run(code.encode("ascii"), timeout=180), "connection")
     return safe_text(state.get("reach"), 16)
 
 

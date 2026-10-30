@@ -27,6 +27,9 @@ import time
 log = logging.getLogger(__name__)
 
 MAX_CLIENTS = 16
+# A client that has not fetched for this long is forgotten, so a one-off visitor
+# or a Presto that has moved on does not sit in the list until the daemon restarts.
+MAX_AGE_SECONDS = 24 * 60 * 60
 MAX_HEADER_CHARS = 32
 UNKNOWN = "unknown"
 
@@ -144,8 +147,9 @@ class ClientRegistry(object):
     The records live in memory only and are lost when the daemon restarts.
     """
 
-    def __init__(self, max_clients=MAX_CLIENTS, clock=None):
+    def __init__(self, max_clients=MAX_CLIENTS, clock=None, max_age=MAX_AGE_SECONDS):
         self.max_clients = max(1, int(max_clients))
+        self.max_age = max_age
         self._clock = clock or time.time
         self._lock = threading.Lock()
         self._records = {}
@@ -166,6 +170,7 @@ class ClientRegistry(object):
         moment = self._clock() if now is None else float(now)
         parsed = parse_diag(diag) or {}
         with self._lock:
+            self._expire(moment)
             entry = self._records.get(key)
             if entry is None:
                 entry = {"name": key[0], "address": key[1], "first_seen": moment,
@@ -201,6 +206,13 @@ class ClientRegistry(object):
         return (key[0], err or "-", stage or "-",
                 count if count is not None else "-")
 
+    def _expire(self, moment):
+        """Forget the clients that have not fetched for ``max_age`` seconds."""
+        for key in [key for key, entry in self._records.items()
+                    if moment - entry["last_seen"] > self.max_age]:
+            del self._records[key]
+        self._trim()
+
     def _trim(self):
         """Drop the least recently seen client when there are too many."""
         while len(self._records) > self.max_clients:
@@ -219,6 +231,7 @@ class ClientRegistry(object):
         moment = self._clock() if now is None else float(now)
         limit = 3 * (poll_interval if poll_interval else 15)
         with self._lock:
+            self._expire(moment)
             records = [dict(entry) for entry in self._records.values()]
         records.sort(key=lambda record: record["last_seen"], reverse=True)
         for record in records:

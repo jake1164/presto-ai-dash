@@ -238,7 +238,7 @@
   }
 
   function buildClientTable(clients) {
-    const table = el("table", "grid compact");
+    const table = el("table", "grid compact clients");
     const head = el("thead");
     const headRow = el("tr");
     for (const header of ["Name", "Address", "Last seen", "Fetches", "Revision",
@@ -251,11 +251,11 @@
       const diag = client.diag || {};
       const line = el("tr");
       const cells = [
-        client.name,
+        client.name === "unknown" ? "(no name)" : client.name,
         client.address,
         whenText(client.last_seen) + " (" + agoText(client.last_seen) + ")",
         String(client.fetches),
-        client.revision,
+        client.revision === "unknown" ? "\u2014" : client.revision,
         diagError(diag),
         diagValue(diag, "n"),
         diagWithUnit(diag, "free", "KB"),

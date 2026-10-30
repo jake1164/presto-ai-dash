@@ -18,7 +18,7 @@ from urllib.request import Request, build_opener, ProxyHandler
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from presto_ai_dash.api import ApiServer
-from presto_ai_dash.clients import (MAX_CLIENTS, ClientRegistry, parse_diag,
+from presto_ai_dash.clients import (MAX_AGE_SECONDS, MAX_CLIENTS, ClientRegistry, parse_diag,
                                     sanitize_header)
 from admin.test_management import ManagementBase
 
@@ -59,7 +59,8 @@ class ClientRegistryTests(unittest.TestCase):
     """One record per (name, address), at most sixteen, newest first."""
 
     def setUp(self):
-        self.registry = ClientRegistry()
+        # Fixed, so entries recorded at made-up small times are not a real day old.
+        self.registry = ClientRegistry(clock=lambda: 1000.0)
         self.now = 1000.0
 
     def record(self, name="presto", address="10.0.0.5", revision="abc123"):
@@ -208,7 +209,8 @@ class ClientRegistryDiagTests(unittest.TestCase):
     """The diagnostics of a client, kept in memory and never logged twice."""
 
     def setUp(self):
-        self.registry = ClientRegistry()
+        # Fixed, so entries recorded at made-up small times are not a real day old.
+        self.registry = ClientRegistry(clock=lambda: 1000.0)
         self.now = 1000.0
         self.logger = logging.getLogger("presto_ai_dash.clients")
         self.level = self.logger.level
@@ -390,6 +392,42 @@ class ApiClientRecordingTests(ManagementBase):
     def test_a_hostile_client_name_never_reaches_the_registry(self):
         self.status({"X-Presto-Client": "evil\x00name"})
         self.assertEqual(self.registry.clients()[0]["name"], "unknown")
+
+
+class ClientExpiryTests(unittest.TestCase):
+    """A row that nobody refreshes goes away by itself."""
+
+    def test_a_client_is_forgotten_after_a_day_without_a_fetch(self):
+        registry = ClientRegistry()
+        registry.record("old", "10.0.0.1", now=1000)
+        registry.record("recent", "10.0.0.2", now=1000 + 3600)
+        later = 1000 + MAX_AGE_SECONDS + 1
+        self.assertEqual([client["name"] for client in registry.clients(now=later)], ["recent"])
+
+    def test_one_inside_the_limit_stays_and_one_at_it_stays_too(self):
+        registry = ClientRegistry()
+        registry.record("edge", "10.0.0.1", now=1000)
+        self.assertEqual(len(registry.clients(now=1000 + MAX_AGE_SECONDS)), 1)
+        self.assertEqual(len(registry.clients(now=1000 + MAX_AGE_SECONDS + 1)), 0)
+
+    def test_a_fetch_renews_it(self):
+        registry = ClientRegistry()
+        registry.record("presto", "10.0.0.1", now=1000)
+        registry.record("presto", "10.0.0.1", now=1000 + MAX_AGE_SECONDS)
+        self.assertEqual(len(registry.clients(now=1000 + MAX_AGE_SECONDS + 5)), 1)
+
+    def test_recording_also_clears_the_old_ones_and_their_problem_memory(self):
+        registry = ClientRegistry()
+        registry.record("old", "10.0.0.1", now=1000, diag="err=OSError 113;st=conn;n=3")
+        registry.record("new", "10.0.0.2", now=1000 + MAX_AGE_SECONDS + 10)
+        self.assertEqual(list(registry._records), [("new", "10.0.0.2")])
+        self.assertNotIn(("old", "10.0.0.1"), registry._reported)
+
+    def test_the_limit_can_be_changed(self):
+        registry = ClientRegistry(max_age=60)
+        registry.record("presto", "10.0.0.1", now=1000)
+        self.assertEqual(len(registry.clients(now=1060)), 1)
+        self.assertEqual(len(registry.clients(now=1061)), 0)
 
 
 if __name__ == "__main__":

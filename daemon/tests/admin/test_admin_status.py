@@ -103,7 +103,8 @@ class StatusEndpointTests(AdminServerBase):
     def test_a_client_that_stopped_polling_is_not_connected(self):
         self.manager.clients.record("presto", "10.0.0.9", "abc123",
                                     now=1000.0)
-        self.manager.clients._clock = lambda: 1000.0 + 10 ** 6
+        # Ten minutes: long past three poll intervals, well inside the day it is kept.
+        self.manager.clients._clock = lambda: 1000.0 + 600
         _, _, body = self.request("/api/admin/status")
         self.assertFalse(body["clients"][0]["connected"])
 
@@ -307,6 +308,21 @@ class ClientDiagnosticsPageTests(AdminServerBase):
         script = self.script()
         self.assertNotIn("innerHTML", script)
         self.assertIn("textContent", script)
+
+
+class ClientsTableLayoutTests(unittest.TestCase):
+    """A long last error must not squeeze State down to one letter."""
+
+    def folder(self):
+        from pathlib import Path
+        return Path(__file__).resolve().parents[2] / "src" / "presto_ai_dash" / "web"
+
+    def test_the_table_is_marked_and_the_state_column_does_not_wrap(self):
+        script = (self.folder() / "admin.js").read_text(encoding="utf-8")
+        self.assertIn('el("table", "grid compact clients")', script)
+        css = (self.folder() / "admin.css").read_text(encoding="utf-8")
+        self.assertRegex(css, r"\.grid\.compact\.clients td:last-child\s*\{\s*white-space:\s*nowrap")
+        self.assertRegex(css, r"\.grid\.compact\.clients td:nth-child\(6\)\s*\{\s*white-space:\s*normal")
 
 
 if __name__ == "__main__":

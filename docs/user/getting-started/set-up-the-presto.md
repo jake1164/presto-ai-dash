@@ -246,6 +246,8 @@ band) and run the script again.
 
 ## Firmware
 
+<span id="the-manual-route"></span><span id="1-flash-the-firmware-only-if-you-need-to"></span>
+
 If the Presto already shows its launcher carousel when you press **RESET**,
 the firmware is fine and setup needs nothing else.
 
@@ -256,10 +258,13 @@ drive that appears. Then run **Set up a Presto** as above. After flashing new
 firmware on a Presto that is already set up, run setup once again: updates over
 the air switch themselves off when the firmware changes.
 
+<span id="2-copy-the-app-files"></span><span id="3-the-device-settings"></span><span id="ai_dash_filesconfigpy"></span><span id="secretspy"></span><span id="copying-the-private-files"></span><span id="4-install-the-app"></span><span id="from-a-release-no-checkout-needed"></span>
 There is no manual install. **Set up a Presto** is the one way onto a Presto,
 because only the setup download carries the daemon's update certificate.
 
 ## For developers: the repository sync tool
+
+<span id="from-the-repository"></span>
 
 In a checkout, the sync tool installs the current `presto/` sources into the
 spare app slot of a USB-connected Presto, verifies every file by its SHA-256
@@ -279,7 +284,7 @@ automatically: you name the port. List the ports with
 In VS Code the same two actions are **Terminal -> Run Task -> Sync Presto**
 and **Check Presto sync**.
 
-## Start it
+## Start it {#5-start-it}
 
 Press **RESET** on the Presto, find **Presto AI Dash** in the firmware carousel and
 tap it.
@@ -297,7 +302,7 @@ your accounts.
 If the daemon is not reachable yet, the screen says **Daemon offline** and
 keeps trying. See [Daemon offline and Wi-Fi drops](../troubleshooting/daemon-offline.md).
 
-## The demo first
+## The demo first {#6-the-demo-first}
 
 To see the screens without any account, turn on **demo mode** in the daemon's
 admin page (Settings, Demo mode), or start the daemon with `DASH_DEMO=1`. The

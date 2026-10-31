@@ -53,6 +53,7 @@ class OtaTlsServerTests(ManagementBase):
 
     def tls_get(self, path):
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
         context.load_verify_locations(cadata=IDENTITY.ca_der)
         with socket.create_connection(("127.0.0.1", self.port), timeout=5) as raw:
             with context.wrap_socket(raw, server_hostname=ota_tls.HOSTNAME) as stream:

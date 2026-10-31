@@ -398,6 +398,11 @@ class App(object):
         # resets on a good poll; this one does not, so the daemon can show how
         # many times the device has been unable to reach it.
         self.fail_total = 0
+        # Failed polls in a row, of any kind. The offline screen needs two: one
+        # failure plus the retry delay alone already reaches OFFLINE_AFTER_S
+        # (15 s poll + failed fetch + 12 s retry >= 30 s), and a device that
+        # recovers on its next poll must show STALE, not take the screen away.
+        self.failed_polls = 0
         self.wifi_drops = 0
         self.started_at = None
         self._last_screen = None
@@ -720,6 +725,7 @@ class App(object):
             return False
         self.connection_error = None
         self.fail_count = 0
+        self.failed_polls = 0
         return True
 
     def _clock_usable(self):
@@ -1116,13 +1122,15 @@ class App(object):
 
     def _poll_failed(self, title, message, immediate=False):
         self.connection_error = (title, message, immediate)
+        self.failed_polls += 1
         self._needs_redraw = True
 
     def _connection_screen(self):
         if self.connection_error is None:
             return None
         if (self.connection_error[2] or self.last_good_at is None or
-                self.uptime.ms() - self.last_good_at >= self.offline_after_s * 1000):
+                (self.failed_polls >= 2 and
+                 self.uptime.ms() - self.last_good_at >= self.offline_after_s * 1000)):
             return self.connection_error[:2]
         return None
 

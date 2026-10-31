@@ -32,12 +32,8 @@ for the running build and shows a one-time unlock code; run the script on the
 computer the Presto is plugged into. No checkout is needed, and the same flow
 works when the daemon runs in Docker on another machine.
 
-Once a device is configured, later app-only refreshes are smaller:
-
-```bash
-pipx install --force "presto-ai-dash[device]"
-presto-ai-dash install-presto --port COM3
-```
+A Presto set up this way updates its own app over the air: after you upgrade the
+daemon, the Presto fetches the new app from it on its next poll.
 
 To move a Presto to another daemon, or after the Wi-Fi changes, use the same
 **Set up a Presto** page and script as for a first setup: it works out what the

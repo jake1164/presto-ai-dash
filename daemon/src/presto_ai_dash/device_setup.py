@@ -94,6 +94,7 @@ SETTING_LIMITS = {
 
 _HOSTNAME = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$")
 _REVISION = re.compile(r"^[0-9a-f]{64}$")
+_OTA_HOSTNAME = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$")
 _RELEASE = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._+-]{0,63}$")
 _DEVICE_NAME = re.compile(r"^[ -~]{1,32}$")
 _LOOPBACK = frozenset(("127.0.0.1", "localhost", "::1", "0.0.0.0", "::"))
@@ -265,9 +266,20 @@ def valid_host(value):
 
 def validate_payload(payload):
     """Refuse anything that is not exactly the documented v1 shape."""
-    if not isinstance(payload, dict) or set(payload) != {
-            "v", "daemon", "device", "app", "release", "created_at"}:
+    base = {"v", "daemon", "device", "app", "release", "created_at"}
+    if not isinstance(payload, dict) or set(payload) not in (base, base | {"ota"}):
         raise SetupError("The setup configuration does not have the expected shape.")
+    if "ota" in payload:
+        ota = payload["ota"]
+        if (not isinstance(ota, dict) or set(ota) != {"hostname", "ca"} or
+                not isinstance(ota["hostname"], str) or not _OTA_HOSTNAME.match(ota["hostname"])):
+            raise SetupError("The setup configuration's update settings are not usable.")
+        try:
+            ca = base64.b64decode(ota["ca"].encode("ascii"), validate=True)
+        except (AttributeError, binascii.Error, UnicodeError, ValueError):
+            raise SetupError("The setup configuration's update settings are not usable.") from None
+        if not 64 <= len(ca) <= 4096:
+            raise SetupError("The setup configuration's update settings are not usable.")
     if payload["v"] != 1:
         raise SetupError("The setup configuration is not a supported version.")
     daemon = payload["daemon"]
@@ -315,13 +327,15 @@ def validate_payload(payload):
 
 
 def build_payload(snapshot, host, port, token, device_name, release, settings=None,
-                  now=None, wifi="set"):
+                  now=None, wifi="set", ota=None):
     """The configuration one handoff carries for one running daemon build.
 
     ``snapshot`` is the daemon's verified public app bundle. The shared device
     token is included; the admin token never is, and there is no parameter for
     one here on purpose. ``wifi`` is ``"set"`` when the setup script should collect the
     Wi-Fi network and ``"keep"`` when the Presto must keep the one it already has.
+    ``ota`` is the daemon's update identity (its ``hostname`` and public
+    ``ca_der``); the device is told to trust it for app downloads.
     """
     values = dict(DEFAULT_SETTINGS)
     values.update(settings or {})
@@ -335,6 +349,9 @@ def build_payload(snapshot, host, port, token, device_name, release, settings=No
         "release": {"version": release},
         "created_at": moment.replace(microsecond=0).isoformat().replace("+00:00", "Z"),
     }
+    if ota is not None:
+        payload["ota"] = {"hostname": ota.hostname,
+                          "ca": base64.b64encode(ota.ca_der).decode("ascii")}
     return validate_payload(payload)
 
 
@@ -371,11 +388,15 @@ def render_setup_script(snapshot, release, template=None):
     end = text.find(TEMPLATE_END)
     if start < 0 or end < start:
         raise SetupError("the setup installer template is incomplete")
-    files = {path: data for path, data in sorted(snapshot["files"].items())}
+    slot, boot = snapshot.get("slot"), snapshot.get("bootstrap")
+    if not slot or not boot:
+        raise SetupError("This build has no Presto bootstrap or slot bundle to install.")
     block = "".join([TEMPLATE_BEGIN, "\n",
                      "BUNDLE = ", repr({"revision": snapshot["revision"],
-                                        "hashes": dict(sorted(snapshot["hashes"].items())),
-                                        "files": files}), "\n",
+                                        "slot": {"revision": slot["revision"],
+                                                 "files": dict(sorted(slot["files"].items()))},
+                                        "boot": {"files": dict(sorted(boot["files"].items()))},
+                                        "bootstrap": int(boot["version"])}), "\n",
                      "RELEASE = ", repr(release), "\n",
                      TEMPLATE_END, "\n"])
     rendered = text[:start] + block + text[end + len(TEMPLATE_END) + 1:]
@@ -395,8 +416,10 @@ class SetupService:
 
     def __init__(self, bundle_provider, shared_token, host, port, release,
                  clock=None, token_temporary=False, template=None,
-                 container=False):
+                 container=False, ota=None):
         self._bundle_provider = bundle_provider
+        # The daemon's update identity, given to every device it sets up.
+        self._ota = ota
         self._token = shared_token or ""
         self._host = host or ""
         self._port = int(port)
@@ -502,7 +525,7 @@ class SetupService:
             raise SetupError("Say whether the Presto's Wi-Fi should be set: true or false.")
         payload = build_payload(snapshot, host, port, self._token, device_name,
                                 self.release, settings=settings, now=self._clock(),
-                                wifi="set" if wifi else "keep")
+                                wifi="set" if wifi else "keep", ota=self._ota)
         code = new_unlock_code()
         envelope = build_handoff(payload, code)
         handoff_id = secrets.token_hex(16)

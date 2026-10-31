@@ -90,7 +90,7 @@ foreground.
 | --- | --- |
 | Daemon | Version, database schema version, uptime, poll interval, start time, the bind address, the log level |
 | Presto devices | Every device the daemon keeps a durable record for: online/last seen, the revision it reports and the one this daemon serves, whether they match, its update state, what to do about it, and its update history. Open a device that has gone quiet and **Remove this record** forgets it; nothing on the Presto changes, and if it reports again it is listed as new |
-| Daemon release | Whether a newer published daemon exists, from the one registry this installation uses (PyPI for pip and pipx, the GitHub Container Registry for the Docker image). The daemon checks in the background about once a day; **Check for updates** asks it to look again now (at most once a minute). The block shows the running and newest eligible version, when it last checked, an official details link, and copyable commands for the actual target. Opening the page contacts no registry, a failed or old check says so instead of claiming you are up to date, and nothing is ever upgraded for you. Set `DASH_RELEASE_CHECK=off` to turn the checks off |
+| Daemon release | Whether a newer published daemon exists, from the one registry this installation uses (PyPI for pip and pipx, the GitHub Container Registry for the Docker image). The daemon checks in the background about once a day; **Check for updates** asks it to look again now (at most once a minute). The block shows the running and newest eligible version, when it last checked, an official details link, and copyable commands for the actual target. Opening the page contacts no registry, a failed or old check says so instead of claiming you are up to date, and nothing is ever upgraded for you. While a newer release is available, a banner above the tabs says so on every tab but Status, with a **How to update** button and a **Dismiss** button (remembered per release; a newer one brings it back). A second banner does the same when a Presto needs attention. The Status tab carries a dot while either applies. Set `DASH_RELEASE_CHECK=off` to turn the checks off |
 | Clients | Every device that fetches the status endpoint: its name, address, when it last fetched, how often, the app revision it reports, and what it says about itself: failures since boot (click the number to see when the daemon heard about them), free memory, signal and uptime. A client that has not fetched for a day drops off the list. The USB setup shows as `setup` while it checks that a Presto can reach the daemon |
 | Accounts | One row per account: when it was last collected, its status, and the last problem in plain words |
 | Readers and collectors | The local activity reader, the usage cache reader, and the remote collectors with their last report and host |
@@ -107,9 +107,13 @@ with its revision.
 
 The revision is what the device says about itself. It is a content hash of the
 public app files, and a different hash is neither older nor newer: it is only
-different. When it differs from the revision this daemon serves, the row says
-**Update over USB** and points at **Set up a Presto** on the Settings tab; there
-is no over-the-air update yet, and nothing here will start one.
+different. A Presto set up with this release updates itself over the air: when
+its revision differs, the daemon offers it this daemon's app on its next poll,
+and the row shows the update's progress and history. A row says **Update over
+USB** and points at **Set up a Presto** on the Settings tab only when the
+Presto cannot update itself: it was set up before over-the-air updates existed,
+its firmware changed since setup, or its update settings are missing. One run
+of Set up a Presto fixes each of these.
 
 The daemon has one shared token, so authentication cannot tell clients
 apart. Each client therefore declares a name in the `X-Presto-Client`

@@ -24,6 +24,7 @@ from .device_lifecycle import DeviceLifecycle
 from .device_setup import SetupService
 from .management import SourceConfiguration, ManagedCollector
 from .models import now_utc
+from . import ota_tls
 from .preview_host import start_preview
 from .problems import ProblemBuffer
 from .release import installation as release_installation
@@ -80,6 +81,7 @@ class Daemon:
         self.api = None
         self.admin = None
         self.preview = None
+        self.ota = None
         self.presto_setup = None
         self.source_configuration = None
         self.maintenance_thread = None
@@ -113,7 +115,21 @@ class Daemon:
         if not (os.environ.get("DASH_ENCRYPTION_KEY")
                 or os.environ.get("DASH_ENCRYPTION_KEY_FILE")):
             paths.append(self.config["admin"].get("key_file") or (str(database) + ".key"))
+        paths.append(ota_tls.identity_path(database))
         private_files.check_private_files(paths)
+
+    def _load_ota_tls(self):
+        database = self.config["daemon"]["database"]
+        try:
+            if private_files._is_memory(database):
+                # A database that is never saved gets an authority that is not either.
+                return ota_tls.OtaTls(*ota_tls._authority(ota_tls._now()))
+            return ota_tls.OtaTls.load_or_create(ota_tls.identity_path(database))
+        except Exception as exc:
+            logging.getLogger(__name__).error(
+                "Presto updates over the air are unavailable: the update certificate "
+                "could not be loaded or made (%s)", type(exc).__name__)
+            return None
 
     def _attach_problems(self):
         """Keep the recent warnings and errors, in memory only."""
@@ -151,7 +167,7 @@ class Daemon:
             # stays off: this stage reports a mismatch and asks for USB.
             self.lifecycle = (self.source_configuration.lifecycle
                               if self.source_configuration is not None
-                              else DeviceLifecycle(self.storage))
+                              else DeviceLifecycle(self.storage, ota_enabled=True))
             # The exact slot bundle this running daemon may serve to a device.
             # It is the same bundle the USB tool installs, so there is still
             # only one inventory of what this release ships.
@@ -169,6 +185,9 @@ class Daemon:
                 self.source_configuration.release_checker = self.release_checker
             self._attach_problems()
             self._check_private_files()
+            # Presto app updates go over TLS with the daemon's own authority.
+            # Without it the dashboard still works; devices update over USB.
+            self.ota = self._load_ota_tls()
             self.api = ApiServer(self.config["daemon"]["host"], self.config["daemon"]["port"],
                                  self.storage, self.shared_token,
                                  source_ids=([collector.source.id for collector in self.collectors]
@@ -199,7 +218,8 @@ class Daemon:
                                  device_lifecycle=self.lifecycle,
                                  # The narrow, authenticated download routes a
                                  # device uses for an update it was permitted.
-                                 device_app=self.device_app)
+                                 device_app=self.device_app,
+                                 tls_context=self.ota.context if self.ota else None)
             if self.config["admin"]["enabled"]:
                 token = resolve_admin_token(self.config, self.shared_token)
                 # The setup downloads carry this running build's public app
@@ -212,7 +232,8 @@ class Daemon:
                     port=self.config["daemon"]["port"],
                     release=release_version(),
                     token_temporary=bool(self.config["daemon"].get("shared_token_generated")),
-                    container=in_container())
+                    container=in_container(),
+                    ota=self.ota)
                 self.admin = AdminServer(self.config["admin"]["port"],
                                          self.source_configuration, token,
                                          host=self.config["admin"]["host"],
@@ -267,6 +288,8 @@ class Daemon:
             # A test aid, off unless DASH_PRESTO_PREVIEW is on. It polls this
             # daemon's device port, so it starts after the port is open.
             self.preview = start_preview(self.config["daemon"]["port"], self.shared_token)
+            if self.source_configuration is not None and self.preview is not None:
+                self.source_configuration.preview_port = self.preview.port
             return self
         except Exception:
             self.stop()

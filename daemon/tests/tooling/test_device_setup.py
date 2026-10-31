@@ -190,8 +190,13 @@ class StandaloneScriptTests(unittest.TestCase):
         compile(source, "presto_setup.py", "exec")
         module = rendered_module()
         self.assertEqual(module.BUNDLE["revision"], BUNDLE["revision"])
-        self.assertEqual(module.BUNDLE["hashes"], BUNDLE["hashes"])
-        self.assertEqual(module.BUNDLE["files"], BUNDLE["files"])
+        # What setup installs: the slot app and the bootstrap, never the old
+        # single-folder copy.
+        self.assertEqual(module.BUNDLE["slot"]["revision"], BUNDLE["slot"]["revision"])
+        self.assertEqual(module.BUNDLE["slot"]["files"], BUNDLE["slot"]["files"])
+        self.assertEqual(module.BUNDLE["boot"]["files"], BUNDLE["bootstrap"]["files"])
+        self.assertEqual(module.BUNDLE["bootstrap"], BUNDLE["bootstrap"]["version"])
+        self.assertNotIn("files", module.BUNDLE)
         self.assertEqual(module.RELEASE, "0.50.0")
 
     def test_the_script_imports_nothing_from_the_daemon_package(self):

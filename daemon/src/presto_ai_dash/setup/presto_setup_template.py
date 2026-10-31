@@ -43,6 +43,7 @@ import ast
 import base64
 import binascii
 import getpass
+import hashlib
 import importlib.util
 import json
 import os
@@ -63,6 +64,22 @@ HANDOFF_NAME = "presto-setup.enc"
 REVISION_TARGET = "/ai_dash_files/revision.txt"
 # Present only on a Presto that was moved to the bootstrap and A/B app slots.
 BOOT_ENTRY = "/ai_dash_boot.py"
+# The single-folder app every Presto ran before the bootstrap. Setup moves a
+# device off it; nothing installs it any more.
+LEGACY_ENTRY = "/ai_dash.py"
+SLOT_ROOT = "/ai_dash_slots"
+SLOT_NAMES = ("a", "b")
+STATE_FOLDER = "/ai_dash_state"
+JOURNAL_PATH = STATE_FOLDER + "/journal.json"
+OTA_PROFILE_PATH = STATE_FOLDER + "/ota.json"
+OTA_CA_PATH = STATE_FOLDER + "/ota-ca.der"
+LAYOUT_FOLDERS = (APP_FOLDER, SLOT_ROOT, SLOT_ROOT + "/a", SLOT_ROOT + "/b",
+                  "/ai_dash_boot_files", STATE_FOLDER)
+# Where a single-folder app counted its boots.
+BOOT_COUNTERS = ("/ai_dash_boot.txt", "/ai_dash_boot.txt.tmp")
+# Room left on the Presto's filesystem after the install.
+FREE_MARGIN = 64 * 1024
+OTA_HOSTNAME_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$")
 
 MARKER = "PRESTO_SETUP:"
 MAX_ENVELOPE_BYTES = 8192
@@ -146,11 +163,20 @@ MISSING_PACKAGES_MESSAGE = (
 PROBE_CODE = r'''
 import os, sys, json
 machine = ''
+firmware = ''
+free = None
 try:
     machine = os.uname().machine
+    firmware = os.uname().version
 except Exception:
     pass
-print('PRESTO_SETUP:' + json.dumps({'micropython': sys.implementation.name == 'micropython', 'machine': machine}))
+try:
+    stat = os.statvfs('/')
+    free = stat[0] * stat[3]
+except Exception:
+    pass
+print('PRESTO_SETUP:' + json.dumps({'micropython': sys.implementation.name == 'micropython', 'machine': machine,
+                                    'firmware': firmware, 'free': free}))
 '''
 
 CONFIG_STATE_CODE = r'''
@@ -335,9 +361,20 @@ def usable_host(value):
 
 def validate_payload(payload):
     """Refuse a decrypted configuration that is not exactly the documented v1."""
-    if not isinstance(payload, dict) or set(payload) != {
-            "v", "daemon", "device", "app", "release", "created_at"}:
+    base = {"v", "daemon", "device", "app", "release", "created_at"}
+    # "ota" is the daemon's update certificate; a daemon that could not make one
+    # leaves it out, and the Presto then updates over USB only.
+    if not isinstance(payload, dict) or set(payload) not in (base, base | {"ota"}):
         raise SetupStopped("The setup file's contents are not a setup configuration.")
+    if "ota" in payload:
+        ota = payload["ota"]
+        if (not isinstance(ota, dict) or set(ota) != {"hostname", "ca"} or
+                not isinstance(ota["hostname"], str) or
+                not OTA_HOSTNAME_PATTERN.match(ota["hostname"])):
+            raise SetupStopped("The setup file's update settings are not usable.")
+        ca = decode_field(ota["ca"], None) if isinstance(ota["ca"], str) else b""
+        if not 64 <= len(ca) <= 4096:
+            raise SetupStopped("The setup file's update settings are not usable.")
     daemon = payload["daemon"]
     if not isinstance(daemon, dict) or set(daemon) != {"host", "port", "token"}:
         raise SetupStopped("The setup file's daemon settings are not usable.")
@@ -485,6 +522,16 @@ class MpremoteDevice:
             raise DeviceError("A file could not be removed from the Presto. Reconnect it "
                               "and run this script again.") from None
 
+    def mkdir(self, path):
+        """Make one folder; one that already exists is fine."""
+        if self.exists(path):
+            return
+        try:
+            self.transport.fs_mkdir(path)
+        except Exception:
+            raise DeviceError("A folder could not be made on the Presto. Reconnect it "
+                              "and run this script again.") from None
+
     def listdir(self, folder):
         try:
             entries = self.transport.fs_listdir(folder)
@@ -617,13 +664,21 @@ def safe_text(value, limit=32):
 
 
 def probe_board(device):
-    """The board's identity, after refusing anything that is not a Presto."""
+    """The board's identity, after refusing anything that is not a Presto.
+
+    Also its firmware version, which the update profile is tied to, and its
+    free space.
+    """
     state = marker_json(device.run(PROBE_CODE.encode("ascii")), "board")
     machine = safe_text(state.get("machine"))
     if not state.get("micropython") or "Presto" not in machine:
         raise SetupStopped("The device on that port is not a Pimoroni Presto (%s). "
                            "Nothing was written." % machine)
-    return machine
+    firmware = state.get("firmware")
+    free = state.get("free")
+    return {"machine": machine,
+            "firmware": firmware if isinstance(firmware, str) and firmware.isascii() else "",
+            "free": free if type(free) is int and free >= 0 else None}
 
 
 def config_state(device):
@@ -635,7 +690,8 @@ def check_reachability(device):
     """Run the app's own read on the device and report a fixed result code."""
     # The daemon lists whoever fetches its status: say this is the setup, and which
     # app build it carries, instead of appearing as an unnamed client.
-    code = REACH_CODE.replace("@REVISION@", str(BUNDLE.get("revision") or "")[:REVISION_CHARS])
+    code = REACH_CODE.replace("@REVISION@",
+                              str((BUNDLE.get("slot") or {}).get("revision") or "")[:REVISION_CHARS])
     state = marker_json(device.run(code.encode("ascii"), timeout=180), "connection")
     return safe_text(state.get("reach"), 16)
 
@@ -691,36 +747,103 @@ def new_device_id():
 
 # -- installing ------------------------------------------------------------
 
-def app_paths(device):
-    """Every path the app owns: the bundle's and any stale module beside it."""
-    paths = list(BUNDLE["hashes"])
+def slot_targets():
+    """Installed path -> bytes, in commit order: both slots, then the bootstrap.
+
+    The bootstrap's entry file is committed last, so an install that stops
+    part-way leaves a device that still starts what it had before.
+    """
+    slots = []
+    for name in SLOT_NAMES:
+        for file_name, data in sorted(BUNDLE["slot"]["files"].items()):
+            slots.append((SLOT_ROOT + "/" + name + "/" + file_name, data))
+    boot = sorted(BUNDLE["boot"]["files"].items(), key=lambda item: item[0] == BOOT_ENTRY)
+    return slots, boot
+
+
+def install_size():
+    slots, boot = slot_targets()
+    return sum(len(data) for _path, data in slots + boot)
+
+
+def boots_so_far(device):
+    """The highest boot count the device has recorded, in either layout.
+
+    The daemon orders a device's reports by (boot, sequence), so a device that
+    keeps its identity must never count its boots from 1 again.
+    """
+    counts = [1]
+    for path in BOOT_COUNTERS:
+        if device.exists(path):
+            text = device.read(path)[:12].strip()
+            if text.isdigit():
+                counts.append(int(text))
+    if device.exists(JOURNAL_PATH):
+        try:
+            journal = json.loads(device.read(JOURNAL_PATH)[:1024].decode("utf-8"))
+            if type(journal.get("boots")) is int:
+                counts.append(journal["boots"])
+        except (ValueError, UnicodeError, AttributeError):
+            pass
+    return max(counts)
+
+
+def journal_text(boots):
+    """A fresh activation journal: slot a active and confirmed, nothing pending."""
+    return json.dumps({"v": 1, "bootstrap": int(BUNDLE["bootstrap"]), "boots": int(boots),
+                       "active": "a", "confirmed": "a", "pending": None, "failure": None,
+                       "success": None, "transfer": None},
+                      separators=(",", ":")).encode("ascii")
+
+
+def legacy_paths(device):
+    """The single-folder app a Presto ran before, never its settings."""
+    paths = [LEGACY_ENTRY, REVISION_TARGET]
     for name in device.listdir(APP_FOLDER):
         lower = name.lower()
-        if lower.endswith((".py", ".mpy")) and not lower.startswith(("config.", "secrets.")):
-            path = APP_FOLDER + "/" + name
-            if path not in paths:
-                paths.append(path)
-    return paths
+        # The modules, the revision label, and staging files an interrupted
+        # older install left behind.
+        if (lower.endswith((".py", ".mpy", ".txt", ".presto-new", ".presto-prev"))
+                and not lower.startswith(("config.", "secrets."))):
+            paths.append(APP_FOLDER + "/" + name)
+    return [path for path in dict.fromkeys(paths) if device.exists(path)]
 
 
-def install_app(device, say):
-    """Stage, verify, then replace, with a rollback when any step fails."""
-    hashes = BUNDLE["hashes"]
-    for path, data in BUNDLE["files"].items():
+def install_slots(device, plan, say):
+    """Install the bootstrap and both app slots, then retire a single-folder app.
+
+    Every file is staged beside its target, verified by SHA-256 and only then
+    moved into place; a failure puts back every file it moved. Both slots get
+    the same verified app, so the device never starts on an unproven one.
+    """
+    free = plan.get("free")
+    needed = install_size() + FREE_MARGIN
+    if type(free) is int and free < needed:
+        raise SetupStopped("The Presto has %d KiB free and the app needs %d KiB. Nothing "
+                           "was written; remove files you do not need from it and run this "
+                           "script again." % (free // 1024, needed // 1024))
+    for folder in LAYOUT_FOLDERS:
+        device.mkdir(folder)
+    slots, boot = slot_targets()
+    journal = journal_text(boots_so_far(device))
+    say("Copying %d files (%.0f KiB) to the Presto; this takes a minute or two..."
+        % (len(slots) + len(boot), install_size() / 1024.0))
+    for path, data in slots + boot:
         device.write(path + ".presto-new", data)
-    for path, wanted in hashes.items():
-        if device.digest(path + ".presto-new") != wanted:
-            raise SetupStopped("A file did not arrive intact. No installed app file was "
+    for path, data in slots + boot:
+        if device.digest(path + ".presto-new") != hashlib.sha256(data).hexdigest():
+            raise SetupStopped("A file did not arrive intact. No installed file was "
                                "replaced; reconnect the Presto and run this script again.")
-    # A module left over from an older build is retired, but only on a device
-    # that already runs AI Dash: on a first install, an unrelated file in the
-    # app folder belongs to the person, not to this app.
-    retire = device.exists(REVISION_TARGET)
-    extras = ([path for path in app_paths(device) if path not in hashes]
-              if retire else [])
+    device.write(JOURNAL_PATH + ".presto-new", journal)
+    if device.read(JOURNAL_PATH + ".presto-new") != journal:
+        raise SetupStopped("A file did not arrive intact. No installed file was "
+                           "replaced; reconnect the Presto and run this script again.")
+    order = [path for path, _data in slots] + [JOURNAL_PATH] + [path for path, _data in boot]
+    wanted = {path: hashlib.sha256(data).hexdigest() for path, data in slots + boot}
+    wanted[JOURNAL_PATH] = hashlib.sha256(journal).hexdigest()
     changed = []
     try:
-        for path in list(hashes) + extras:
+        for path in order:
             backup = path + ".presto-prev"
             if device.exists(backup):
                 device.remove(backup)
@@ -728,16 +851,11 @@ def install_app(device, say):
             if had_old:
                 device.rename(path, backup)
             changed.append((path, had_old))
-            if path in hashes:
-                device.rename(path + ".presto-new", path)
-        actual = {path: device.digest(path) for path in app_paths(device)}
-        for path, wanted in hashes.items():
-            if actual.get(path) != wanted:
-                raise SetupStopped("The installed app did not verify. The previous app was "
-                                   "put back; reconnect the Presto and run this script again.")
-        if retire and set(actual) != set(hashes):
-            raise SetupStopped("A stale app file could not be retired. The previous app was "
-                               "put back; reconnect the Presto and run this script again.")
+            device.rename(path + ".presto-new", path)
+        for path in order:
+            if device.digest(path) != wanted[path]:
+                raise SetupStopped("The installed app did not verify. Everything was put "
+                                   "back; reconnect the Presto and run this script again.")
     except Exception:
         for path, had_old in reversed(changed):
             try:
@@ -748,11 +866,58 @@ def install_app(device, say):
             except Exception:
                 pass
         raise
-    for path in list(hashes) + extras:
+    for path in order:
         backup = path + ".presto-prev"
         if device.exists(backup):
             device.remove(backup)
-    say("Installed %d app files and verified every one by SHA-256." % len(hashes))
+    # A module an older build had in a slot is no longer part of the app.
+    for name in SLOT_NAMES:
+        folder = SLOT_ROOT + "/" + name
+        for file_name in device.listdir(folder):
+            path = folder + "/" + file_name
+            if path not in wanted and file_name.lower().endswith((".py", ".mpy")):
+                device.remove(path)
+    # Only now, with the new layout verified, does the old one go.
+    retired = 0
+    if plan.get("legacy"):
+        for path in legacy_paths(device):
+            device.remove(path)
+            retired += 1
+    say("Installed the app in two slots with its bootstrap and verified every file by "
+        "SHA-256%s." % ("; the previous single-folder app was removed" if retired else ""))
+
+
+def ota_profile(payload, firmware):
+    """The device's update profile: where to fetch the app and whom to trust."""
+    ota = payload["ota"]
+    return json.dumps({"enabled": True, "host": payload["daemon"]["host"],
+                       "port": int(payload["daemon"]["port"]),
+                       "hostname": ota["hostname"], "ca_file": OTA_CA_PATH,
+                       "firmware": firmware}, sort_keys=True).encode("ascii")
+
+
+def write_ota(device, payload, firmware, say):
+    """Turn on updates over the air: the profile and the daemon's certificate.
+
+    Neither file is secret: the certificate is public, and the profile holds
+    the daemon's address. They live outside both app slots, so an update never
+    replaces them.
+    """
+    if "ota" not in payload:
+        say("This daemon did not include an update certificate, so app updates over "
+            "the air stay off. Check the daemon log, then run this script again.")
+        return
+    ca = base64.b64decode(payload["ota"]["ca"])
+    profile = ota_profile(payload, firmware)
+    for path, data in ((OTA_CA_PATH, ca), (OTA_PROFILE_PATH, profile)):
+        device.write(path + ".presto-new", data)
+        if device.read(path + ".presto-new") != data:
+            raise SetupStopped("A file did not arrive intact. Reconnect the Presto and run "
+                               "this script again.")
+        if device.exists(path):
+            device.remove(path)
+        device.rename(path + ".presto-new", path)
+    say("Turned on app updates over the air from this daemon.")
 
 
 def write_private(device, path, data):
@@ -909,17 +1074,21 @@ def ask_settings(device, payload, requested_name, ask, say):
 
 
 def preview(payload, plan, port, machine, say):
-    total = sum(len(data) for data in BUNDLE["files"].values())
     daemon = payload["daemon"]
+    slots, boot = slot_targets()
     say("")
     say("Presto AI Dash %s (app revision %s) on %s (%s):"
-        % (RELEASE or "unknown", str(BUNDLE["revision"])[:REVISION_CHARS], port, machine))
-    if plan.get("slot"):
-        say("  - App files: left alone. This Presto updates its app over the air.")
-    else:
-        say("  - %d app files, %.1f KiB, installed in /ai_dash_files and as /ai_dash.py,"
-            % (len(BUNDLE["files"]), total / 1024.0))
-        say("    verified by SHA-256 and rolled back if a write fails.")
+        % (RELEASE or "unknown", str(BUNDLE["slot"]["revision"])[:REVISION_CHARS], port, machine))
+    say("  - The app with over-the-air updates: %d files, %.0f KiB, in two app slots"
+        % (len(slots) + len(boot), install_size() / 1024.0))
+    say("    and a small bootstrap, verified by SHA-256 and put back if a write fails.")
+    if plan.get("legacy"):
+        say("  - The single-folder app this Presto runs now (/ai_dash.py) is removed once")
+        say("    the new one has verified. Its settings stay.")
+    elif plan.get("slot"):
+        say("  - This Presto already updates over the air: both slots are reinstalled.")
+    if "ota" in payload:
+        say("  - Later app updates arrive from the daemon; USB is only needed to recover.")
     if plan["config"] == "update":
         say("  - /ai_dash_files/config.py: point it at daemon %s:%d with the new device token."
             % (daemon["host"], int(daemon["port"])))
@@ -947,8 +1116,7 @@ def preview(payload, plan, port, machine, say):
 
 
 def apply_plan(device, payload, plan, say):
-    if not plan.get("slot"):
-        install_app(device, say)
+    install_slots(device, plan, say)
     if plan["config"] == "update":
         write_private(device, CONFIG_PATH, plan["config_data"])
     else:
@@ -963,6 +1131,7 @@ def apply_plan(device, payload, plan, say):
     if not device.exists(CONFIG_PATH):
         raise SetupStopped("The device has no /ai_dash_files/config.py, so it cannot reach "
                            "the daemon. Run this script again and replace its settings.")
+    write_ota(device, payload, plan.get("firmware") or "", say)
 
 
 # -- the run ---------------------------------------------------------------
@@ -1082,16 +1251,20 @@ def run(arguments, device_factory, ask, say):
     wrote = False
     completed = False
     try:
-        machine = probe_board(device)
-        # A Presto that updates its app over the air keeps its app: only its
-        # settings change, and the app never comes from this script.
+        board = probe_board(device)
+        # Every Presto ends on the bootstrap and two app slots, which is what
+        # updates over the air. A running slot app arms a watchdog that would
+        # reset the board under this script, so it goes back to the launcher
+        # first.
         slot = device.exists(BOOT_ENTRY)
         if slot:
-            say("This Presto updates its app over the air, so only its settings will change.")
             device.reset_to_launcher()
         plan = ask_settings(device, payload, arguments.name, ask, say)
         plan["slot"] = slot
-        preview(payload, plan, port, machine, say)
+        plan["legacy"] = device.exists(LEGACY_ENTRY) or device.exists(REVISION_TARGET)
+        plan["firmware"] = board["firmware"]
+        plan["free"] = board["free"]
+        preview(payload, plan, port, board["machine"], say)
         if not proceed(ask("Continue? [Y/n] ")):
             raise Cancelled()
         wrote = True

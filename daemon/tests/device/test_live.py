@@ -435,12 +435,29 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(self.app._connection_screen())
         self.app._render()
         self.assertIn('STALE - retrying', [row[0] for row in self.device.display.rows])
+        self.assertFalse(await self.app.poll_once())
         with patch.object(self.module, '_now_ms', return_value=30001):
             self.assertEqual(self.app._connection_screen()[0], 'Daemon offline')
         self.app.client.fetch_async.side_effect = None
         self.assertTrue(await self.app.poll_once())
         self.assertIsNone(self.app.connection_error)
         self.assertEqual(self.app.index, 1)
+
+    async def test_one_failed_poll_never_takes_the_screen(self):
+        # A poll at 15 s fails, and the retry 12 s later lands after the 30 s
+        # offline threshold. One miss followed by a good retry must stay STALE.
+        await self.app.poll_once()
+        self.app.client.fetch_async.side_effect = NetworkUnavailable('short head')
+        with patch.object(self.module, '_now_ms', return_value=18000):
+            self.assertFalse(await self.app.poll_once())
+        with patch.object(self.module, '_now_ms', return_value=30500):
+            self.assertIsNone(self.app._connection_screen())
+            self.app._render()
+        self.assertIn('STALE - retrying', [row[0] for row in self.device.display.rows])
+        self.app.client.fetch_async.side_effect = None
+        with patch.object(self.module, '_now_ms', return_value=31000):
+            self.assertTrue(await self.app.poll_once())
+        self.assertEqual(self.app.failed_polls, 0)
 
     async def test_auth_is_immediate_and_preserves_last_good(self):
         await self.app.poll_once()

@@ -104,6 +104,23 @@ device's 64 KiB limit. If an extension would push the answer past it, the
 extensions are omitted and the quota data is kept: a device with no room is told
 nothing new.
 
+### App downloads over TLS
+
+```text
+GET /api/v1/device-app/manifest
+GET /api/v1/device-app/file/<module name>
+Authorization: Bearer <shared token>
+```
+
+A Presto downloads app updates from these two routes, over TLS on this same
+port: the daemon looks at the first byte of each connection, and a TLS
+handshake is answered with TLS while everything else stays plain HTTP. Over
+TLS, only these two routes answer; every other path is `404`. The certificate
+is signed by the daemon's own authority (`dash.db.ota.pem` beside the database)
+for the fixed name `presto-ai-dash-ota.invalid`, and the Presto trusts only
+that authority, which it received from the setup utility. They serve only the
+running daemon's own app, one file per request.
+
 ### The status codes
 
 | Code | Meaning |
@@ -123,7 +140,7 @@ nothing new.
 The status and admin ports share these, so one slow or greedy client cannot
 keep the daemon from answering the Presto:
 
-- A whole request must arrive within 10 seconds, and each read within 3.
+- A whole request must arrive within 10 seconds, and each write of an answer must finish within 3.
 - At most 64 requests are handled at once, and at most 16 from one address. The
   next one is answered `503` and closed at once.
 - A body is refused with `413`, before it is read, over 16 KiB on the ingest

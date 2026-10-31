@@ -236,8 +236,10 @@ process is using.
 
 ## A reverse proxy in front
 
-The daemon speaks plain HTTP and does not terminate TLS. A reverse proxy
-does that:
+The daemon speaks plain HTTP for everything but one thing: the Presto
+downloads app updates over TLS, on the same device port, with a certificate
+the daemon makes for itself (see below). A reverse proxy can put TLS in front
+of the admin page:
 
 - point the proxy at the container's port 8787 (the device port) or 8788
   (the admin page),
@@ -256,6 +258,29 @@ request with another `Host` header is refused, exactly as before.
 
 The device port needs no such list: the Presto sends the shared token and
 the daemon does not look at the `Host` header there.
+
+**Keep the Presto on the daemon's own network, not behind the proxy.** The
+Presto is supported talking to the device port directly. Behind a proxy:
+
+- **App updates over the air stop working** when the proxy terminates TLS or
+  speaks HTTP on the device port. The Presto trusts only the certificate
+  authority its daemon gave it at setup, never the proxy's certificate.
+- **The Presto's status polls are plain HTTP**, so reaching the daemon through
+  a proxy across the internet would send the device token and your quota
+  readings unencrypted.
+
+Passing the device port through as raw TCP might work, but it is not tested or
+supported.
+
+### The update certificate
+
+On first start the daemon makes a private certificate authority and keeps it
+in `dash.db.ota.pem`, beside the database (in the container, in the `/data`
+volume). It is private to the account that runs the daemon, like `dash.db.key`.
+Each start signs a fresh server certificate from it. The setup utility gives
+each Presto the authority's public certificate. Deleting the file makes a new
+authority, and every Presto then needs one run of **Set up a Presto** before it
+can update over the air again.
 
 ## Security notes
 

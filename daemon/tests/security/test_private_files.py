@@ -230,14 +230,14 @@ class StartupCheckTests(PrivateFilesBase):
         with patch.dict(os.environ), patch.object(private_files, "check_private_files") as check:
             os.environ.pop("DASH_ENCRYPTION_KEY", None)
             Daemon._check_private_files(fake)
-        check.assert_called_once_with(["dash.db", "dash.db.key"])
+        check.assert_called_once_with(["dash.db", "dash.db.key", "dash.db.ota.pem"])
 
     def test_the_daemon_skips_the_key_file_when_the_key_is_in_the_environment(self):
         fake = SimpleNamespace(config={"daemon": {"database": "dash.db"}, "admin": {"key_file": "k"}})
         with patch.dict(os.environ, {"DASH_ENCRYPTION_KEY": "x"}), \
                 patch.object(private_files, "check_private_files") as check:
             Daemon._check_private_files(fake)
-        check.assert_called_once_with(["dash.db"])
+        check.assert_called_once_with(["dash.db", "dash.db.ota.pem"])
 
     def test_a_configured_key_file_is_the_one_checked(self):
         fake = SimpleNamespace(config={"daemon": {"database": "dash.db"},
@@ -245,7 +245,7 @@ class StartupCheckTests(PrivateFilesBase):
         with patch.dict(os.environ), patch.object(private_files, "check_private_files") as check:
             os.environ.pop("DASH_ENCRYPTION_KEY", None)
             Daemon._check_private_files(fake)
-        check.assert_called_once_with(["dash.db", "elsewhere.key"])
+        check.assert_called_once_with(["dash.db", "elsewhere.key", "dash.db.ota.pem"])
 
 
 if __name__ == "__main__":

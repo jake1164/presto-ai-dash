@@ -58,6 +58,11 @@ class StatusEndpointTests(AdminServerBase):
         self.assertIn("uptime", daemon)
         self.assertEqual(daemon["poll_interval"], self.config["daemon"]["poll_interval"])
 
+    def test_the_preview_port_is_reported_only_when_a_preview_is_running(self):
+        self.assertIsNone(self.request("/api/admin/status")[2]["preview"])
+        self.manager.preview_port = 8790
+        self.assertEqual(self.request("/api/admin/status")[2]["preview"], {"port": 8790})
+
     def test_the_accounts_carry_their_health(self):
         self.assertEqual(self.request("/api/admin/status")[0], 200)
         status, _, body = self.request("/api/admin/status")
@@ -227,6 +232,20 @@ class PageWiringTests(AdminServerBase):
         for name in (b"services", b"status", b"settings"):
             self.assertIn(b'id="tab-' + name + b'"', html)
             self.assertIn(b'id="panel-' + name + b'"', html)
+
+    def test_an_available_update_is_announced_above_every_tab(self):
+        status, _, html = self.request("/")
+        self.assertEqual(status, 200)
+        # The banner sits before the tab list, so every tab shows it.
+        self.assertLess(html.index(b'id="update-banner"'), html.index(b'id="tablist"'))
+        self.assertIn(b'id="tab-status-dot"', html)
+        self.assertLess(html.index(b'id="device-banner"'), html.index(b'id="tablist"'))
+        status, _, script = self.request("/admin.js")
+        self.assertIn(b"/api/admin/releases", script)
+        # Read-only: the banner reads the cached result and never asks the
+        # daemon to contact a registry.
+        start = script.index(b"async function loadRelease")
+        self.assertNotIn(b"releases/check", script[start:script.index(b"function tabFromHash")])
 
     def test_the_script_keeps_the_tab_in_the_hash_and_in_local_storage(self):
         status, _, script = self.request("/admin.js")

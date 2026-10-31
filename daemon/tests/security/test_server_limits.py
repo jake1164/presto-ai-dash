@@ -68,8 +68,8 @@ class RequestDeadlineTests(ServerLimitBase):
         self.addCleanup(sock.close)
         started = time.monotonic()
         sock.sendall(b"GET /api/v1/status HTTP/1.0\r\n")
-        # One header byte every 0.4 s stays inside the 3 s per-read timeout
-        # but not inside the whole-request deadline.
+        # One header byte every 0.4 s: each read is quick, but the whole
+        # request misses its deadline.
         closed = False
         for _ in range(20):
             time.sleep(0.4)
@@ -109,6 +109,28 @@ class RequestDeadlineTests(ServerLimitBase):
         reply = read_all(sock)
         self.assertIn(b"200", reply.split(b"\r\n", 1)[0])
         self.assertIn(b'{"ok": true}', reply)
+
+
+    def test_a_request_delayed_past_three_seconds_is_still_answered(self):
+        # A Wi-Fi retransmission can hold a device's request for seconds after
+        # the connection opens. Inside the deadline it must be answered, not
+        # dropped with an empty reply (a device's "NetworkUnavailable (head)").
+        api = self.make_api()
+        sock = connect(api.actual_port)
+        self.addCleanup(sock.close)
+        time.sleep(3.5)
+        sock.sendall(b"GET /healthz HTTP/1.0\r\n\r\n")
+        reply = read_all(sock)
+        self.assertIn(b"200", reply.split(b"\r\n", 1)[0])
+
+    def test_a_request_that_never_arrives_is_logged(self):
+        api = self.make_api()
+        api._server.RequestHandlerClass.request_deadline = 0.5
+        with self.assertLogs("presto_ai_dash.api", level="INFO") as logs:
+            sock = connect(api.actual_port)
+            self.addCleanup(sock.close)
+            self.assertEqual(read_all(sock), b"")
+        self.assertTrue(any("closed without an answer" in line for line in logs.output))
 
 
 class HandlerCapTests(ServerLimitBase):

@@ -846,6 +846,9 @@ class _ExclusiveHTTPServer(ThreadingHTTPServer):
 
 class ApiServer:
     STOP_GRACE_SECONDS = 2.0
+    # How often the accept loop checks for stop(). The library default of half
+    # a second made every stop wait that long; an idle wake-up is negligible.
+    SERVE_POLL_SECONDS = 0.02
 
     def __init__(self, host, port, storage, shared_token, source_ids=None,
                  status_provider=None, *, ingest_enabled=None, ingest_rate_limiter=None,
@@ -895,6 +898,7 @@ class ApiServer:
 
     def start(self):
         self._thread = threading.Thread(target=self._server.serve_forever,
+                                        args=(self.SERVE_POLL_SECONDS,),
                                         name="api", daemon=True)
         self._thread.start()
         log.info("API listening on http://%s:%d", self.host, self.actual_port)

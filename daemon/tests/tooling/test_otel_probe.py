@@ -140,7 +140,7 @@ class ServerTests(unittest.TestCase):
         self.lines = []
         self.server = probe.make_server(0, self.lines.append)
         self.port = self.server.server_address[1]
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread = threading.Thread(target=self.server.serve_forever, args=(0.02,), daemon=True)
         self.thread.start()
         self.addCleanup(self.stop)
 

@@ -69,7 +69,7 @@ class Servers(unittest.TestCase):
 
     def serve(self, handler):
         server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread = threading.Thread(target=server.serve_forever, args=(0.02,), daemon=True)
         thread.start()
         self.addCleanup(thread.join)
         self.addCleanup(server.server_close)

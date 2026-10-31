@@ -50,7 +50,7 @@ class BodyServer(unittest.TestCase):
                 self.wfile.write(body)
 
         server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread = threading.Thread(target=server.serve_forever, args=(0.02,), daemon=True)
         thread.start()
         self.addCleanup(thread.join)
         self.addCleanup(server.server_close)
@@ -222,11 +222,13 @@ def read_to_end(sock):
 class EarlyRejectionTests(ServerBase):
     """The client sends its headers, waits, then sends a body the server never read."""
 
-    def late_body(self, headers, body, pause=0.25):
+    def late_body(self, headers, body, after_answer=True):
         sock = socket.create_connection(("127.0.0.1", self.api.actual_port), timeout=5)
         try:
             sock.sendall(headers)
-            time.sleep(pause)  # the server has answered and is closing by now
+            if after_answer:
+                # Wait until the server has answered, then send what it never read.
+                sock.recv(1, socket.MSG_PEEK)
             try:
                 sock.sendall(body)
             except OSError:
@@ -266,7 +268,7 @@ class EarlyRejectionTests(ServerBase):
 
     def test_a_chunked_body_is_not_mistaken_for_a_bad_length(self):
         # No Content-Length at all: the answer must not be "invalid_length".
-        reply = self.late_body(self.head(extra=b"Transfer-Encoding: chunked"), b"0\r\n\r\n", pause=0)
+        reply = self.late_body(self.head(extra=b"Transfer-Encoding: chunked"), b"0\r\n\r\n", after_answer=False)
         self.assertNotIn(b"invalid_length", reply)
 
     def test_a_slow_client_is_not_held_for_long_after_the_answer(self):
@@ -366,7 +368,9 @@ class StatusLineResetTimeTests(unittest.TestCase):
             args = ["claude-statusline", "--url", "http://127.0.0.1:1", "--token-file", str(token), "--host", "laptop"]
             output = io.StringIO()
             stdin = io.TextIOWrapper(io.BytesIO(raw.encode("utf-8")))
-            with patch("sys.stdin", stdin), patch("sys.stdout", output):
+            # A refused connection, without the second Windows spends retrying one.
+            with patch("sys.stdin", stdin), patch("sys.stdout", output), \
+                    patch.object(collector, "_post", side_effect=ConnectionRefusedError):
                 code = collector.main(args, state_path=str(Path(temp) / "state.json"))
         return code, output.getvalue()
 

@@ -57,7 +57,7 @@ class RunningPreview(object):
     def __init__(self, runner, server):
         self.runner = runner
         self.server = server
-        self.thread = threading.Thread(target=server.serve_forever, name="presto-preview",
+        self.thread = threading.Thread(target=server.serve_forever, args=(0.02,), name="presto-preview",
                                        daemon=True)
 
     def start(self):

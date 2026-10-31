@@ -519,7 +519,7 @@ class RealFetchTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
-        cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
+        cls.thread = threading.Thread(target=cls.server.serve_forever, args=(0.02,), daemon=True)
         cls.thread.start()
         cls.base = "http://127.0.0.1:%d" % cls.server.server_address[1]
 

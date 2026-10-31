@@ -433,7 +433,7 @@ class ReportingRedirectTests(unittest.TestCase):
                 self.end_headers()
         redirect = ThreadingHTTPServer(("127.0.0.1", 0), Redirect)
         for server in (target, redirect):
-            thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
+            thread = threading.Thread(target=server.serve_forever, args=(0.02,), daemon=True); thread.start()
             self.addCleanup(server.server_close); self.addCleanup(thread.join); self.addCleanup(server.shutdown)
         with self.assertRaises(HttpError) as caught:
             get_json("http://127.0.0.1:%d/" % redirect.server_port,

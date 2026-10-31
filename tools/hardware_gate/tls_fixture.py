@@ -121,7 +121,7 @@ def fixtures(host, directory):
             context.load_cert_chain(cert_path, key_path)
             server = Server((host, 0), Handler)
             server.socket = context.wrap_socket(server.socket, server_side=True)
-            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread = threading.Thread(target=server.serve_forever, args=(0.02,), daemon=True)
             thread.start()
             stack.callback(server.server_close)
             stack.callback(server.shutdown)

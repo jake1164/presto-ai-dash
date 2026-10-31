@@ -514,7 +514,7 @@ class WhenTheDaemonSaysNoTests(PushBase):
                 pass
 
         server = HTTPServer(("127.0.0.1", 0), Handler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread = threading.Thread(target=server.serve_forever, args=(0.02,), daemon=True)
         thread.start()
         self.addCleanup(thread.join, 5)
         self.addCleanup(server.server_close)

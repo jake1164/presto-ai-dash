@@ -44,6 +44,12 @@ class Transport:
         self.token, self.timeout = token, timeout
         self._socket = socket
         self.context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        # MicroPython has no ssl.TLSVersion; its Mbed TLS 3.x has no TLS 1.0
+        # or 1.1 to allow. CPython (tests, tools) gets the same floor explicitly.
+        try:
+            self.context.minimum_version = ssl.TLSVersion.TLSv1_2
+        except AttributeError:
+            pass
         self.context.verify_mode = ssl.CERT_REQUIRED
         self.context.load_verify_locations(cadata=ca)
         self.trusted = True

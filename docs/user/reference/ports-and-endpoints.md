@@ -323,8 +323,8 @@ reverse proxy with TLS or use a private network such as Tailscale.
 
 ## The documentation site
 
-The site you are reading is published on GitHub Pages at
-<https://jake1164.github.io/presto-ai-dash/>. It is static files built from
+The [documentation site](../index.md) you are reading is published on GitHub
+Pages. It is static files built from
 Markdown. It uses Google Analytics to count page views, asks no other host for
 anything in a current browser, and knows nothing about your installation.
 [Privacy](../privacy/index.md#the-documentation-site) has the details and the

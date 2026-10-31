@@ -27,6 +27,11 @@ import time
 log = logging.getLogger(__name__)
 
 MAX_CLIENTS = 16
+# A client that has not fetched for this long is forgotten, so a one-off visitor
+# or a Presto that has moved on does not sit in the list until the daemon restarts.
+MAX_AGE_SECONDS = 24 * 60 * 60
+# How many "the device reported more failures" notes are kept for each client.
+MAX_EVENTS = 50
 MAX_HEADER_CHARS = 32
 UNKNOWN = "unknown"
 
@@ -144,8 +149,9 @@ class ClientRegistry(object):
     The records live in memory only and are lost when the daemon restarts.
     """
 
-    def __init__(self, max_clients=MAX_CLIENTS, clock=None):
+    def __init__(self, max_clients=MAX_CLIENTS, clock=None, max_age=MAX_AGE_SECONDS):
         self.max_clients = max(1, int(max_clients))
+        self.max_age = max_age
         self._clock = clock or time.time
         self._lock = threading.Lock()
         self._records = {}
@@ -166,21 +172,45 @@ class ClientRegistry(object):
         moment = self._clock() if now is None else float(now)
         parsed = parse_diag(diag) or {}
         with self._lock:
+            self._expire(moment)
             entry = self._records.get(key)
             if entry is None:
                 entry = {"name": key[0], "address": key[1], "first_seen": moment,
                          "last_seen": moment, "fetches": 0, "revision": UNKNOWN,
-                         "diag": {}}
+                         "diag": {}, "events": []}
                 self._records[key] = entry
             entry["last_seen"] = moment
             entry["fetches"] += 1
             entry["revision"] = sanitize_header(revision)
             entry["diag"] = _merge_diag(entry.get("diag") or {}, parsed)
+            self._note_failures(entry, parsed.get("n"), moment)
             self._trim()
             said = self._change(key, entry["diag"])
         if said is not None:
             log.info('client "%s" reported a fetch problem: err=%s st=%s n=%s', *said)
         return dict(entry)
+
+    def _note_failures(self, entry, count, moment):
+        """Remember when the daemon heard that the device had failed more fetches.
+
+        The device reports a running count of failed fetches since it started. A
+        device that cannot reach the daemon cannot say so at the time, so the
+        moment kept is when the report arrived, not when the failures happened.
+        """
+        if count is None:
+            return
+        before = entry.get("failures_seen")
+        if before is None or count < before:
+            # The first sight of the device, or it restarted and counts from zero.
+            new, first = count, before is None
+        else:
+            new, first = count - before, False
+        entry["failures_seen"] = count
+        if new > 0:
+            diag = entry["diag"]
+            entry["events"].append({"at": moment, "count": new, "err": diag.get("err"),
+                                    "st": diag.get("st"), "first": first})
+            del entry["events"][:-MAX_EVENTS]
 
     def _change(self, key, diag):
         """The log arguments for a changed problem, or None.
@@ -201,6 +231,13 @@ class ClientRegistry(object):
         return (key[0], err or "-", stage or "-",
                 count if count is not None else "-")
 
+    def _expire(self, moment):
+        """Forget the clients that have not fetched for ``max_age`` seconds."""
+        for key in [key for key, entry in self._records.items()
+                    if moment - entry["last_seen"] > self.max_age]:
+            del self._records[key]
+        self._trim()
+
     def _trim(self):
         """Drop the least recently seen client when there are too many."""
         while len(self._records) > self.max_clients:
@@ -219,11 +256,14 @@ class ClientRegistry(object):
         moment = self._clock() if now is None else float(now)
         limit = 3 * (poll_interval if poll_interval else 15)
         with self._lock:
+            self._expire(moment)
             records = [dict(entry) for entry in self._records.values()]
         records.sort(key=lambda record: record["last_seen"], reverse=True)
         for record in records:
             record["connected"] = (moment - record["last_seen"]) <= limit
             record["diag"] = dict(record.get("diag") or {})
+            record["events"] = [dict(event) for event in record.get("events") or []]
+            record.pop("failures_seen", None)
         return records
 
     def clear(self):

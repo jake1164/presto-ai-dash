@@ -8,6 +8,7 @@ import sqlite3
 import sys
 import threading
 import time
+from datetime import timedelta
 
 from . import __version__, private_files
 from . import demo as demo_data
@@ -17,11 +18,18 @@ from .clients import ClientRegistry
 from .config import (ConfigError, admin_bind_error, configure_logging,
                      demo_enabled, ingest_enabled, load_config, resolve_shared_token,
                      resolve_admin_token)
+from .device_install import app_snapshot
+from .device_app import DeviceApp
+from .device_lifecycle import DeviceLifecycle
+from .device_setup import SetupService
 from .management import SourceConfiguration, ManagedCollector
 from .models import now_utc
 from .preview_host import start_preview
 from .problems import ProblemBuffer
-from .sources import build_sources
+from .release import installation as release_installation
+from .release import release_version
+from .release_checker import ReleaseChecker, checks_switched_off
+from .sources import build_sources, in_container
 from .storage import Storage
 
 log = logging.getLogger(__name__)
@@ -72,9 +80,12 @@ class Daemon:
         self.api = None
         self.admin = None
         self.preview = None
+        self.presto_setup = None
         self.source_configuration = None
         self.maintenance_thread = None
         self.clients = None
+        self.lifecycle = None
+        self.release_checker = None
         self.problems = None
         self._stop_lock = threading.Lock()
         self._stopped = False
@@ -135,6 +146,27 @@ class Daemon:
                                    for source in build_sources(self.config)]
                 self.clients = ClientRegistry()
                 self.problems = ProblemBuffer()
+            # Device identity and update state are durable, so they work the
+            # same whether or not the admin page is running. Operational OTA
+            # stays off: this stage reports a mismatch and asks for USB.
+            self.lifecycle = (self.source_configuration.lifecycle
+                              if self.source_configuration is not None
+                              else DeviceLifecycle(self.storage))
+            # The exact slot bundle this running daemon may serve to a device.
+            # It is the same bundle the USB tool installs, so there is still
+            # only one inventory of what this release ships.
+            self.device_app = (self.source_configuration.device_app
+                               if self.source_configuration is not None
+                               else DeviceApp())
+            # Newer-release notices come from a background checker that asks
+            # only this installation's own registry. It is created here and
+            # started after the ports are open; nothing waits on it.
+            self.release_checker = ReleaseChecker(
+                self.storage, release_installation(),
+                enabled=not checks_switched_off(os.environ))
+            self.lifecycle.release_checks = self.release_checker.enabled
+            if self.source_configuration is not None:
+                self.source_configuration.release_checker = self.release_checker
             self._attach_problems()
             self._check_private_files()
             self.api = ApiServer(self.config["daemon"]["host"], self.config["daemon"]["port"],
@@ -161,15 +193,33 @@ class Daemon:
                                  # The demo follows the alert settings the
                                  # person chose, sound included.
                                  demo_device_alerts=(self.source_configuration.device_alerts
-                                                     if managed else None))
+                                                     if managed else None),
+                                 # Durable device identity, revision comparison
+                                 # and the release notice, per request.
+                                 device_lifecycle=self.lifecycle,
+                                 # The narrow, authenticated download routes a
+                                 # device uses for an update it was permitted.
+                                 device_app=self.device_app)
             if self.config["admin"]["enabled"]:
                 token = resolve_admin_token(self.config, self.shared_token)
+                # The setup downloads carry this running build's public app
+                # files, its shared device token and its release identity. The
+                # admin token is never part of them.
+                self.presto_setup = SetupService(
+                    bundle_provider=app_snapshot,
+                    shared_token=self.shared_token,
+                    host=self.config["daemon"]["host"],
+                    port=self.config["daemon"]["port"],
+                    release=release_version(),
+                    token_temporary=bool(self.config["daemon"].get("shared_token_generated")),
+                    container=in_container())
                 self.admin = AdminServer(self.config["admin"]["port"],
                                          self.source_configuration, token,
                                          host=self.config["admin"]["host"],
                                          allowed_hosts=self.config["admin"]["allowed_hosts"],
                                          token_generated=bool(self.config["admin"].get("token_generated")),
-                                         secure_cookie=bool(self.config["admin"].get("secure_cookie")))
+                                         secure_cookie=bool(self.config["admin"].get("secure_cookie")),
+                                         setup=self.presto_setup)
             return self
         except Exception:
             self.stop()
@@ -185,9 +235,19 @@ class Daemon:
                           counts["snapshots"], counts["alerts"])
             except Exception:
                 log.exception("periodic retention cleanup failed")
+            try:
+                # An admin deduplication record is kept for a day; a live one
+                # is never dropped, so a double click still returns its result.
+                self.storage.prune_device_admin_requests(
+                    now_utc() - timedelta(hours=24))
+            except Exception:
+                log.exception("device request cleanup failed")
 
     def start(self):
         try:
+            # A release check that was in flight when the last process stopped
+            # is not happening now: say so instead of claiming it still is.
+            self.storage.clear_release_checking()
             # Collect once, then expire old history before reporting readiness.
             for collector in self.collectors:
                 collector.collect_once()
@@ -202,6 +262,8 @@ class Daemon:
             self.api.start()
             if self.admin is not None:
                 self.admin.start()
+            if self.release_checker is not None:
+                self.release_checker.start()
             # A test aid, off unless DASH_PRESTO_PREVIEW is on. It polls this
             # daemon's device port, so it starts after the port is open.
             self.preview = start_preview(self.config["daemon"]["port"], self.shared_token)
@@ -234,6 +296,8 @@ class Daemon:
                         logging.getLogger().removeHandler(self.source_configuration.logs)
                 except Exception:  # pragma: no cover - defensive
                     pass
+            if self.release_checker is not None:
+                self.release_checker.stop()
             try:
                 try:
                     if self.preview is not None:

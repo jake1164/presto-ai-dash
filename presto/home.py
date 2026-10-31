@@ -63,6 +63,11 @@ STRIP_SEPARATOR = 8
 STRIP_SLACK = 2
 STRIP_MIN_CHARS = 4
 
+# The shared lifecycle/release dock in the bottom-right corner. When it is
+# active the list stops above it, and the overflow strip's text column stops
+# this far to the left of it, so a name is never drawn under the icon.
+DOCK_RIGHT_GAP = 4
+
 
 def scroll_limit(total_height, height=LIST_HEIGHT):
     """How far a list of this total height scrolls inside the region."""
@@ -187,13 +192,14 @@ def alerts_state(source):
     return True
 
 
-def strip_needed(total_height, setting):
+def strip_needed(total_height, setting, region=SOURCE_HEIGHT):
     """Does a list this tall need the overflow strip?
 
     The strip appears only when the list is taller than the list area and
-    the setting allows it; a list that fits needs no band at all.
+    the setting allows it; a list that fits needs no band at all. ``region``
+    is the area the list has, which is smaller while the shared dock is shown.
     """
-    return bool(setting) and total_height > SOURCE_HEIGHT
+    return bool(setting) and total_height > region
 
 
 def _fit_name(name, measure, space):
@@ -282,19 +288,25 @@ class HomeLayout(object):
     accounts - once per payload, not once per frame.
     """
 
-    def __init__(self, rows, setting=DEFAULT_OVERFLOW_ROWS, measure=None, width=0):
+    def __init__(self, rows, setting=DEFAULT_OVERFLOW_ROWS, measure=None, width=0,
+                 dock_left=None, dock_top=None):
         self.rows = home_layout(rows)
         self.total = 0
         for entry in self.rows:
             self.total += entry[1]
         self.measure = measure
         self.width = width
+        # The shared dock, when one is drawn: the list stops at ``dock_top``
+        # and the strip's text column at ``dock_left`` less the gap. Both are
+        # None when no icon is shown, which releases the space again.
+        self.dock_left = dock_left
+        self.dock_top = dock_top
         if type(setting) is not int:
             setting = DEFAULT_OVERFLOW_ROWS
         self.setting = max(0, min(STRIP_MAX_LINES, setting))
         self.lines = 0
-        self.region = SOURCE_HEIGHT
-        if strip_needed(self.total, self.setting):
+        self.region = self._region_for(0)
+        if strip_needed(self.total, self.setting, self.region):
             for lines in range(1, self.setting + 1):
                 if self._names_fit(lines):
                     self.lines = lines
@@ -302,8 +314,15 @@ class HomeLayout(object):
             else:
                 self.lines = self.setting
         if self.lines:
-            self.region = SOURCE_HEIGHT - STRIP_LINE_HEIGHT * self.lines
+            self.region = self._region_for(self.lines)
         self.limit = scroll_limit(self.total, self.region)
+
+    def _region_for(self, lines):
+        """The list height with this many strip lines, clear of the dock."""
+        region = SOURCE_HEIGHT - STRIP_LINE_HEIGHT * lines
+        if self.dock_top is not None:
+            region = min(region, self.dock_top - SOURCE_TOP)
+        return max(0, region)
 
     def extra_lines(self, offset):
         """How many lines the hidden names would need at this offset."""
@@ -316,8 +335,15 @@ class HomeLayout(object):
         return max(0, len(packed) + (1 if (leftover or unfit) else 0) - self.lines)
 
     def strip_limit(self):
-        """The x the strip may not cross: the row width, less the draw slack."""
-        return LIST_X + self.width - STRIP_SLACK
+        """The x the strip may not cross: the row width, less the draw slack.
+
+        While the shared dock is shown, the column also stops short of it, so
+        a name is never drawn under the icon.
+        """
+        limit = LIST_X + self.width - STRIP_SLACK
+        if self.dock_left is not None:
+            limit = min(limit, self.dock_left - DOCK_RIGHT_GAP)
+        return limit
 
     def _offsets(self, region):
         """The scroll offsets where the set of fully visible rows changes."""
@@ -351,7 +377,7 @@ class HomeLayout(object):
 
     def _names_fit(self, lines):
         """Do the hidden names fit in ``lines`` lines at every scroll offset?"""
-        region = SOURCE_HEIGHT - STRIP_LINE_HEIGHT * lines
+        region = self._region_for(lines)
         previous = None
         for offset in self._offsets(region):
             if offset == previous:

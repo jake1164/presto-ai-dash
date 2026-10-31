@@ -22,6 +22,8 @@ from .config import (ALERT_KEYS, DEFAULTS, alert_base_settings, alert_settings,
                      demo_enabled, ingest_enabled, overflow_rows)
 from .credentials import load_cipher
 from .dashboard import build_card_details, build_instance_payload, device_view, lazy_cards
+from .device_app import DeviceApp
+from .device_lifecycle import DeviceLifecycle, release_instructions
 from .effective import effective_settings, uptime_label, uptime_seconds
 from .http_client import origin_of
 from .logbuffer import LogBuffer
@@ -197,6 +199,20 @@ class SourceConfiguration:
             if record["credential"] is not None:
                 self.cipher.decrypt(record["id"], record["credential"])
         self.codex_logins = CodexLoginManager(self)
+        # Durable device identity and update state. The updater exists, but
+        # operational OTA stays off unless this daemon was explicitly built
+        # with the deployment gate passed: the default configuration issues no
+        # command and acknowledges no confirmation, so a known mismatch asks
+        # for a USB update instead.
+        self.lifecycle = DeviceLifecycle(
+            storage, ota_enabled=bool(self.config["daemon"].get(
+                "presto_ota_enabled", False)))
+        # The exact slot bundle this running daemon serves to a device.
+        self.device_app = DeviceApp()
+        # The background daemon-release checker, attached by the daemon. The
+        # admin page reads its cached result and asks it for a check; it never
+        # contacts a registry itself.
+        self.release_checker = None
     def list_sources(self):
         records = self.storage.source_instances()
         snapshots = self.storage.latest_snapshots()
@@ -718,8 +734,9 @@ class SourceConfiguration:
         snapshots = self.storage.latest_snapshots()
         poll_interval = self.config["daemon"]["poll_interval"]
         uptime = uptime_seconds(self.started_at)
-        return {
-            "daemon": {
+        devices = self.devices_view()
+        attention = devices["needs_attention_count"]
+        return {            "daemon": {
                 "version": __version__,
                 "schema_version": self.storage.schema_version(),
                 "uptime_seconds": uptime,
@@ -733,7 +750,9 @@ class SourceConfiguration:
             },
             "clients": [dict(record, last_seen=_stamp(record["last_seen"]),
                             first_seen=_stamp(record["first_seen"]),
-                            diag=dict(record.get("diag") or {}))
+                            diag=dict(record.get("diag") or {}),
+                            events=[dict(event, at=_stamp(event["at"]))
+                                    for event in record.get("events") or []])
                         for record in self.clients.clients(poll_interval=poll_interval)],
             "accounts": [self._account_health(source, snapshots.get(source["id"]))
                          for source in sources],
@@ -742,7 +761,81 @@ class SourceConfiguration:
             "collectors": self._collectors(sources),
             "problems": [dict(record, time=_stamp(record["time"]))
                          for record in self.problems.problems()],
+            # The durable devices, and how many need attention. These are the
+            # same authoritative projections the device routes return, so the
+            # page has one source of device truth. "clients" above stays the
+            # in-memory view of who polled, and is never mixed with them.
+            "devices": devices["devices"],
+            "device_attention_count": attention,
+            "release": self.release_view(),
         }
+
+    def devices_view(self):
+        """Every durable device, plus the count that needs attention."""
+        return self.lifecycle.devices_view(self.config["daemon"]["poll_interval"])
+
+    def device_view(self, device_id):
+        """One device's detail, or None for an ID the daemon does not know."""
+        return self.lifecycle.device_view(device_id, self.config["daemon"]["poll_interval"])
+
+    def forget_device(self, device_id):
+        """Remove the record of a device that has gone quiet."""
+        self.lifecycle.forget(device_id, self.config["daemon"]["poll_interval"])
+
+    def device_attention_count(self):
+        return self.lifecycle.attention_count()
+
+    def refuse_device_mutation(self, device_id, kind):
+        """Refuse a retry or recovery request: there is no updater yet.
+
+        The route exists so a client can tell "not available" from "no such
+        device". It never authorizes a transfer, resets a budget or clears a
+        warning; a warning clears only on a supported recovery.
+        """
+        self.lifecycle.refuse_mutation(device_id, kind)
+
+    def device_mutation(self, device_id, kind, body, idempotency_key):
+        """Authorize a retry, or queue a recovery check, when OTA is enabled.
+
+        With the updater absent this raises the same ``409 ota_not_enabled``
+        the route has always answered. Neither branch contacts the device.
+        """
+        if self.lifecycle.ota_enabled:
+            if kind == "retry":
+                return self.lifecycle.authorize_retry(device_id, body,
+                                                      idempotency_key)
+            return self.lifecycle.queue_recovery(device_id, body, idempotency_key)
+        self.lifecycle.refuse_mutation(device_id, kind)
+        raise AssertionError("refuse_mutation always raises")
+
+    def release_view(self):
+        """The cached daemon-release result, with this install's own commands.
+
+        No registry is contacted: this only reads what the background checker
+        stored. A development build or a switched-off check is ``disabled``,
+        which is honest about not having looked, never "current".
+        """
+        result = dict(self.lifecycle.release())
+        checker = self.release_checker
+        installation = checker.installation if checker is not None else None
+        result["instructions"] = release_instructions(
+            result["channel"], result["latest"], result["state"],
+            ambiguous=(installation.running
+                       if installation is not None and installation.ambiguous else None))
+        result["checking"] = bool(checker is not None and checker.is_checking())
+        result["can_check"] = bool(checker is not None and checker.enabled)
+        result["next_check_at"] = checker.next_check_at() if checker is not None else None
+        result["running_note"] = (
+            "version_ambiguous" if installation is not None and installation.ambiguous
+            else None)
+        return result
+
+    def request_release_check(self):
+        """Queue a background registry check. Returns ``(outcome, retry_after)``."""
+        checker = self.release_checker
+        if checker is None:
+            return "disabled", None
+        return checker.request_check()
 
     def log_view(self, limit=None, level="DEBUG", text=""):
         """The recent log lines for the admin page, newest first, with their times."""

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "presto-ai-dash"
-version = "0.50.0"
+version = "0.50.0rc4"
 description = "Shows your AI usage and quota limits on a Pimoroni Presto display: a small daemon, an admin page and the device app."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -21,15 +21,22 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: System :: Monitoring",
 ]
-# Authenticated encryption for database-backed provider credentials.
-dependencies = ["cryptography>=46.0.0"]
+# cryptography: authenticated encryption for database-backed provider credentials.
+# packaging: PEP 440 ordering of release versions for the newer-release notice.
+dependencies = ["cryptography>=46.0.0", "packaging>=24.0"]
 
 [tool.setuptools.package-data]
 # presto_app/ is the Presto device app, copied in at release time by
-# tools/build_release.py (it is not in git).
+# tools/build_release.py (it is not in git). setup/ holds the standalone
+# installer template the admin page renders for the exact running bundle.
 presto_ai_dash = ["web/*.html", "web/*.js", "web/*.css",
                   "presto_app/*.py", "presto_app/ai_dash_files/*.py",
-                  "presto_app/ai_dash_files/*.txt"]
+                  "presto_app/ai_dash_files/*.txt",
+                  # The slot and bootstrap bundles, also copied in at release time.
+                  "presto_app_slot/*.py", "presto_app_slot/revision.txt",
+                  "presto_app_slot/revision.sha256",
+                  "presto_app_boot/*.py", "presto_app_boot/ai_dash_boot_files/*.py",
+                  "setup/*.py"]
 
 [project.optional-dependencies]
 dev = []

@@ -18,7 +18,7 @@ from urllib.request import Request, build_opener, ProxyHandler
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 from presto_ai_dash.api import ApiServer
-from presto_ai_dash.clients import (MAX_CLIENTS, ClientRegistry, parse_diag,
+from presto_ai_dash.clients import (MAX_AGE_SECONDS, MAX_CLIENTS, MAX_EVENTS, ClientRegistry, parse_diag,
                                     sanitize_header)
 from admin.test_management import ManagementBase
 
@@ -59,7 +59,8 @@ class ClientRegistryTests(unittest.TestCase):
     """One record per (name, address), at most sixteen, newest first."""
 
     def setUp(self):
-        self.registry = ClientRegistry()
+        # Fixed, so entries recorded at made-up small times are not a real day old.
+        self.registry = ClientRegistry(clock=lambda: 1000.0)
         self.now = 1000.0
 
     def record(self, name="presto", address="10.0.0.5", revision="abc123"):
@@ -208,7 +209,8 @@ class ClientRegistryDiagTests(unittest.TestCase):
     """The diagnostics of a client, kept in memory and never logged twice."""
 
     def setUp(self):
-        self.registry = ClientRegistry()
+        # Fixed, so entries recorded at made-up small times are not a real day old.
+        self.registry = ClientRegistry(clock=lambda: 1000.0)
         self.now = 1000.0
         self.logger = logging.getLogger("presto_ai_dash.clients")
         self.level = self.logger.level
@@ -390,6 +392,102 @@ class ApiClientRecordingTests(ManagementBase):
     def test_a_hostile_client_name_never_reaches_the_registry(self):
         self.status({"X-Presto-Client": "evil\x00name"})
         self.assertEqual(self.registry.clients()[0]["name"], "unknown")
+
+
+class ClientFailureEventsTests(unittest.TestCase):
+    """When the daemon heard that a device had failed more fetches."""
+
+    def setUp(self):
+        self.registry = ClientRegistry(clock=lambda: 5000.0)
+
+    def poll(self, now, **diag):
+        header = ";".join("%s=%s" % pair for pair in diag.items())
+        self.registry.record("presto", "10.0.0.9", now=now, diag=header)
+        return self.registry.clients(now=now)[0]["events"]
+
+    def test_a_device_with_no_failures_has_no_events(self):
+        self.assertEqual(self.poll(100, n=0, free=7000), [])
+
+    def test_a_rising_count_is_one_event_with_the_new_failures_and_the_time_it_was_heard(self):
+        self.poll(100, n=0)
+        events = self.poll(160, n=3, err="TimeoutError", st="conn")
+        self.assertEqual(events, [{"at": 160, "count": 3, "err": "TimeoutError", "st": "conn", "first": False}])
+
+    def test_a_steady_count_adds_nothing_and_a_further_rise_adds_the_difference(self):
+        self.poll(100, n=2, err="OSError 110", st="conn")
+        self.poll(130, n=2)
+        events = self.poll(160, n=7, err="TimeoutError", st="head")
+        self.assertEqual([(event["count"], event["err"], event["first"]) for event in events],
+                         [(2, "OSError 110", True), (5, "TimeoutError", False)])
+
+    def test_a_device_first_seen_with_failures_says_they_came_before_the_daemon_saw_it(self):
+        events = self.poll(100, n=18, err="TimeoutError", st="conn")
+        self.assertEqual(len(events), 1)
+        self.assertEqual((events[0]["count"], events[0]["first"]), (18, True))
+
+    def test_a_restarted_device_starts_counting_again(self):
+        self.poll(100, n=5, err="TimeoutError", st="conn")
+        self.assertEqual(len(self.poll(130, n=0, up=1)), 1, "a restart is not a failure")
+        events = self.poll(160, n=2, err="OSError 113", st="conn")
+        self.assertEqual([event["count"] for event in events], [5, 2])
+
+    def test_a_poll_without_a_count_changes_nothing(self):
+        self.poll(100, n=1, err="TimeoutError", st="conn")
+        self.assertEqual(len(self.poll(130, free=6000)), 1)
+
+    def test_only_the_newest_events_are_kept(self):
+        for step in range(1, MAX_EVENTS + 11):
+            events = self.poll(100 + step, n=step, err="TimeoutError", st="conn")
+        self.assertEqual(len(events), MAX_EVENTS)
+        self.assertEqual(events[-1]["count"], 1)
+        self.assertEqual(events[0]["at"], 100 + 11)
+
+    def test_the_callers_copy_cannot_change_the_registry_and_no_bookkeeping_leaks(self):
+        self.poll(100, n=1, err="TimeoutError", st="conn")
+        record = self.registry.clients(now=100)[0]
+        record["events"].clear()
+        self.assertEqual(len(self.registry.clients(now=100)[0]["events"]), 1)
+        self.assertNotIn("failures_seen", record)
+
+    def test_events_go_with_the_client_when_it_is_forgotten(self):
+        self.poll(100, n=1, err="TimeoutError", st="conn")
+        self.assertEqual(self.registry.clients(now=100 + MAX_AGE_SECONDS + 1), [])
+
+
+class ClientExpiryTests(unittest.TestCase):
+    """A row that nobody refreshes goes away by itself."""
+
+    def test_a_client_is_forgotten_after_a_day_without_a_fetch(self):
+        registry = ClientRegistry()
+        registry.record("old", "10.0.0.1", now=1000)
+        registry.record("recent", "10.0.0.2", now=1000 + 3600)
+        later = 1000 + MAX_AGE_SECONDS + 1
+        self.assertEqual([client["name"] for client in registry.clients(now=later)], ["recent"])
+
+    def test_one_inside_the_limit_stays_and_one_at_it_stays_too(self):
+        registry = ClientRegistry()
+        registry.record("edge", "10.0.0.1", now=1000)
+        self.assertEqual(len(registry.clients(now=1000 + MAX_AGE_SECONDS)), 1)
+        self.assertEqual(len(registry.clients(now=1000 + MAX_AGE_SECONDS + 1)), 0)
+
+    def test_a_fetch_renews_it(self):
+        registry = ClientRegistry()
+        registry.record("presto", "10.0.0.1", now=1000)
+        registry.record("presto", "10.0.0.1", now=1000 + MAX_AGE_SECONDS)
+        self.assertEqual(len(registry.clients(now=1000 + MAX_AGE_SECONDS + 5)), 1)
+
+    def test_recording_also_clears_the_old_ones_and_their_problem_memory(self):
+        registry = ClientRegistry()
+        registry.record("old", "10.0.0.1", now=1000, diag="err=OSError 113;st=conn;n=3")
+        registry.record("new", "10.0.0.2", now=1000 + MAX_AGE_SECONDS + 10)
+        self.assertEqual(list(registry._records), [("new", "10.0.0.2")])
+        self.assertNotIn(("old", "10.0.0.1"), registry._reported)
+
+    def test_the_limit_can_be_changed(self):
+        registry = ClientRegistry(max_age=60)
+        registry.record("presto", "10.0.0.1", now=1000)
+        self.assertEqual(len(registry.clients(now=1060)), 1)
+        self.assertEqual(len(registry.clients(now=1061)), 0)
 
 
 if __name__ == "__main__":

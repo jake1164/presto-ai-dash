@@ -12,6 +12,8 @@ from .api import ApiServer, BoundedRequestHandler, parse_length
 from .collectors import COLLECTOR_FILE, collector_bytes
 from .admin_sessions import AdminSessions, SESSION_SECONDS, token_binding
 from .codex_login import CodexLoginError
+from .device_setup import HANDOFF_NAME, SCRIPT_NAME, SetupError, SetupUnavailable
+from .device_lifecycle import AdminRequestError
 from .sources._codex_rpc import CodexReportingError
 from .storage import ConfigurationConflict
 
@@ -19,6 +21,26 @@ log = logging.getLogger(__name__)
 MAX_BODY = 65536
 INGEST_TOKEN_PATH = r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/ingest-token"
 SERVICE_ALERTS_PATH = r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/alerts"
+SETUP_PATH = "/api/admin/presto-setup"
+SETUP_SCRIPT_PATH = r"/api/admin/presto-setup/([A-Za-z0-9_-]{1,80})/script"
+SETUP_HANDOFF_FILE_PATH = r"/api/admin/presto-setup/([A-Za-z0-9_-]{1,80})/handoff"
+SETUP_HANDOFF_PATH = r"/api/admin/presto-setup/([A-Za-z0-9_-]{1,80})"
+SETUP_BODY_LIMIT = 1024
+# Device identity, revision and update state. The ID is the 32 lowercase
+# hexadecimal characters the setup utility generates; the route takes the same
+# shape as every other admin identifier and the lifecycle coordinator refuses
+# anything that is not a well-formed device ID.
+DEVICE_PATH = r"/api/admin/devices/([A-Za-z0-9_-]{1,80})"
+DEVICE_RETRY_PATH = r"/api/admin/devices/([A-Za-z0-9_-]{1,80})/retry"
+DEVICE_RECOVERY_PATH = r"/api/admin/devices/([A-Za-z0-9_-]{1,80})/confirm-recovery"
+RELEASES_PATH = "/api/admin/releases"
+RELEASES_CHECK_PATH = "/api/admin/releases/check"
+# The check request carries nothing; a small body is read and ignored.
+RELEASE_CHECK_BODY_LIMIT = 512
+# The retry and recovery bodies: two fields, and an idempotency key.
+DEVICE_BODY_LIMIT = 512
+IDEMPOTENCY_CHARS = 32
+HEX_DIGITS = "0123456789abcdef"
 ASSETS = {"/": ("index.html", "text/html; charset=utf-8"),
           "/admin.js": ("admin.js", "text/javascript; charset=utf-8"),
           "/admin.css": ("admin.css", "text/css; charset=utf-8")}
@@ -105,7 +127,7 @@ def origin_is_allowed(origin, host_header, server_port, allowed_hosts=()):
 
 
 def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
-                       secure_cookie=False):
+                       secure_cookie=False, setup=None):
     if not token:
         raise ValueError("admin API requires a token")
     # A session is bound to the token that made it: change a configured token and
@@ -247,6 +269,26 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
                         headers={"Content-Disposition":
                                  'attachment; filename="%s"' % COLLECTOR_FILE})
                 return
+            if path == SETUP_PATH:
+                # Read-only: what the page needs before preparing a download.
+                if self._authorized():
+                    if setup is None:
+                        self._send(200, {"v": 1, "available": False,
+                                         "reason": "bundle_unavailable"})
+                    else:
+                        try:
+                            self._send(200, setup.state(self.headers.get("Host", "")))
+                        except Exception:
+                            log.error("presto setup state failed")
+                            self._send(500, {"error": "setup state could not be read"})
+                return
+            setup_script = re.fullmatch(SETUP_SCRIPT_PATH, path)
+            setup_handoff_file = re.fullmatch(SETUP_HANDOFF_FILE_PATH, path)
+            if setup_script or setup_handoff_file:
+                match = setup_script or setup_handoff_file
+                self._setup_download(setup, match[1],
+                                     "script" if setup_script else "handoff")
+                return
             if path == "/api/admin/ingest":
                 if self._authorized():
                     try:
@@ -299,6 +341,40 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
                     except Exception:
                         log.error("admin status view failed")
                         self._send(500, {"error": "status could not be read"})
+                return
+            if path == "/api/admin/devices":
+                # Read-only: the durable devices and the attention count.
+                if self._authorized():
+                    try:
+                        self._send(200, manager.devices_view())
+                    except Exception:
+                        log.error("admin device listing failed")
+                        self._send(500, {"error": "device records could not be read"})
+                return
+            device_detail = re.fullmatch(DEVICE_PATH, path)
+            if device_detail:
+                # Read-only: one device, with its newest attempt records.
+                if self._authorized():
+                    try:
+                        view = manager.device_view(device_detail[1])
+                    except Exception:
+                        log.error("admin device detail failed")
+                        self._send(500, {"error": "device record could not be read"})
+                        return
+                    if view is None:
+                        self._send(404, {"error": "device not found"})
+                    else:
+                        self._send(200, view)
+                return
+            if path == RELEASES_PATH:
+                # Read-only: the cached release result and this install's own
+                # update commands. No registry is contacted here.
+                if self._authorized():
+                    try:
+                        self._send(200, manager.release_view())
+                    except Exception:
+                        log.error("admin release view failed")
+                        self._send(500, {"error": "release state could not be read"})
                 return
             if path == "/api/admin/logs":
                 # Read-only: the daemon's recent log lines, newest first, from memory.
@@ -417,6 +493,204 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
                 log.error("admin ingest token operation failed")
                 self._send(500, {"error": "ingest token could not be saved"})
 
+        def _setup_download(self, setup, handoff_id, kind):
+            """One of the two files a prepared handoff offers.
+
+            Both are authenticated and uncached. The unlock code is in neither:
+            it is shown once in the page and typed into the script by hand.
+            """
+            if not self._authorized():
+                return
+            if setup is None:
+                self._send(409, {"error": "Presto setup is not available in this build"})
+                return
+            try:
+                if kind == "script":
+                    body = setup.script(handoff_id)
+                    name, content_type = SCRIPT_NAME, "text/x-python; charset=utf-8"
+                else:
+                    body = setup.handoff(handoff_id)
+                    name, content_type = HANDOFF_NAME, "application/octet-stream"
+            except KeyError:
+                self._send(404, {"error": "setup download not found; prepare it again"})
+                return
+            except SetupError as exc:
+                self._send(409, {"error": str(exc)})
+                return
+            except Exception:
+                log.error("presto setup download failed")
+                self._send(500, {"error": "setup download could not be prepared"})
+                return
+            self._send(200, body, content_type,
+                       headers={"Content-Disposition": 'attachment; filename="%s"' % name})
+
+        def create_setup(self, method):
+            """Prepare a handoff (POST) or forget one (DELETE)."""
+            if not self._authorized():
+                return
+            path = urlsplit(self.path).path
+            if method == "DELETE":
+                handoff = re.fullmatch(SETUP_HANDOFF_PATH, path)
+                if not handoff:
+                    self._send(404, {"error": "not found"})
+                    return
+                try:
+                    removed = setup.discard(handoff[1]) if setup is not None else False
+                except Exception:
+                    log.error("presto setup discard failed")
+                    self._send(500, {"error": "setup download could not be discarded"})
+                    return
+                if not removed:
+                    self._send(404, {"error": "setup download not found"})
+                    return
+                self._send(200, {"discarded": True})
+                return
+            if path != SETUP_PATH:
+                self._send(404, {"error": "not found"})
+                return
+            if (self.headers.get("Content-Type", "").split(";")[0].strip()
+                    != "application/json" or self.headers.get("Transfer-Encoding")):
+                self._send(415, {"error": "send an application/json body"})
+                return
+            try:
+                length = parse_length(self.headers.get("Content-Length"), "0")
+            except ValueError:
+                self._send(400, {"error": "invalid body length"})
+                return
+            if not 2 <= length <= SETUP_BODY_LIMIT:
+                self._send(413, {"error": "invalid or oversized request body"})
+                return
+            try:
+                data = json.loads(self.rfile.read(length))
+            except (ValueError, UnicodeError, RecursionError):
+                self._send(400, {"error": "invalid JSON"})
+                return
+            if (not isinstance(data, dict) or set(data) - {"host", "port", "name", "wifi"} or
+                    not {"host", "port"} <= set(data)):
+                self._send(400, {"error": "send the daemon host and port"})
+                return
+            if setup is None:
+                self._send(409, {"error": "Presto setup is not available in this build"})
+                return
+            try:
+                result = setup.create(data["host"], data["port"],
+                                      device_name=data.get("name", "presto"),
+                                      wifi=data.get("wifi", True))
+            except SetupUnavailable as exc:
+                self._send(409, {"error": str(exc)})
+                return
+            except SetupError as exc:
+                self._send(400, {"error": str(exc)})
+                return
+            except Exception:
+                log.error("presto setup download could not be prepared")
+                self._send(500, {"error": "setup download could not be prepared"})
+                return
+            self._send(201, result)
+
+        def _forget_device(self, device_id):
+            """Remove the record of a device that has gone quiet.
+
+            The same sign-in, Host, Origin and CSRF checks as every other change.
+            The device itself is neither contacted nor changed.
+            """
+            if not self._authorized():
+                return
+            try:
+                manager.forget_device(device_id)
+            except AdminRequestError as exc:
+                self._send(exc.status, {"error": exc.code})
+                return
+            except Exception:
+                log.error("admin device removal failed")
+                self._send(500, {"error": "device record could not be removed"})
+                return
+            self._send(200, {"removed": True})
+
+        def _device_mutation(self, device_id, kind):
+            """A retry or recovery request, refused while the updater is absent.
+
+            Both routes need the same body, CSRF and idempotency treatment as
+            any other admin mutation, so the request is validated in full
+            first: a malformed request is still 400/413/415. The answer to a
+            well-formed one is ``409 ota_not_enabled``, because nothing here
+            may authorize a transfer, spend a retry or clear a warning.
+            """
+            if not self._authorized():
+                return
+            if (self.headers.get("Content-Type", "").split(";")[0].strip()
+                    != "application/json" or self.headers.get("Transfer-Encoding")):
+                self._send(415, {"error": "send an application/json body"})
+                return
+            try:
+                length = parse_length(self.headers.get("Content-Length"), "0")
+            except ValueError:
+                self._send(400, {"error": "invalid body length"})
+                return
+            if not 2 <= length <= DEVICE_BODY_LIMIT:
+                self._send(413, {"error": "invalid or oversized request body"})
+                return
+            try:
+                data = json.loads(self.rfile.read(length))
+            except (ValueError, UnicodeError, RecursionError):
+                self._send(400, {"error": "invalid JSON"})
+                return
+            key = self.headers.get("Idempotency-Key", "")
+            if (not isinstance(data, dict) or len(key) != IDEMPOTENCY_CHARS or
+                    any(char not in HEX_DIGITS for char in key)):
+                self._send(400, {"error": "invalid request"})
+                return
+            try:
+                # With the updater disabled this raises 409 ota_not_enabled;
+                # with it enabled the coordinator validates the body shape,
+                # the idempotency key, the optimistic concurrency value and
+                # every gate before it queues anything.
+                result = manager.device_mutation(device_id, kind, data, key)
+            except AdminRequestError as exc:
+                self._send(exc.status, {"error": exc.code})
+                return
+            except Exception:
+                log.error("admin device mutation failed")
+                self._send(500, {"error": "device request could not be processed"})
+                return
+            self._send(202, result)
+
+        def _release_check(self):
+            """Queue a background release check. Never contacts a registry here.
+
+            It goes through the same Host, Origin, session or bearer and CSRF
+            checks as every admin change. 202 means a check is queued or one
+            is already running; 429 means one started within the last minute.
+            """
+            if not self._authorized():
+                return
+            try:
+                length = parse_length(self.headers.get("Content-Length"), "0")
+            except ValueError:
+                self._send(400, {"error": "invalid body length"})
+                return
+            if self.headers.get("Transfer-Encoding") or length > RELEASE_CHECK_BODY_LIMIT:
+                self._send(413, {"error": "invalid or oversized request body"})
+                return
+            if length:
+                self.rfile.read(length)
+            try:
+                outcome, retry_after = manager.request_release_check()
+            except Exception:
+                log.error("admin release check request failed")
+                self._send(500, {"error": "the check could not be queued"})
+                return
+            if outcome in ("throttled", "rate_limited"):
+                # "throttled": a check started within the last minute.
+                # "rate_limited": the registry itself asked to be left alone.
+                code = "check_throttled" if outcome == "throttled" else "rate_limited"
+                self._send(429, {"error": code, "retry_after": retry_after},
+                           headers={"Retry-After": str(retry_after)})
+            elif outcome == "disabled":
+                self._send(409, {"error": "release_checks_disabled"})
+            else:
+                self._send(202, {"queued": True, "status": outcome})
+
         def do_POST(self):
             if urlsplit(self.path).path == "/api/admin/session":
                 if self._authorized(bearer_only=True):
@@ -433,6 +707,19 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
             codex_login = re.fullmatch(r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/codex-login", path)
             codex_logout = re.fullmatch(r"/api/admin/sources/([A-Za-z0-9_-]{1,80})/codex-logout", path)
             token_create = re.fullmatch(INGEST_TOKEN_PATH, path)
+            device_retry = re.fullmatch(DEVICE_RETRY_PATH, path)
+            device_recovery = re.fullmatch(DEVICE_RECOVERY_PATH, path)
+            if path == RELEASES_CHECK_PATH:
+                self._release_check()
+                return
+            if device_retry or device_recovery:
+                self._device_mutation((device_retry or device_recovery)[1],
+                                      "retry" if device_retry else "confirm-recovery")
+                return
+            if path == SETUP_PATH:
+                # Prepare the two setup downloads and the one-time unlock code.
+                self.create_setup("POST")
+                return
             if token_create:
                 self._ingest_token("POST", token_create[1])
                 return
@@ -499,9 +786,18 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
                     log.warning("every admin browser session was ended (%d)", count)
                     self._send(200, {"signed_out": count}, cookie=self._session_cookie())
                 return
+            if re.fullmatch(SETUP_HANDOFF_PATH, urlsplit(self.path).path):
+                # Forget a prepared handoff; the files already downloaded stay
+                # valid until they are used.
+                self.create_setup("DELETE")
+                return
             token_revoke = re.fullmatch(INGEST_TOKEN_PATH, urlsplit(self.path).path)
             if token_revoke:
                 self._ingest_token("DELETE", token_revoke[1])
+                return
+            device_forget = re.fullmatch(DEVICE_PATH, urlsplit(self.path).path)
+            if device_forget:
+                self._forget_device(device_forget[1])
                 return
             self._mutation("DELETE")
 
@@ -510,7 +806,8 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
 
 class AdminServer(ApiServer):
     def __init__(self, port, manager, token, host="127.0.0.1", allowed_hosts=(),
-                 token_generated=False, secure_cookie=False):
+                 token_generated=False, secure_cookie=False, setup=None):
         super().__init__(host, port, manager.storage, token,
                          handler_class=make_admin_handler(manager, token, allowed_hosts,
-                                                          token_generated, secure_cookie))
+                                                          token_generated, secure_cookie,
+                                                          setup))

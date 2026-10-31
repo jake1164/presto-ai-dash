@@ -38,6 +38,96 @@ the collector run alone in an empty folder; not yet on a second real computer.
 whitelist and keeps it in memory only, and the admin page's Status tab shows
 each client's last error, failure count, free memory, signal and uptime.
 
+**Built since (2026-10-28):** first-time Presto setup (Part 1 of the
+[device lifecycle plan](../.ai_docs/presto-ai-dash-device-lifecycle-plan.md)).
+The authenticated admin page's Settings tab offers **Set up a Presto**: it
+prepares `presto_setup.py` (the public app of the running build, rendered from
+the one shared inventory) and `presto-setup.enc` (a versioned AES-256-GCM
+envelope with the daemon address, the expected revision and the persistent
+shared device token), and shows a one-time 160-bit unlock code that is in
+neither file. The standalone installer opens the file in memory, lists and
+requires an explicit USB port, refuses a board that is not a Pimoroni Presto,
+collects Wi-Fi locally, keeps existing settings and a stable random device ID
+unless explicitly replaced, installs with the existing staged/verified/
+rolled-back engine, starts the app, checks device-to-daemon reachability, and
+removes the handoff only on success. The container image now stages the same
+bundle the wheel carries, and tagged image builds record the exact release
+identity (`DASH_RELEASE_VERSION`, RC suffix included). Automated tests cover
+the crypto, tampering, packaging parity, board/port refusal, preservation,
+interruption/retry and secret-free errors; the admin flow was inspected in a
+browser. **Not yet proven:** a first-time install on real hardware followed by
+a real power cycle and user launch. The installation layout and the 12-character
+`legacy-v1` revision are unchanged; the A/B launcher is still the gated future
+work in Parts 2–4.
+
+**Built since (2026-10-29):** device reporting (Part 3 of the
+[device lifecycle plan](../.ai_docs/presto-ai-dash-device-lifecycle-plan.md)).
+A device now sends its persistent `X-Presto-Device-ID` (the 32 hex characters
+the setup utility writes into its private `config.py`) and one compact
+`X-Presto-Lifecycle` report on each status poll. The daemon validates both
+strictly, compares the reported revision with the identity of **its own**
+bundled app, and keeps a durable record per device in SQLite (schema v10), so an
+unresolved mismatch survives a restart. The Status tab gains a **Presto
+devices** list with a per-device panel — name, online/last seen, installed and
+expected revision, comparison, update state and reason, and the matching USB
+instruction — and a **Daemon release** block that reads a cached result only.
+On the device, the shared bottom-right indicator (Home and every service card)
+shows a yellow warning for a device that needs action, a blue arrow for a newer
+daemon release, and nothing when all is well; tapping it opens a read-only
+ASCII explanation. Operational OTA stays off: `ota_enabled` is false, no
+command is issued, and the retry and recovery routes answer
+`409 ota_not_enabled`. The installation layout, the 12-character `legacy-v1`
+revision and the A/B gating are unchanged. **Not proven:** any of the OTA,
+retry, confirmation or release-notice paths on hardware, because none of them
+exists yet.
+
+**Built since (2026-10-29):** safe Presto application updates (Part 2 of the
+[device lifecycle plan](../.ai_docs/presto-ai-dash-device-lifecycle-plan.md)),
+with operational OTA still **off**. One shared inventory now publishes three
+artifacts: the unchanged `legacy-v1` app, a `slot-v1` dashboard (SHA-256 over
+canonical slot-relative names, generated revision files excluded) and a
+bootstrap of compatibility version 1. A small stable carousel entry
+(`/ai_dash_boot.py`) chooses slot A or B from a durable journal in
+`/ai_dash_state`, keeping identity, settings, boot counter and recovery
+metadata outside both slots and leaving the stock launcher and firmware alone.
+The journal is written through a temporary file and a rename with a backup, and
+every interrupted state is tested. A candidate gets one clean entry, re-arms
+the stock handoff, and rolls back on the next entry; a crashed candidate is
+recorded and a crashed confirmed slot is raised rather than reset in a loop.
+`tools/presto_device.py migrate` is the one deliberate USB migration; routine
+`sync`/`check` work on both layouts and never migrate by themselves. The
+daemon serves **only its own** bundle through two authenticated routes
+(`/api/v1/device-app/manifest` and `/api/v1/device-app/file/<name>`), and the
+device validates the manifest whole, fails closed without verified TLS, an
+explicit hostname and usable time, checks firmware, storage and bootstrap
+requirements, and stages the inactive slot through a resumable chunked
+transfer. The daemon's updater persists a permit before returning it, keeps one
+attempt per device, spends it once, retries 1 and 5 minutes later, stops on a
+gate or a first-boot crash, reports `unconfirmed` at a deadline rather than a
+failure, and settles a candidate only after the two-poll handshake; the admin
+**Retry** and **Confirm recovery** routes validate body, idempotency,
+concurrency and target, and retry never clears the warning. `presto_ota_enabled`
+defaults to false, so a mismatch still asks for a USB update. **Not proven:**
+any of it on hardware — no migration, no staged full-app transfer, no physical
+power cut during a production journal write, no real confirmation handshake,
+no near-full-flash test and no supported-firmware matrix. The device remains on
+the legacy layout.
+
+**Part 2 review fixes (2026-10-29):** migration now prepares directories before
+uploads, preserves the public boot epoch, and retires only inventoried public
+legacy files. Device hashing uses the MicroPython JSON API. Staging validates
+the actual different target and current preflight gates, persists the permit
+before file writes, verifies the complete inactive slot and generated revision
+metadata, and carries its attempt through confirmation. Corrupt/incompatible
+journals and failed entry commits require recovery; a later app crash cannot
+overwrite a durable confirmation. Candidate entry requires a firmware watchdog
+and feeding stops at the local confirmation deadline. Retry accounting includes
+failures received after lost progress polls, and admin mutations commit their
+idempotency response in the same transaction. These changes have automated
+regressions; watchdog timing, real migration, full-app A/B staging, power cuts,
+trust provisioning, and the other production hardware gates still require
+physical acceptance. Routine USB sync remains legacy and OTA remains disabled.
+
 **Open:** Phase 8 (OpenTelemetry;
 researched, decision gate pending), several Presto devices, M8 acceptance
 (real expired-login recovery, a second
@@ -47,6 +137,10 @@ live list is the backlog in [the remote ingest plan](remote-ingest-plan.md).
 The daemon suite has **2032 tests** (8 skipped) as of 2026-10-25. The sections
 below are the historical record; dated corrections mark statements that are
 no longer true.
+
+> **Correction, 2026-10-29.** The required suite now runs **2,576 tests with 9
+> skipped** and passes with the repository `.venv`. The 2026-10-25 figure above
+> is history.
 
 ## Milestones
 
@@ -463,6 +557,13 @@ pending because no browser surface was connected in the implementation session.
   reusable summary/detail views, and optional app-defined budgets. Direct-call
   reporting follows later. See [the design and acceptance outline](future.md#application-usage-monitoring).
   No book-app special cases or M3 application schema are required.
+- **Part 4, newer-release notifications (2026-10-29):** implemented. A background
+  checker asks one registry (PyPI for a published wheel, GHCR for a published
+  image, nothing for a checkout or local image), caches the result in the
+  existing `daemon_release_cache` row, and shows it in the admin Status tab
+  (with a **Check for updates** action) and as the blue arrow on the Presto.
+  Informational only. Design, dependency decision and acceptance limits:
+  [release-notifications.md](release-notifications.md).
 - **Deployment targets:** v0 direct Python/pip/pipx; v0.1 optional Docker;
   v0.2 optional separate tray runner; v1 binaries/installers if useful.
   These targets are plans, not delivered features. The planned daemon command

@@ -67,6 +67,8 @@
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "args": [
+        "--config",
+        "${workspaceFolder}/dash.toml",
         "--open",
         "--open-first",
         "http://127.0.0.1:8788/"

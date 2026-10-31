@@ -217,9 +217,30 @@ class DeviceSyncTests(unittest.TestCase):
                     target = arguments[index + 2][1:].removesuffix(".presto-new")
                     self.assertEqual(Path(arguments[index + 1]).read_bytes(), self.bundle["files"][target])
                 return device.MARKER + json.dumps(self.bundle["hashes"])
-            return ""
+            return device.MARKER + json.dumps({"config": True})
         self.assertEqual(device.operate("sync", "TESTPORT", self.bundle, remote, self.receipt), [])
         self.assertEqual(bundle.sync_status(self.bundle["revision"], self.receipt)["status"], "matched")
+        self.assertIn("--no-follow", calls[-1])
+
+    def test_sync_refuses_a_device_that_has_no_settings_and_writes_nothing(self):
+        calls = []
+        def remote(port, arguments):
+            calls.append(arguments)
+            return device.MARKER + json.dumps({"config": False})
+        with self.assertRaisesRegex(RuntimeError, "Set up a Presto"):
+            device.operate("sync", "TESTPORT", self.bundle, remote, self.receipt)
+        self.assertEqual([arguments for arguments in calls if "run" in arguments], [])
+        self.assertFalse(any("cp" in arguments for arguments in calls))
+        self.assertEqual(bundle.sync_status(self.bundle["revision"], self.receipt)["status"], "unverified")
+
+    def test_a_failed_settings_preflight_still_relaunches_the_app(self):
+        calls = []
+        def remote(port, arguments):
+            calls.append(arguments)
+            return ""  # no marker: the device's answer cannot be read
+        with self.assertRaisesRegex(RuntimeError, "unambiguous"):
+            device.operate("sync", "TESTPORT", self.bundle, remote, self.receipt)
+        self.assertFalse(any("cp" in arguments for arguments in calls))
         self.assertIn("--no-follow", calls[-1])
 
     def test_failed_sync_does_not_record_a_success_and_attempts_app_relaunch(self):
@@ -228,7 +249,7 @@ class DeviceSyncTests(unittest.TestCase):
             calls.append(arguments)
             if "run" in arguments:
                 raise RuntimeError("connection interrupted")
-            return ""
+            return device.MARKER + json.dumps({"config": True})
         with self.assertRaisesRegex(RuntimeError, "interrupted"):
             device.operate("sync", "TESTPORT", self.bundle, remote, self.receipt)
         self.assertEqual(bundle.sync_status(self.bundle["revision"], self.receipt)["status"], "unverified")

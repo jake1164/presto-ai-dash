@@ -33,6 +33,20 @@ def _presto_files():
 
 class TestLayering(unittest.TestCase):
 
+    def test_bootstrap_hardware_exception_is_machine_only(self):
+        path = os.path.join(PRESTO_DIR, 'bootstrap', 'boot.py')
+        with open(path, encoding='utf-8') as handle:
+            tree = ast.parse(handle.read())
+        imports = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imports.extend(alias.name for alias in node.names if alias.name in
+                               ('presto', 'machine', 'picographics', 'picovector'))
+            elif isinstance(node, ast.ImportFrom) and node.module in (
+                    'presto', 'machine', 'picographics', 'picovector'):
+                imports.append(node.module)
+        self.assertEqual(imports, ['machine'])
+
     def test_only_main_and_ui_import_hardware(self):
         offenders = []
         for name in _presto_files():

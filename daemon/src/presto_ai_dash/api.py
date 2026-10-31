@@ -14,8 +14,12 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
+from . import clock_proof
 from . import demo
 from .dashboard import build_status_payload, lazy_cards
+from .device_app import FILE_PATH as DEVICE_FILE_PATTERN
+from .device_app import MANIFEST_PATH as DEVICE_APP_MANIFEST_PATH
+from .device_protocol import MAX_STATUS_BYTES
 from .ingest import ingest as store_observation
 
 log = logging.getLogger(__name__)
@@ -32,6 +36,9 @@ ALERT_BODY_LIMIT = 256
 # The lazy card detail: one card's tiles and lines, fetched when the card
 # is opened. It is a read-only path with the same shared token.
 CARDS_PATH = re.compile(r"^/api/v1/cards/([A-Za-z0-9_-]{1,80})$")
+# The device-app routes are matched on a fixed pattern, so a caller cannot
+# ask for a path of its own.
+DEVICE_APP_FILE_PATH = re.compile(DEVICE_FILE_PATTERN)
 # The query that asks for the small summary: "?cards=lazy".
 LAZY_QUERY = "cards=lazy"
 
@@ -287,7 +294,8 @@ class BoundedRequestHandler(BaseHTTPRequestHandler):
 def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                  *, ingest_enabled=None, ingest_rate_limiter=None, client_registry=None,
                  alert_writer=None, alert_rate_limiter=None, card_provider=None,
-                 demo_enabled=None, demo_second=None, demo_device_alerts=None):
+                 demo_enabled=None, demo_second=None, demo_device_alerts=None,
+                 device_lifecycle=None, device_app=None):
     if not shared_token:
         raise ValueError("API requires a nonempty shared token")
     limiter = ingest_rate_limiter if ingest_rate_limiter is not None else _IngestRateLimiter()
@@ -384,6 +392,9 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
             if card_match:
                 self._card_detail(card_match[1])
                 return
+            if path in (DEVICE_APP_MANIFEST_PATH,) or DEVICE_APP_FILE_PATH.match(path):
+                self._device_app(path)
+                return
             if path != STATUS_PATH:
                 self._send_json(404, {"error": "not_found"})
                 return
@@ -407,6 +418,12 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                 log.exception("could not build status payload")
                 self._send_json(500, {"error": "internal_error"})
                 return
+            if device_lifecycle is not None and not self._demo_on():
+                # The lifecycle extension describes only the requesting device.
+                # Demo mode is skipped on purpose: sample data must never
+                # create a durable device record, spend a retry or confirm an
+                # update, and real unresolved state is left exactly as it is.
+                payload = self._with_lifecycle(payload, device_lifecycle)
             if client_registry is not None:
                 # Who is polling: remembered in memory only, and never part of
                 # the response, which stays exactly as it was. The device's
@@ -419,7 +436,39 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                                            diag=self.headers.get("X-Presto-Diag"))
                 except Exception:
                     log.debug("could not record the client", exc_info=True)
+            # A board with no clock battery asks for the time with a nonce;
+            # the proof is single-use, so it cannot be replayed (clock_proof).
+            payload = clock_proof.attach(payload, self.headers, shared_token, MAX_STATUS_BYTES)
             self._send_json(200, payload)
+
+        def _with_lifecycle(self, payload, lifecycle):
+            """A request-local copy carrying the two optional extensions.
+
+            The provider's payload is never mutated: a cached or shared dict
+            must not grow one device's state. If the result would exceed the
+            device's own response bound, the extensions are dropped rather
+            than the quota data: a device with no room is told nothing new,
+            and nothing is dispatched or acknowledged.
+            """
+            merged = dict(payload)
+            try:
+                extension = lifecycle.observe(self.headers)
+                release = lifecycle.release()
+            except Exception:
+                log.debug("the lifecycle extension was skipped", exc_info=True)
+                return merged
+            if extension is not None:
+                merged["device_lifecycle"] = extension
+            if release is not None:
+                merged["daemon_release"] = release
+            try:
+                size = len(json.dumps(merged).encode("utf-8"))
+            except (TypeError, ValueError):
+                return dict(payload)
+            if size > MAX_STATUS_BYTES:
+                log.debug("no room for the lifecycle extension in a %d byte payload", size)
+                return dict(payload)
+            return merged
 
         def _status_payload(self, query):
             """The status payload, small when the client asks for lazy cards.
@@ -435,6 +484,54 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
             except TypeError:
                 # An older provider that cannot make a lazy payload.
                 return status_provider()
+
+        def _device_app(self, path):
+            """The running daemon's own slot bundle, one file per request.
+
+            It is deliberately dull: no redirect (a redirect is how a device
+            is steered to another host), no query, no directory listing and no
+            path the caller makes up. The shared token authenticates the
+            account; the device still has to trust the bytes through TLS.
+            """
+            if not self._authorized():
+                self._send_json(401, {"error": "unauthorised"})
+                return
+            if device_app is None or self._demo_on():
+                # Demo mode has no real bundle to install, and pretending it
+                # does would offer a device an update that is not this build.
+                self._send_json(404, {"error": "not_found"})
+                return
+            if path == DEVICE_APP_MANIFEST_PATH:
+                body = device_app.manifest()
+                if body is None:
+                    self._send_json(404, {"error": "bundle_unavailable"})
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("X-Content-Type-Options", "nosniff")
+                self.end_headers()
+                if self.command != "HEAD":
+                    self.wfile.write(body)
+                return
+            match = DEVICE_APP_FILE_PATH.match(path)
+            body = device_app.file(match[1]) if match else None
+            if body is None:
+                self._send_json(404, {"error": "not_found"})
+                return
+            import hashlib as _hashlib
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Presto-SHA256", _hashlib.sha256(body).hexdigest())
+            self.end_headers()
+            if self.command != "HEAD":
+                # Bounded writes, so a large file does not become one buffer.
+                for start in range(0, len(body), 8192):
+                    self.wfile.write(body[start:start + 8192])
 
         def _card_detail(self, card_id):
             """One card's tiles and lines. Read-only, with the shared token."""
@@ -754,7 +851,8 @@ class ApiServer:
                  status_provider=None, *, ingest_enabled=None, ingest_rate_limiter=None,
                  handler_class=None, client_registry=None, alert_writer=None,
                  alert_rate_limiter=None, card_provider=None, demo_enabled=None,
-                 demo_second=None, demo_device_alerts=None):
+                 demo_second=None, demo_device_alerts=None, device_lifecycle=None,
+                 device_app=None):
         self.host = host
         self._server = _ExclusiveHTTPServer(
             (host, port), handler_class or make_handler(
@@ -767,7 +865,9 @@ class ApiServer:
                 card_provider=card_provider,
                 demo_enabled=demo_enabled,
                 demo_second=demo_second,
-                demo_device_alerts=demo_device_alerts))
+                demo_device_alerts=demo_device_alerts,
+                device_lifecycle=device_lifecycle,
+                device_app=device_app))
         self._server.daemon_threads = False
         self._server.block_on_close = True
         self._server._active_condition = threading.Condition()

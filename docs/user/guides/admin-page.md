@@ -84,11 +84,27 @@ foreground.
 | Section | What it shows |
 | --- | --- |
 | Daemon | Version, database schema version, uptime, poll interval, start time, the bind address, the log level |
-| Clients | Every device that fetches the status endpoint: its name, address, when it last fetched, how often, the app revision it reports, and what it says about itself: last error, failures since boot, free memory, signal and uptime |
+| Presto devices | Every device the daemon keeps a durable record for: online/last seen, the revision it reports and the one this daemon serves, whether they match, its update state, what to do about it, and its update history. Open a device that has gone quiet and **Remove this record** forgets it; nothing on the Presto changes, and if it reports again it is listed as new |
+| Daemon release | Whether a newer published daemon exists, from the one registry this installation uses (PyPI for pip and pipx, the GitHub Container Registry for the Docker image). The daemon checks in the background about once a day; **Check for updates** asks it to look again now (at most once a minute). The block shows the running and newest eligible version, when it last checked, an official details link, and copyable commands for the actual target. Opening the page contacts no registry, a failed or old check says so instead of claiming you are up to date, and nothing is ever upgraded for you. Set `DASH_RELEASE_CHECK=off` to turn the checks off |
+| Clients | Every device that fetches the status endpoint: its name, address, when it last fetched, how often, the app revision it reports, and what it says about itself: failures since boot (click the number to see when the daemon heard about them), free memory, signal and uptime. A client that has not fetched for a day drops off the list. The USB setup shows as `setup` while it checks that a Presto can reach the daemon |
 | Accounts | One row per account: when it was last collected, its status, and the last problem in plain words |
 | Readers and collectors | The local activity reader, the usage cache reader, and the remote collectors with their last report and host |
 | Problems | The recent `WARNING` and `ERROR` messages, de-duplicated |
 | Log | The daemon's recent log lines, newest first, with a level filter, a search box and **Show more** |
+
+**Presto devices** and **Clients** answer different questions. A client row is a
+name and an address seen in memory since the daemon started, and it is gone
+after a restart. A device row is keyed by the device ID the setup utility
+generated, it is stored in the database, and it survives a restart so an
+unresolved problem is not forgotten. A device only gets a row once it runs a
+build that sends its device ID; an older app still appears under **Clients**
+with its revision.
+
+The revision is what the device says about itself. It is a content hash of the
+public app files, and a different hash is neither older nor newer: it is only
+different. When it differs from the revision this daemon serves, the row says
+**Update over USB** and points at **Set up a Presto** on the Settings tab; there
+is no over-the-air update yet, and nothing here will start one.
 
 The daemon has one shared token, so authentication cannot tell clients
 apart. Each client therefore declares a name in the `X-Presto-Client`
@@ -129,17 +145,24 @@ full history use `docker logs`.
 ### Settings
 
 What applies to every service, in collapsible sections. The first one is
-open, the rest are folded away. Every section is headed *Applies to all
-services*.
+open, the rest are folded away. A section that applies to one device rather
+than to the daemon says so in its badge.
 
 | Section | What is in it |
 | --- | --- |
 | Home display | The overflow strip setting |
+| Set up a Presto | The one-time USB setup download: the daemon address, the unlock code, `presto_setup.py` and `presto-setup.enc`. See [Set up the Presto](../getting-started/set-up-the-presto.md#the-guided-setup) |
 | Remote reports | The ingest switch, the collector download and its SHA-256, the remote tokens, the collector trail and version, the plain-HTTP warning |
 | Demo mode | The sample-data switch, and what it does and does not touch |
 | Alerts | The master switch, the thresholds, the sound switch (off until you turn it on), quiet hours, pop to top, the mute length |
 | Effective daemon configuration | Read-only: every value and where it came from |
 | About and help | What the sources are, the order note, where the logs and the diagnostics commands are |
+
+**Set up a Presto** prepares both files for *this running build*, so a device
+installed from it carries the same app revision the daemon expects. The unlock
+code it shows once is not in either download, and the encrypted file holds the
+persistent shared device token, never the admin token. Losing the code or the
+file costs a new download; it does not revoke the device token.
 
 The effective configuration names the origin of every value:
 `environment`, `dash.toml`, `database`, or `default`. Those values need a

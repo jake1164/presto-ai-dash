@@ -12,11 +12,26 @@ change you make is visible in the preview within a second.
 ```bash
 .venv/Scripts/python tools/presto_preview/live.py          # live daemon
 .venv/Scripts/python tools/presto_preview/live.py --demo   # the scripted demo
+.venv/Scripts/python tools/presto_preview/live.py --config dash.toml   # follow that daemon
 ```
 
 `live.py` runs the real `presto/main.py` App against an emulated 240x240
 RGB565 framebuffer, using the firmware's own bitmap fonts, shown at 480x480.
 It polls the real daemon, so it shows real data.
+
+By default it polls the daemon named in `presto/config.py`, the same settings
+file the device uses. When you are debugging a daemon on this computer, pass
+`--config` with the daemon's own configuration file instead: the preview then
+polls that daemon's port and token, and a bind-everything address such as
+`0.0.0.0` becomes `127.0.0.1`. The VS Code launch entries do this for you, so
+the preview always follows the daemon you started beside it. If the daemon has
+no `shared_token` set it invents a new one at every start, which the preview
+cannot know, so it says so and keeps the token from `presto/config.py`.
+
+The line under the screen says where it is polling, for example
+`live daemon · polling 127.0.0.1:8787 (dash.toml)`: the address and which file
+named it (`dash.toml` when you pass `--config`, `presto/config.py` otherwise),
+never the token. Demo mode says it has no daemon.
 
 It binds to `127.0.0.1` only. The live view shows real account names and
 quotas, so do not expose it and do not paste a screenshot of it anywhere

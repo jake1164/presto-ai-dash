@@ -21,7 +21,11 @@ DEFAULTS = {
     "daemon": {"host": "0.0.0.0", "port": 8787, "shared_token": "",
                "poll_interval": 15, "database": "dash.db",
                "retention_hours": 72, "cleanup_interval": 300,
-               "ingest_enabled": False},
+               "ingest_enabled": False,
+               # Unattended Presto updates exist in the code but stay off until
+               # the production deployment gate passes. Leaving this false is
+               # the supported configuration: a mismatch asks for a USB update.
+               "presto_ota_enabled": False},
     "logging": {"level": "INFO"},
     "admin": {"enabled": False, "port": 8788, "token": "", "key_file": "",
               "host": "127.0.0.1", "allowed_hosts": [], "secure_cookie": False},
@@ -423,6 +427,13 @@ def load_config(path=None):
             raise ConfigError("daemon.%s must be a valid string" % key)
     if type(config["daemon"]["ingest_enabled"]) is not bool:
         raise ConfigError("daemon.ingest_enabled must be a boolean")
+    # Operational Presto updates: accepted as a flag so a controlled test can
+    # turn them on, but not a supported configuration yet. A non-boolean is
+    # refused rather than coerced, because a typo must not enable updates.
+    ota = config["daemon"].get("presto_ota_enabled", False)
+    if type(ota) is not bool:
+        raise ConfigError("daemon.presto_ota_enabled must be a boolean")
+    config["daemon"]["presto_ota_enabled"] = ota
     if type(config["demo"].get("enabled", False)) is not bool:
         raise ConfigError("demo.enabled must be a boolean")
     overflow = config["display"].get("overflow_rows")

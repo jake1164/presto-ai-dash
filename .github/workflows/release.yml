@@ -1,7 +1,8 @@
 name: Release
 
-# Runs when a version tag is pushed: v0.50.0 is a release; v0.50.0-rc1 is a
-# pre-release. The tag must match the version in daemon/pyproject.toml.
+# Runs when a version tag is pushed: v0.50.0 is a release; v0.50.0-rc4 is a
+# pre-release. The tag must match the version in daemon/pyproject.toml, in its
+# PEP 440 form: v0.50.0 needs 0.50.0 and v0.50.0-rc4 needs 0.50.0rc4.
 #
 # One job builds everything in order, so nothing is published unless the
 # tests, the tag check and the wheel check all pass:
@@ -11,8 +12,9 @@ name: Release
 #   4. the container image, pushed to ghcr.io (a "latest" tag moves only for a
 #      full release)
 #   5. a GitHub Release with the files and their SHA-256 sums
-#   6. a full release only: the same wheel and source archive, as attached to
-#      that Release, go to PyPI (the "publish" job below)
+#   6. the same wheel and source archive, as attached to that Release, go to
+#      PyPI for a full release (the "publish" job below) or to TestPyPI for a
+#      pre-release (the "publish-test" job)
 #
 # The release job uses only the GitHub CLI and Docker that the runner already
 # has. Every action it and the publish job use is pinned to a commit, as in the
@@ -50,7 +52,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install the build tools and the daemon's dependency
-        run: python -m pip install build "cryptography>=46" "mpremote>=1.24,<2"
+        run: python -m pip install build "cryptography>=46" "packaging>=24" "mpremote>=1.24,<2"
 
       - name: Check the tag against the package version
         run: python tools/build_release.py --tag "$TAG" --stage-only
@@ -71,7 +73,7 @@ jobs:
           IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}"
           VERSION="${TAG#v}"
           echo "$REGISTRY_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
-          docker build -t "$IMAGE:$VERSION" .
+          docker build --build-arg DASH_RELEASE_VERSION="$VERSION" -t "$IMAGE:$VERSION" .
           docker push "$IMAGE:$VERSION"
           # "latest" is the stable tag users pull. A pre-release never moves it.
           if [[ "$VERSION" != *-* ]]; then
@@ -89,9 +91,40 @@ jobs:
           # a machine without a checkout can follow the Docker guide.
           gh release create "$TAG" dist/* compose.yaml .env.example --title "$TAG" $FLAGS
 
-  # PyPI never accepts a version twice, and a pre-release builds the same wheel
-  # version as the release it leads up to (v0.50.0-rc1 builds 0.50.0). So only a
-  # tag without a "-" ever reaches PyPI. It publishes through PyPI's trusted
+  # A pre-release (v0.50.0-rc4) goes to TestPyPI, a rehearsal of the real
+  # publish below. Each tag builds its own version (0.50.0rc4; the tag check
+  # enforces it), so every candidate uploads and pip can upgrade between them.
+  # skip-existing only lets a re-run of the same tag succeed. TestPyPI trusts
+  # this workflow and the "testpypi" environment (set up once on test.pypi.org).
+  publish-test:
+    needs: release
+    if: ${{ contains(github.ref_name, '-') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: testpypi
+    permissions:
+      contents: read     # download the files from the GitHub Release
+      id-token: write    # trusted publishing to TestPyPI
+    env:
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Download the wheel and the source archive from the Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir dist
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir dist --pattern '*.whl' --pattern '*.tar.gz'
+          ls -l dist
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+  # Only a tag without a "-" (a full release, package version 0.50.0) reaches
+  # PyPI; candidates stop at TestPyPI above. It publishes through PyPI's trusted
   # publishing: no token is stored; PyPI trusts this workflow, this repository
   # and the "pypi" environment (set up once on pypi.org).
   publish:

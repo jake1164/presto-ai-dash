@@ -36,6 +36,7 @@ button:disabled { opacity: .55; cursor: wait; }
 .check { display: flex; align-items: center; gap: 9px; font-weight: 400; }
 input[type=checkbox] { accent-color: #7ce6da; width: 18px; height: 18px; }
 .note { font-size: .85rem; color: #b1c2d7; }
+.note.error { color: #fcd34d; }
 .actions { justify-content: flex-start; margin-top: 24px; flex-wrap: wrap; }
 #login-form button { margin-top: 20px; }
 .source { padding: 16px 0; border-bottom: 1px solid #2a3b53; }

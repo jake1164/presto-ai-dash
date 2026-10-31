@@ -581,6 +581,8 @@
     const text = element("setup-unlock-code").textContent || "";
     if (!text) return;
     const button = element("copy-setup-code");
+    const note = element("copy-setup-note");
+    note.hidden = true;
     let copied = false;
     if (navigator.clipboard && window.isSecureContext) {
       try { await navigator.clipboard.writeText(text); copied = true; } catch (_) { copied = false; }
@@ -598,7 +600,11 @@
     range.selectNodeContents(element("setup-unlock-code"));
     const selection = window.getSelection();
     selection.removeAllRanges(); selection.addRange(range);
-    message("This browser would not copy it. The code is selected: press Ctrl+C.", true);
+    // Beside the code, not in the message line at the top of the page, which is
+    // scrolled out of sight when this panel is in view.
+    note.textContent = "This browser would not copy it (a page served over plain HTTP often can't). " +
+      "The code is selected: press Ctrl+C.";
+    note.hidden = false;
   }
   // The reason the reader sees in words when the master switch is off.
   // It is text, not only a colour, so it is never missed.
@@ -1252,10 +1258,22 @@
     const copy = document.createElement("button"); copy.type = "button";
     copy.textContent = "Copy"; copy.setAttribute("aria-label", "Copy to the clipboard");
     copy.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(text); copy.textContent = "Copied";
+      let copied = false;
+      if (navigator.clipboard && window.isSecureContext) {
+        try { await navigator.clipboard.writeText(text); copied = true; } catch (_) { copied = false; }
+      }
+      // Plain HTTP has no clipboard API; fall back, then select the text. The
+      // page-top message line is out of sight here, so the button says it.
+      if (!copied) copied = copyWithCommand(text);
+      if (copied) {
+        copy.textContent = "Copied";
         setTimeout(() => { copy.textContent = "Copy"; }, 2000);
-      } catch (_) { message("Copying is blocked; select the text instead.", true); }
+      } else {
+        const range = document.createRange(); range.selectNodeContents(code);
+        const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+        copy.textContent = "Selected: press Ctrl+C";
+        setTimeout(() => { copy.textContent = "Copy"; }, 4000);
+      }
     });
     container.append(code, copy);
     return container;

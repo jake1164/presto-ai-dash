@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1000 550" width="1000" height="550">
+  <rect width="1000" height="550" fill="#E8EDF2"/>
+  <text x="38" y="46" font-family="DejaVu Sans,sans-serif" font-size="25" font-weight="bold" fill="#152235">Watchful Meter — visual QA</text>
+  <text x="38" y="72" font-family="DejaVu Sans,sans-serif" font-size="14" fill="#546274">Actual pixel-size icons centered in consistent preview tiles</text>
+  <g font-family="DejaVu Sans,sans-serif" font-size="15" text-anchor="middle">
+    <rect x="40" y="95" width="220" height="190" rx="12" fill="#FFFFFF"/>
+    <rect x="270" y="95" width="220" height="190" rx="12" fill="#FFFFFF"/>
+    <rect x="500" y="95" width="220" height="190" rx="12" fill="#FFFFFF"/>
+    <rect x="730" y="95" width="220" height="190" rx="12" fill="#FFFFFF"/>
+    <image x="142" y="170" width="16" height="16" xlink:href="../png/presto-ai-dash-16.png"/>
+    <image x="364" y="162" width="32" height="32" xlink:href="../png/presto-ai-dash-32.png"/>
+    <image x="578" y="146" width="64" height="64" xlink:href="../png/presto-ai-dash-64.png"/>
+    <image x="776" y="114" width="128" height="128" xlink:href="../png/presto-ai-dash-128.png"/>
+    <g fill="#283448"><text x="150" y="265">16 px</text><text x="380" y="265">32 px</text><text x="610" y="265">64 px</text><text x="840" y="265">128 px</text></g>
+    <rect x="40" y="302" width="220" height="190" rx="12" fill="#0D1117"/>
+    <rect x="270" y="302" width="220" height="190" rx="12" fill="#0D1117"/>
+    <rect x="500" y="302" width="220" height="190" rx="12" fill="#0D1117"/>
+    <rect x="730" y="302" width="220" height="190" rx="12" fill="#0D1117"/>
+    <image x="142" y="377" width="16" height="16" xlink:href="../png/presto-ai-dash-16.png"/>
+    <image x="364" y="369" width="32" height="32" xlink:href="../png/presto-ai-dash-32.png"/>
+    <image x="578" y="353" width="64" height="64" xlink:href="../png/presto-ai-dash-64.png"/>
+    <image x="776" y="321" width="128" height="128" xlink:href="../png/presto-ai-dash-128.png"/>
+    <g fill="#CED9E7"><text x="150" y="473">16 px</text><text x="380" y="473">32 px</text><text x="610" y="473">64 px</text><text x="840" y="473">128 px</text></g>
+  </g>
+  <text x="40" y="530" font-family="DejaVu Sans,sans-serif" font-size="12" fill="#607080">Backgrounds: white and GitHub-like dark (#0D1117). Icons are exported PNGs, not vector renderings.</text>
+</svg>

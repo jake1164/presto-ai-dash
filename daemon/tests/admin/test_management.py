@@ -355,6 +355,17 @@ class AdminServerBase(ManagementBase):
 
 
 class AdminHttpTests(AdminServerBase):
+    def test_brand_assets_work_on_the_locked_page_with_local_images_only(self):
+        for path, content_type in (("/presto-ai-dash-icon.svg", "image/svg+xml"),
+                                   ("/favicon.ico", "image/x-icon"),
+                                   ("/favicon.svg", "image/svg+xml")):
+            status, headers, body = self.request(path, token=None)
+            self.assertEqual(status, 200)
+            self.assertEqual(headers["Content-Type"], content_type)
+            self.assertTrue(body)
+            self.assertIn("img-src 'self'", headers["Content-Security-Policy"])
+            self.assertIn("default-src 'none'", headers["Content-Security-Policy"])
+
     def test_second_admin_server_cannot_share_listening_port(self):
         with self.assertRaises(OSError):
             duplicate = AdminServer(self.admin.actual_port, self.manager, "other-admin-token")

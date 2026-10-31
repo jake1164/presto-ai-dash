@@ -11,6 +11,8 @@ on:
     branches: [main]
     paths:
       - 'docs/user/**'
+      - 'assets/brand/**'
+      - 'tools/build_brand_assets.py'
       - 'website/**'
       - 'tools/build_pages_site.py'
       - 'tools/pages_legacy_urls.json'
@@ -31,6 +33,8 @@ on:
     branches: [main]
     paths:
       - 'docs/user/**'
+      - 'assets/brand/**'
+      - 'tools/build_brand_assets.py'
       - 'website/**'
       - 'tools/build_pages_site.py'
       - 'tools/pages_legacy_urls.json'
@@ -76,6 +80,9 @@ jobs:
 
       - name: Install docs dependencies
         run: pip install -r docs/requirements.txt
+
+      - name: Verify derived branding assets
+        run: python tools/build_brand_assets.py --check
 
       - name: Build the demo page's app files
         # The demo page runs the device's own code in the browser. These files

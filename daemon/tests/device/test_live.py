@@ -206,7 +206,7 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.app._poll_delay(), 15)
 
     def mixed_payload(self):
-        """Four quota accounts and two local services, in the saved order.
+        """Four quota accounts and three local services, in the saved order.
 
         The first has three windows and the second two, like the author's OpenCode Go
         and Claude; each bar is six pixels, so the rows are 54, 47, 40 and 40 pixels."""
@@ -225,7 +225,7 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
                 'status': 'ok',
                 'quota': {'windows': windows[:{0: 3, 1: 2}.get(index, 1)] if index < 2
                           else windows[1:2]}})
-        for index in range(2):
+        for index in range(3):
             payload['sources'].append({
                 'id': 'local-%d' % index, 'type': 'litellm', 'name': 'Gateway %d' % index,
                 'status': 'ok', 'metrics': {'requests_today': 12}})
@@ -234,19 +234,20 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
     async def test_the_home_scroll_uses_the_total_height_of_mixed_rows(self):
         self.app.client.fetch_async.return_value = self.mixed_payload()
         await self.app.poll_once()
-        total = 54 + 47 + 40 + 40 + 2 * 18
+        total = 54 + 47 + 40 + 40 + 3 * 18
         # The list is taller than the list area, so the overflow strip takes
-        # one line of it: 204 - 18 = 186 pixels of list.
+        # one line of it. A clean live footer reclaims 16 chip-band pixels:
+        # 204 + 16 - 18 = 202 pixels of list.
         self.assertEqual(self.app.home_layout.lines, 1)
-        self.assertEqual(self.app.home_layout.region, 186)
-        self.assertEqual(self.app.home_scroll.limit, total - 186)
+        self.assertEqual(self.app.home_layout.region, 202)
+        self.assertEqual(self.app.home_scroll.limit, total - 202)
         self.app._render()
         texts = [row[0] for row in self.device.display.rows]
         self.assertIn('Cloud 0', texts)
-        # The local rows are named in the overflow strip until they are
-        # scrolled into the list.
-        band = [row[0] for row in self.device.display.rows if row[2] >= 190]
-        self.assertIn('Gateway 0', band)
+        # The reclaimed room admits the first local row; the second is
+        # still named in the overflow strip until it is scrolled into view.
+        band = [row[0] for row in self.device.display.rows if row[2] >= 206]
+        self.assertNotIn('Gateway 0', band)
         self.assertIn('Gateway 1', band)
         # At the end of the scroll the local rows are on the list, in place.
         self.app.home_scroll.offset = self.app.home_scroll.limit
@@ -264,7 +265,7 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
         self.app._poll_touch()
         self.device.touch.x, self.device.touch.y = 120, 130
         self.app._poll_touch()
-        self.assertEqual(self.app.home_scroll.offset, 20)
+        self.assertEqual(self.app.home_scroll.offset, min(20, self.app.home_scroll.limit))
         # A horizontal drag belongs to the cards, not to the list.
         self.device.touch.state = False
         self.app._poll_touch()
@@ -273,7 +274,7 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
         self.app._poll_touch()
         self.device.touch.x, self.device.touch.y = 180, 150
         self.app._poll_touch()
-        self.assertEqual(self.app.home_scroll.offset, 20)
+        self.assertEqual(self.app.home_scroll.offset, min(20, self.app.home_scroll.limit))
 
     async def test_a_drag_in_the_strip_band_scrolls_the_list(self):
         self.app.client.fetch_async.return_value = self.mixed_payload()
@@ -282,32 +283,32 @@ class DevicePollingTests(unittest.IsolatedAsyncioTestCase):
         # The band is at the bottom of the list area; a drag that starts
         # there scrolls the list.
         self.device.touch.state = True
-        self.device.touch.x, self.device.touch.y = 120, 195
+        self.device.touch.x, self.device.touch.y = 120, 211
         self.app._poll_touch()
-        self.device.touch.x, self.device.touch.y = 120, 175
+        self.device.touch.x, self.device.touch.y = 120, 191
         self.app._poll_touch()
-        self.assertEqual(self.app.home_scroll.offset, 20)
+        self.assertEqual(self.app.home_scroll.offset, min(20, self.app.home_scroll.limit))
 
     async def test_a_horizontal_swipe_in_the_strip_band_still_changes_cards(self):
         self.app.client.fetch_async.return_value = self.mixed_payload()
         await self.app.poll_once()
         self.device.touch.state = True
-        self.device.touch.x, self.device.touch.y = 120, 195
+        self.device.touch.x, self.device.touch.y = 120, 211
         self.app._poll_touch()
-        self.device.touch.x, self.device.touch.y = 120, 175
+        self.device.touch.x, self.device.touch.y = 120, 191
         self.app._poll_touch()
-        self.assertEqual(self.app.home_scroll.offset, 20)
+        self.assertEqual(self.app.home_scroll.offset, min(20, self.app.home_scroll.limit))
         # A horizontal drag belongs to the cards, not to the list.
         self.device.touch.state = False
         self.app._handle_gestures(self.app._poll_touch())
         self.device.touch.state = True
-        self.device.touch.x, self.device.touch.y = 60, 195
+        self.device.touch.x, self.device.touch.y = 60, 211
         self.app._handle_gestures(self.app._poll_touch())
-        self.device.touch.x, self.device.touch.y = 180, 195
+        self.device.touch.x, self.device.touch.y = 180, 211
         self.app._handle_gestures(self.app._poll_touch())
         self.device.touch.state = False
         self.app._handle_gestures(self.app._poll_touch())
-        self.assertEqual(self.app.home_scroll.offset, 20)
+        self.assertEqual(self.app.home_scroll.offset, min(20, self.app.home_scroll.limit))
         self.assertNotEqual(self.app._current_card().id, "dash")
 
     async def test_success_renders_configured_instances_not_demo_cloud_values(self):

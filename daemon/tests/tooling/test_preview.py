@@ -25,6 +25,13 @@ from presto_bundle import app_files, snapshot  # noqa: E402
 
 
 class PreviewTests(unittest.TestCase):
+    def test_preview_page_declares_the_shared_tightly_framed_favicon(self):
+        self.assertIn('type="image/svg+xml" href="/favicon.svg"', live.PAGE)
+        with open(os.path.join(PREVIEW_DIR, "favicon.svg"), encoding="utf-8") as handle:
+            favicon = handle.read()
+        self.assertIn('viewBox="50 50 412 412"', favicon)
+        self.assertIn("Watchful Meter", favicon)
+
     def test_preview_cannot_report_a_configured_physical_device_identity(self):
         configured = SimpleNamespace(DEVICE_ID="a" * 32)
         with patch.dict(sys.modules, {"config": configured}):
@@ -515,6 +522,9 @@ class LiveServerGuardTests(unittest.TestCase):
 
     def test_the_page_and_its_own_requests_still_work(self):
         self.assertEqual(self.call("GET", "/")[0], 200)
+        status, favicon = self.call("GET", "/favicon.svg")
+        self.assertEqual(status, 200)
+        self.assertIn(b'viewBox="50 50 412 412"', favicon)
         self.assertEqual(self.call("GET", "/state?after=-1")[0], 200)
         self.assertEqual(self.call("GET", "/frame.png")[0], 200)
         origin = {"Origin": "http://127.0.0.1:%d" % self.port}

@@ -4,6 +4,11 @@ The admin page is where you configure the daemon. It is served on
 `127.0.0.1` only, by the daemon itself, and it is plain HTML, CSS and
 JavaScript with no dependencies and no third-party assets.
 
+The Watchful Meter icon and **Presto AI Dash** name identify the admin page,
+including its locked view, all three tabs, and error messages. Its tagline is
+**Always in view. Never in your way.** The icon and browser favicon are served
+by your daemon; displaying them makes no external request.
+
 Open it with:
 
 ```bash

@@ -40,10 +40,18 @@ class TransportTests(unittest.TestCase):
         t = self.setup_transport(b'HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\n{}')
         self.assertEqual(t.manifest('/api/v1/device-app/manifest'), '{}')
         self.assertEqual(self.context.verify_mode, ssl.CERT_REQUIRED)
+        self.assertEqual(self.context.minimum_version, ssl.TLSVersion.TLSv1_2)
         self.context.load_verify_locations.assert_called_once_with(cadata=b'provisioned-ca')
         self.context.wrap_socket.assert_called_once_with(self.raw, server_hostname='daemon.example')
         self.assertIn(b'Authorization: Bearer test-token\r\n', self.stream.request)
         self.assertTrue(self.stream.closed)
+
+    def test_firmware_without_tls_versions_still_verifies(self):
+        # MicroPython's ssl has no TLSVersion; Mbed TLS 3.x has no TLS < 1.2.
+        with patch("ssl.TLSVersion", new=SimpleNamespace()):
+            t = self.setup_transport(b'HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\n{}')
+        self.assertEqual(t.manifest('/api/v1/device-app/manifest'), '{}')
+        self.assertEqual(self.context.verify_mode, ssl.CERT_REQUIRED)
 
     def test_redirect_duplicate_length_and_encoding_are_refused(self):
         for head in (b'HTTP/1.0 302 Found\r\n\r\n',

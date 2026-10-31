@@ -208,7 +208,7 @@ class QuotaStorageTests(ManagementBase):
     def test_new_connector_without_a_special_card_still_appears(self):
         payload = build_instance_payload({"new-account": SourceSnapshot("new-account", "ok")},
             [{"id": "new-account", "type": "new_connector", "name": "New AI", "enabled": True}])
-        self.assertEqual([c["title"] for c in payload["cards"]], ["AI Dash", "New AI"])
+        self.assertEqual([c["title"] for c in payload["cards"]], ["Presto AI Dash", "New AI"])
         self.assertEqual(payload["cards"][1]["primary"], "Usage unavailable")
 
     def test_separate_accounts_keys_restart_and_public_api_projection(self):

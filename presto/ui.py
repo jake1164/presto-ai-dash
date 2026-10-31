@@ -11,6 +11,7 @@ a status display, not a poster.
 """
 
 from cards import truncate
+from brand import COLOURS as BRAND_COLOURS, NAME, SPRITES, TAGLINE, TAGLINE_LINES
 
 # Layout, in the 240x240 default framebuffer.
 MARGIN = 8
@@ -139,7 +140,9 @@ EMPTY_ACCENT = "yellow"
 # The shared lifecycle/release dock. One place on Home and on every service
 # card, normal or expanded: the bottom right, to the right of the Home overflow
 # column and above the footer bands (STALE/DEMO at 208, the mute chip at 218,
-# the page dots at 228). The drawn icon keeps the usual 8-pixel right margin;
+# the page dots at 228). A clean live view reclaims 16 pixels from the unused
+# chip bands and moves the dock down by the same amount. The drawn icon keeps
+# the usual 8-pixel right margin;
 # the tap area is wider than the icon and reaches the screen edge, so a
 # fingertip finds it. When neither a device problem nor a fresh release notice
 # exists, nothing is drawn and the space is released again.
@@ -147,7 +150,7 @@ LIFECYCLE_ICON = 10
 LIFECYCLE_DOCK_W = 32
 LIFECYCLE_DOCK_H = 24
 LIFECYCLE_DOCK_Y = 184
-LIFECYCLE_ICON_Y = 188
+LIFECYCLE_ICON_Y = 194
 # The gap the Home overflow column keeps from the dock's left edge.
 LIFECYCLE_DOCK_GAP = 4
 # The two meanings, and nothing else: a yellow warning for something a person
@@ -174,8 +177,8 @@ LIFECYCLE_ARROW_SHAPE = (
 LIFECYCLE_VIEW_TITLE = "Device notice"
 LIFECYCLE_VIEW_RELEASE = "Daemon release"
 LIFECYCLE_VIEW_CLOSE = "TAP TO CLOSE"
-LIFECYCLE_VIEW_TOP = 52
-LIFECYCLE_VIEW_LINE_H = 14
+LIFECYCLE_VIEW_TOP = 114
+LIFECYCLE_VIEW_LINE_H = 11
 LIFECYCLE_VIEW_MAX_LINES = 8
 
 
@@ -238,6 +241,27 @@ def _text(display, palette, text, x, y, rgb, scale=2, max_chars=None,
         fitted = truncate(text, length)
     display.set_pen(palette.pen(rgb))
     display.text(fitted, x, y, available, scale)
+
+
+def _draw_brand(display, palette, x, y, size=16):
+    """Draw the approved transparent mark using cached pens and short spans."""
+    for rgb, runs in zip(BRAND_COLOURS, SPRITES[size]):
+        display.set_pen(palette.pen(rgb))
+        for offset in range(0, len(runs), 3):
+            display.rectangle(x + runs[offset], y + runs[offset + 1],
+                              runs[offset + 2], 1)
+
+
+def _brand_header(display, palette):
+    _draw_brand(display, palette, (display.get_bounds()[0] - 64) // 2, 4, 64)
+    display.set_font("bitmap8")
+    _center_text(display, palette, NAME, 64, INK, scale=1)
+
+
+def _center_text(display, palette, text, y, rgb, scale=1):
+    width = display.get_bounds()[0]
+    x = max(MARGIN, (width - display.measure_text(text, scale)) // 2)
+    _text(display, palette, text, x, y, rgb, scale=scale)
 
 
 def bell_box(width=240):
@@ -336,23 +360,28 @@ def lifecycle_icon_x(width=240):
     return width - MARGIN - LIFECYCLE_ICON
 
 
-def lifecycle_dock(width=240):
+def footer_extra(stale=False, demo=False, muted=False):
+    """Reclaim the chip bands while the live view has no footer messages."""
+    return 0 if stale or demo or muted else 16
+
+
+def lifecycle_dock(width=240, extra=0):
     """The shared tap area: (x, y, w, h), flush to the bottom-right edge."""
-    return (width - LIFECYCLE_DOCK_W, LIFECYCLE_DOCK_Y, LIFECYCLE_DOCK_W,
+    return (width - LIFECYCLE_DOCK_W, LIFECYCLE_DOCK_Y + extra, LIFECYCLE_DOCK_W,
             LIFECYCLE_DOCK_H)
 
 
-def lifecycle_hit(x, y, width=240, height=240):
+def lifecycle_hit(x, y, width=240, height=240, extra=0):
     """Whether a touch is on the shared dock.
 
     It is checked before Home row navigation, page-dot navigation and the
     card's tap-to-expand, so the same tap always means the same thing. The
-    area does not overlap the bell (top right), the page dots (the last 24
-    pixels) or the mute chip (y 218).
+    area does not overlap the bell or the page dots. ``extra`` is zero while
+    the mute chip is shown, keeping that chip's bottom-right area separate.
     """
     if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
         return False
-    left, top, box_width, box_height = lifecycle_dock(width)
+    left, top, box_width, box_height = lifecycle_dock(width, extra)
     return left <= x < left + box_width and top <= y < top + box_height
 
 
@@ -371,7 +400,7 @@ def lifecycle_kind(notice):
     return None
 
 
-def draw_lifecycle_dock(display, palette, kind, width=240):
+def draw_lifecycle_dock(display, palette, kind, width=240, extra=0):
     """The shared indicator: a yellow warning or a blue release arrow.
 
     Nothing is drawn when there is no notice, which gives the space back to
@@ -380,7 +409,7 @@ def draw_lifecycle_dock(display, palette, kind, width=240):
     if kind not in ("warning", "release"):
         return None
     x = lifecycle_icon_x(width)
-    y = LIFECYCLE_ICON_Y
+    y = LIFECYCLE_ICON_Y + extra
     if kind == "warning":
         display.set_pen(palette.pen(LIFECYCLE_WARN_RGB))
         for dx, dy, box_width, box_height in LIFECYCLE_WARN_SHAPE:
@@ -413,10 +442,11 @@ def draw_lifecycle_view(display, palette, notice, width=240, height=240, demo=Fa
     display.clear()
     display.set_pen(palette.pen(accent))
     display.rectangle(0, 0, 5, height)
+    _brand_header(display, palette)
 
     display.set_font("bitmap8")
     title = LIFECYCLE_VIEW_TITLE if kind == "warning" else LIFECYCLE_VIEW_RELEASE
-    _text(display, palette, title, MARGIN + 6, TITLE_Y, INK, scale=2,
+    _text(display, palette, title, MARGIN + 6, 86, INK, scale=2,
           max_chars=TITLE_MAX)
 
     lines = notice.get("lines") if isinstance(notice.get("lines"), list) else []
@@ -700,7 +730,7 @@ def _draw_compact_local_row(display, palette, row, y, row_width, stale):
     _text(display, palette, detail, 14 + row_width - detail_w, text_y, rgb, scale=1)
 
 
-def build_home_layout(display, rows, setting=None, width=240, dock=False):
+def build_home_layout(display, rows, setting=None, width=240, dock=False, extra=0):
     """The Home layout for these rows: the list region and the strip band.
 
     The names are measured with the display's own font metrics, in the font
@@ -711,7 +741,7 @@ def build_home_layout(display, rows, setting=None, width=240, dock=False):
     list then stops above it and the strip's text column stops short of it, so
     no row and no hidden name is ever drawn under the icon.
     """
-    from home import DEFAULT_OVERFLOW_ROWS, HomeLayout, LIST_X
+    from home import DEFAULT_OVERFLOW_ROWS, HomeLayout, LIST_X, SOURCE_HEIGHT
 
     if setting is None:
         setting = DEFAULT_OVERFLOW_ROWS
@@ -722,7 +752,8 @@ def build_home_layout(display, rows, setting=None, width=240, dock=False):
 
     return HomeLayout(rows, setting, measure, width - LIST_X - MARGIN,
                       lifecycle_dock(width)[0] if dock else None,
-                      LIFECYCLE_DOCK_Y if dock else None)
+                      LIFECYCLE_DOCK_Y + extra if dock else None,
+                      height=SOURCE_HEIGHT + extra)
 
 
 def _draw_strip(display, palette, layout, scroll, stale):
@@ -740,7 +771,9 @@ def _draw_strip(display, palette, layout, scroll, stale):
     if not lines and plus is None:
         return
     display.set_font("bitmap8")
-    band_top = SOURCE_TOP + layout.region
+    # Anchor the names at the bottom of the available band. The dock can
+    # shorten the list without pulling this whole row upward with it.
+    band_top = SOURCE_TOP + layout.height - STRIP_LINE_HEIGHT * layout.lines
     limit = layout.strip_limit()
     for index, line in enumerate(lines):
         y = band_top + index * STRIP_LINE_HEIGHT
@@ -766,7 +799,7 @@ def draw_sources(display, palette, rows, index, total, status="offline",
     """Live Home: the accounts in the saved order, quota rows and local ones."""
     from alerts import rgb_for_accent
     from cards import accent_for
-    from home import SOURCE_TOP
+    from home import SOURCE_HEIGHT, SOURCE_TOP
     display.set_pen(palette.pen(BACKGROUND))
     display.clear()
     # An empty list is not a healthy one: amber asks for a look, where the
@@ -819,7 +852,8 @@ def draw_sources(display, palette, rows, index, total, status="offline",
         display.rectangle(width - 5, SOURCE_TOP + (region - thumb) * scroll // limit,
                           2, thumb)
     _draw_strip(display, palette, layout, scroll, stale)
-    draw_lifecycle_dock(display, palette, lifecycle_kind(notice), width)
+    draw_lifecycle_dock(display, palette, lifecycle_kind(notice), width,
+                        layout.height - SOURCE_HEIGHT)
     display.set_font("bitmap6")
     if stale:
         _text(display, palette, "STALE - retrying", 14, 210, INK_DIM, scale=1,
@@ -1116,7 +1150,8 @@ def draw_card(display, palette, card, index, total, muted=False,
     # Detail lines. The shared dock owns the bottom-right corner, so the lines
     # stop above it while a notice is showing; the existing "+N more (tap)"
     # line keeps the rest of the detail reachable.
-    card_bottom = LIFECYCLE_DOCK_Y if lifecycle_kind(notice) else CARD_BOTTOM
+    extra = footer_extra(stale, demo, muted)
+    card_bottom = LIFECYCLE_DOCK_Y + extra if lifecycle_kind(notice) else CARD_BOTTOM
     room = max(0, (card_bottom - y) // CARD_DETAIL_H)
     count = min(CARD_DETAIL_LINES, room)
     display.set_font("bitmap6")
@@ -1141,7 +1176,7 @@ def draw_card(display, palette, card, index, total, muted=False,
               scale=1, max_width=footer_width)
     if demo:
         _draw_demo_chip(display, palette, width, height)
-    draw_lifecycle_dock(display, palette, lifecycle_kind(notice), width)
+    draw_lifecycle_dock(display, palette, lifecycle_kind(notice), width, extra)
     _draw_dots(display, palette, index, total, accent_rgb, width, height)
 
     # Mute indicator: the chip says how long the mute has left.
@@ -1206,13 +1241,14 @@ def draw_message(display, palette, title, message, accent_rgb=None,
 
     display.set_pen(palette.pen(accent_rgb))
     display.rectangle(0, 0, 5, 240)
+    _brand_header(display, palette)
 
     display.set_font("bitmap8")
-    _text(display, palette, title, MARGIN + 6, 70, INK, scale=3,
+    _text(display, palette, title, MARGIN + 6, 86, INK, scale=2,
           max_chars=PRIMARY_MAX)
 
     display.set_font("bitmap6")
-    _text(display, palette, message, MARGIN + 6, 110, INK_DIM, scale=2,
+    _text(display, palette, message, MARGIN + 6, 114, INK_DIM, scale=2,
           max_chars=SECONDARY_MAX)
 
     if detail:
@@ -1227,15 +1263,17 @@ def draw_message(display, palette, title, message, accent_rgb=None,
             y += DETAIL_LINE_H
     if demo:
         _draw_demo_chip(display, palette)
+    display.set_font("bitmap6")
+    _text(display, palette, TAGLINE, MARGIN + 6, 226, INK_DIM, scale=1)
 
 
 def draw_boot(display, palette, message="Starting..."):
-    """The white boot screen."""
+    """Brand and startup state, using the same drawing path as every screen."""
     display.set_pen(palette.pen(BACKGROUND))
     display.clear()
+    _brand_header(display, palette)
     display.set_font("bitmap8")
-    _text(display, palette, "AI Dash", MARGIN + 6, 100, INK, scale=3,
-          max_chars=PRIMARY_MAX)
+    _center_text(display, palette, message, 104, BRAND_COLOURS[1], scale=2)
     display.set_font("bitmap6")
-    _text(display, palette, message, MARGIN + 6, 130, INK_DIM, scale=2,
-          max_chars=SECONDARY_MAX)
+    for index, line in enumerate(TAGLINE_LINES):
+        _center_text(display, palette, line, 140 + 16 * index, INK_DIM)

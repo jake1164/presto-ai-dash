@@ -7,6 +7,52 @@ endpoint for monthly included credit quotas and reset dates, purchased credits,
 and legacy session/weekly limits. Rolling seven-day activity remains separate.
 The older activity-only descriptions below record the original implementation.
 
+**Branding update (2026-10-30):** the approved Watchful Meter icon, full
+**Presto AI Dash** name and **Always in view. Never in your way.** tagline
+are applied to the README, package README, documentation, admin and shared
+Presto UI. The temporary product homepage gains its icon, favicon and brand
+colours within its existing placeholder layout; the larger landing-page
+redesign stays out of scope. Canonical artwork lives in `assets/brand/`, with
+reproducible web copies and compact device sprites from
+`tools/build_brand_assets.py`; the existing shared app inventory includes the
+sprites in previews, demo, setup downloads and releases. The admin serves
+images locally with `img-src 'self'`. Documentation records the approved
+messaging, 480x480 physical panel versus 240x240 logical canvas, and asset
+rules in [Branding](branding.md).
+
+Desktop/phone and light/dark documentation/homepage views, all admin tabs and
+locked/error states, the documentation 404, browser demo and PSL were visually
+reviewed. Device startup, empty, stale/muted, offline, Wi-Fi error, display-error
+and notice views were also inspected. Strict docs, Pages assembly, privacy,
+28 help anchors, 925 compatibility redirects, wheel contents and 56
+MicroPython WebAssembly screen comparisons pass. Routine USB **sync and check
+both succeeded on COM3** for legacy revision **`375d0b5d8ff9`** on 2026-10-30;
+the app was relaunched. This is a dated USB check, not continuous telemetry.
+The stock carousel's name and description are updated, but its chart glyph
+remains: inspection of the actual public launcher confirms it accepts only
+built-in icons. Custom carousel artwork requires a separate launcher extension;
+no stock launcher, firmware, private settings or installation layout was changed.
+The website source changes have not been published.
+
+The required repository `.venv` suite passes with **2,972 tests, 9 skipped**
+after this branding update. Existing Windows resource-cleanup and unawaited
+coroutine warnings remain visible in the test run; they are not new branding
+failures.
+
+**Branding follow-up (2026-10-30):** after review on the physical display and
+live PSL, Home and service cards have no product logo. Clean live views reclaim
+16 pixels from unused chip bands, placing the overflow names and notice dock
+closer to the page dots and admitting more list content. Stale/demo/mute chips
+restore their reserved space, with layout and touch targets kept together.
+Starting, connecting/Joining Wi-Fi, offline, error and device-notice screens
+share the large centered 64px Watchful Meter header. The SVG favicon removes
+outer canvas padding without changing the artwork; admin, docs, the temporary
+homepage and PSL use the same version. Routine COM3 sync and independent check
+both succeeded for revision **`e3cbc277ee52`**; the legacy layout, stock launcher
+and private configuration remain intact. Edits and visual review are batched
+before the full test run, as requested. Final verification on 2026-10-31 passed
+**2,977 tests, 9 skipped**.
+
 **Built:**
 
 - **M0 to M12**: the repository, the static and connected Presto app, the

@@ -43,7 +43,10 @@ IDEMPOTENCY_CHARS = 32
 HEX_DIGITS = "0123456789abcdef"
 ASSETS = {"/": ("index.html", "text/html; charset=utf-8"),
           "/admin.js": ("admin.js", "text/javascript; charset=utf-8"),
-          "/admin.css": ("admin.css", "text/css; charset=utf-8")}
+          "/admin.css": ("admin.css", "text/css; charset=utf-8"),
+          "/presto-ai-dash-icon.svg": ("presto-ai-dash-icon.svg", "image/svg+xml"),
+          "/favicon.ico": ("presto-ai-dash-favicon.ico", "image/x-icon"),
+          "/favicon.svg": ("presto-ai-dash-favicon.svg", "image/svg+xml")}
 # The names the admin page always answers to: this machine, over plain HTTP.
 LOOPBACK_NAMES = ("127.0.0.1", "localhost")
 
@@ -154,7 +157,7 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
             self.send_header("Referrer-Policy", "no-referrer")
             self.send_header("Content-Security-Policy",
                              "default-src 'none'; script-src 'self'; style-src 'self'; "
-                             "connect-src 'self'; frame-ancestors 'none'; "
+                             "connect-src 'self'; img-src 'self'; frame-ancestors 'none'; "
                              "base-uri 'none'; form-action 'none'")
             for name, value in (headers or {}).items():
                 self.send_header(name, value)

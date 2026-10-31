@@ -64,8 +64,13 @@ class PageTests(unittest.TestCase):
     def test_the_page_is_in_the_navigation_and_loads_its_two_assets(self):
         config = read("mkdocs.yml")
         self.assertIn("- See It Running: demo/index.md", config)
-        self.assertRegex(config, r"extra_css:\n\s+- demo/demo\.css")
-        self.assertRegex(config, r"extra_javascript:\n\s+- demo/demo\.js")
+        # Site-wide branding or consent assets can precede the demo files.
+        # Verify membership in each YAML list, without imposing list order.
+        for section, asset in (("extra_css", "demo/demo.css"),
+                               ("extra_javascript", "demo/demo.js")):
+            block = re.search(r"(?m)^" + section + r":\n((?:[ \t]+-[^\n]*\n)+)", config)
+            self.assertIsNotNone(block, section)
+            self.assertIn(asset, [line.strip()[2:] for line in block[1].splitlines()])
 
 
 class ScriptTests(unittest.TestCase):

@@ -23,9 +23,9 @@
 
 site_name: Presto AI Dash
 site_description: >-
-  A tiny AI usage dashboard for a Pimoroni Presto: subscription quotas and
-  local service health on a 240x240 touchscreen, collected by a small
-  read-only Python daemon on your own LAN.
+  Always in view. Never in your way. Monitor AI usage, subscription limits,
+  reset times, and service health across your accounts, all at a glance
+  on a dedicated display.
 site_url: https://jake1164.github.io/presto-ai-dash/docs/
 repo_url: https://github.com/jake1164/presto-ai-dash
 repo_name: jake1164/presto-ai-dash
@@ -36,6 +36,8 @@ site_dir: build/docs/site
 
 theme:
   name: material
+  logo: images/brand/presto-ai-dash-icon.svg
+  favicon: images/brand/presto-ai-dash-favicon.svg
   # Replaces Material's repository widget with one that fetches nothing.
   custom_dir: docs/overrides
   # No web fonts: the site must not ask a third party for anything.
@@ -43,15 +45,15 @@ theme:
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-7
         name: Switch to dark mode
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
-      primary: indigo
-      accent: indigo
+      primary: custom
+      accent: custom
       toggle:
         icon: material/brightness-4
         name: Switch to light mode
@@ -102,6 +104,7 @@ extra:
       github: false
 
 extra_css:
+  - stylesheets/brand.css
   - demo/demo.css
 
 extra_javascript:

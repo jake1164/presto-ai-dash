@@ -240,7 +240,7 @@ by the firmware launcher.
 Use the distinct folder name shown above: MicroPython would import a folder
 named `/ai_dash` instead of running the root `/ai_dash.py` entry.
 
-Press **RESET**, find **AI Dash** in the firmware carousel, and tap it. With no
+Press **RESET**, find **Presto AI Dash** in the firmware carousel, and tap it. With no
 service configured, Home says **No services set up / Open the admin page** and
 the accent bar and LED are amber. Add an account on the admin page and the
 account rows replace it on the next poll.

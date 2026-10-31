@@ -71,6 +71,8 @@
     "settings-panel": {page: "guides/admin-page.md", anchor: "settings"},
     "home-display": {page: "guides/home-display.md", anchor: "the-setting"},
     "set-up-presto": {page: "getting-started/set-up-the-presto.md", anchor: "the-guided-setup"},
+    "device-usb-update": {page: "getting-started/set-up-the-presto.md", anchor: "a-note-on-updates"},
+    "device-usb-problems": {page: "getting-started/set-up-the-presto.md", anchor: "if-something-goes-wrong"},
     "remote-reports": {page: "concepts/remote-reports.md", anchor: "turning-it-on"},
     "demo-mode": {page: "guides/admin-page.md", anchor: "demo-mode"},
     "remote-token": {page: "guides/remote-collectors.md", anchor: "rotating-and-revoking"},
@@ -579,6 +581,8 @@
     const text = element("setup-unlock-code").textContent || "";
     if (!text) return;
     const button = element("copy-setup-code");
+    const note = element("copy-setup-note");
+    note.hidden = true;
     let copied = false;
     if (navigator.clipboard && window.isSecureContext) {
       try { await navigator.clipboard.writeText(text); copied = true; } catch (_) { copied = false; }
@@ -596,7 +600,11 @@
     range.selectNodeContents(element("setup-unlock-code"));
     const selection = window.getSelection();
     selection.removeAllRanges(); selection.addRange(range);
-    message("This browser would not copy it. The code is selected: press Ctrl+C.", true);
+    // Beside the code, not in the message line at the top of the page, which is
+    // scrolled out of sight when this panel is in view.
+    note.textContent = "This browser would not copy it (a page served over plain HTTP often can't). " +
+      "The code is selected: press Ctrl+C.";
+    note.hidden = false;
   }
   // The reason the reader sees in words when the master switch is off.
   // It is text, not only a colour, so it is never missed.
@@ -1250,10 +1258,22 @@
     const copy = document.createElement("button"); copy.type = "button";
     copy.textContent = "Copy"; copy.setAttribute("aria-label", "Copy to the clipboard");
     copy.addEventListener("click", async () => {
-      try {
-        await navigator.clipboard.writeText(text); copy.textContent = "Copied";
+      let copied = false;
+      if (navigator.clipboard && window.isSecureContext) {
+        try { await navigator.clipboard.writeText(text); copied = true; } catch (_) { copied = false; }
+      }
+      // Plain HTTP has no clipboard API; fall back, then select the text. The
+      // page-top message line is out of sight here, so the button says it.
+      if (!copied) copied = copyWithCommand(text);
+      if (copied) {
+        copy.textContent = "Copied";
         setTimeout(() => { copy.textContent = "Copy"; }, 2000);
-      } catch (_) { message("Copying is blocked; select the text instead.", true); }
+      } else {
+        const range = document.createRange(); range.selectNodeContents(code);
+        const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+        copy.textContent = "Selected: press Ctrl+C";
+        setTimeout(() => { copy.textContent = "Copy"; }, 4000);
+      }
     });
     container.append(code, copy);
     return container;
@@ -1922,6 +1942,39 @@
     if (reason) return "Reported by the device: " + reason + ". See the log for the same code.";
     return "The installed app matches this daemon's. This is the device's own report, not a USB check.";
   }
+  // The steps and the guide for a device that needs a person. Shown beside the
+  // warning, not inside the folded row, so the fix is visible without opening it.
+  const DEVICE_FIX_STEPS = {
+    usb_update_required: [
+      "Open the Settings tab and choose Set up a Presto.",
+      "Download presto_setup.py and the setup file it prepares, to the computer the Presto is plugged into by USB.",
+      "Run: python presto_setup.py",
+      "The installed revision here changes to the expected one when the Presto reports again.",
+    ],
+    revision_uncomparable: [
+      "Plug the Presto into a computer by USB.",
+      "Run Set up a Presto from the Settings tab to reinstall the app.",
+    ],
+  };
+  function deviceFix(device) {
+    const update = device.update || {};
+    if (!update.needs_attention) return null;
+    const box = el("div", "device-advice");
+    box.append(el("p", "", deviceAdvice(device)));
+    const steps = DEVICE_FIX_STEPS[update.reason];
+    if (steps) {
+      const list = el("ol", "");
+      for (const step of steps) list.append(el("li", "", step));
+      box.append(list);
+    }
+    const links = el("div", "guide-slot");
+    const guide = helpLink("device-usb-update", "How to update a Presto over USB");
+    const problems = helpLink("device-usb-problems", "If the update fails");
+    if (guide) links.append(guide);
+    if (problems) links.append(problems);
+    box.append(links);
+    return box;
+  }
   function factsList(pairs) {
     const list = el("dl", "facts");
     for (const [name, value] of pairs) {
@@ -1991,7 +2044,8 @@
           revisionText(device.expected) + " expected"),
         el("span", "note", " · " + deviceStateLabel(device)));
       block.append(summary);
-      block.append(el("p", "note", deviceAdvice(device)));
+      const fix = deviceFix(device);
+      if (!fix) block.append(el("p", "note", deviceAdvice(device)));
       const body = el("div", "");
       body.append(factsList([
         ["Device ID", device.device_id],
@@ -2022,7 +2076,13 @@
           loadDeviceDetail(device.device_id, attemptsBox);
         }
       });
-      wrap.append(block);
+      if (fix) {
+        const item = el("div", "device-item");
+        item.append(block, fix);
+        wrap.append(item);
+      } else {
+        wrap.append(block);
+      }
     }
     return wrap;
   }

@@ -143,8 +143,8 @@ class TestCarouselEntry(unittest.TestCase):
                        and any(isinstance(target, ast.Name) and target.id == "APP_DIR"
                                for target in node.targets))
         self.assertNotEqual(os.path.basename(app_dir), "ai_dash")
-        self.assertEqual(source.splitlines()[:3], ["# ICON monitoring", "# NAME AI Dash",
-                                                 "# DESC Daemon status dashboard."])
+        self.assertEqual(source.splitlines()[:3], ["# ICON monitoring", "# NAME Presto AI Dash",
+                                                 "# DESC Always in view. Never in your way."])
 
 
 if __name__ == "__main__":

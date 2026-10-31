@@ -1,10 +1,18 @@
 # Presto AI Dash
 
-A tiny AI usage dashboard for a [Pimoroni Presto](https://shop.pimoroni.com/products/presto).
-The Presto is a 240x240 touchscreen with seven LEDs and a buzzer, and it is
-sitting on your desk collecting dust. Presto AI Dash turns it into a glanceable
-panel: how much of your Claude, Codex and OpenCode Go allowance is gone, when
-it resets, whether your local Ollama is up, and whether anything is broken.
+![Presto AI Dash Watchful Meter icon](images/brand/presto-ai-dash-icon.svg){ width="96" height="96" }
+
+**Always in view. Never in your way.**
+
+Monitor AI usage, subscription limits, reset times, and service health across your accounts—all at a glance on a dedicated display.
+
+**No windows. No screen clutter. Just the information you need.**
+
+Presto AI Dash is an open-source, self-hosted monitor for a
+[Pimoroni Presto](https://shop.pimoroni.com/products/presto). Its physical panel
+is 480x480; the app draws on a 240x240 logical canvas, with seven LEDs and a
+buzzer for alerts. A separate computer or server runs the Python daemon or
+Docker container that collects the readings; the display connects over Wi-Fi.
 
 ![The Presto Home screen with quota bars for several accounts](images/home.png)
 

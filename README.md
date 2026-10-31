@@ -1,8 +1,14 @@
 <div align="center">
 
+<img src="assets/brand/png/presto-ai-dash-128.png" width="96" height="96" alt="Presto AI Dash Watchful Meter icon">
+
 # Presto AI Dash
 
-**Your AI coding limits, reset times, and local AI service health — right on your desk.**
+**Always in view. Never in your way.**
+
+Monitor AI usage, subscription limits, reset times, and service health across your accounts—all at a glance on a dedicated display.
+
+**No windows. No screen clutter. Just the information you need.**
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-blue)
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)

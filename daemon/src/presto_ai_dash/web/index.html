@@ -3,12 +3,19 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI Dash · Configuration</title>
+  <meta name="description" content="Presto AI Dash — Always in view. Never in your way. Configure your self-hosted AI usage display.">
+  <title>Presto AI Dash · Configuration</title>
+  <link rel="alternate icon" href="/favicon.ico">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="stylesheet" href="/admin.css">
   <script src="/admin.js" defer></script>
 </head>
 <body>
-  <header><div><p class="eyebrow">PRESTO AI DASH</p><h1>Configuration</h1></div>
+  <header><div class="brand-heading">
+      <img class="brand-icon" src="/presto-ai-dash-icon.svg" width="72" height="72" alt="">
+      <div><p class="eyebrow">Presto AI Dash</p><h1>Configuration</h1>
+        <p class="brand-tagline">Always in view. Never in your way.</p></div>
+    </div>
     <div class="header-actions">
       <details id="header-help" class="header-help">
         <summary>Help</summary>
@@ -210,6 +217,7 @@
               <code id="setup-unlock-code"></code>
               <button type="button" id="copy-setup-code">Copy</button>
             </div>
+            <p id="copy-setup-note" class="note error" role="status" aria-live="polite" hidden></p>
             <ol class="note">
               <li>Your browser has downloaded <a id="download-setup-script" href="#" download="presto_setup.py">presto_setup.py</a>
                 and <a id="download-setup-handoff" href="#" download="presto-setup.enc">presto-setup.enc</a>.
@@ -399,5 +407,6 @@
       </div>
     </div>
   </main>
+  <footer class="brand-footer">Presto AI Dash <span aria-hidden="true">·</span> No windows. No screen clutter. Just the information you need.</footer>
 </body>
 </html>

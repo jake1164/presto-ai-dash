@@ -1,6 +1,6 @@
 # ICON monitoring
-# NAME AI Dash
-# DESC A tiny AI usage dashboard for Pimoroni Presto.
+# NAME Presto AI Dash
+# DESC Always in view. Never in your way.
 
 """Presto AI Dash - Presto application.
 
@@ -53,7 +53,7 @@ from popup import PopToTop
 from ticks import Uptime
 from ui import (Palette, bell_hit, build_home_layout, dot_hit, draw_boot,
                 draw_card, draw_lifecycle_view, draw_sources, draw_message,
-                lifecycle_hit)
+                footer_extra, lifecycle_hit)
 
 
 # How long a detail view stays open before returning to the card.
@@ -480,9 +480,11 @@ class App(object):
             # decided by the layout, not by the scroll position.
             self.home_layout = build_home_layout(self.display, self.live_rows or [],
                                                  overflow_rows(payload), self.width,
-                                                 dock=bool(self.lifecycle_notice))
+                                                 dock=bool(self.lifecycle_notice),
+                                                 extra=footer_extra(bool(self.connection_error),
+                                                                    self.demo, self.alerts.muted))
             self.home_scroll.set_height(self.home_layout.total, SOURCE_TOP,
-                                        SOURCE_HEIGHT, self.home_layout.region)
+                                        self.home_layout.height, self.home_layout.region)
         self.index = next((i for i, card in enumerate(cards) if card.id == selected), 0)
         if selected is not None and self._current_card().id != selected:
             self.detail_open = False
@@ -1268,7 +1270,9 @@ class App(object):
         """
         if self._connection_screen() is not None or not self.lifecycle_notice:
             return False
-        if not lifecycle_hit(self._touch_x, self._touch_y, self.width, self.height):
+        if not lifecycle_hit(self._touch_x, self._touch_y, self.width, self.height,
+                             extra=footer_extra(bool(self.connection_error),
+                                                self.demo, self.alerts.muted)):
             return False
         self.lifecycle_open = True
         self._needs_redraw = True
@@ -1390,6 +1394,16 @@ class App(object):
             draw_lifecycle_view(self.display, self.palette, self.lifecycle_notice,
                                 self.width, self.height, demo=self.demo)
         elif card.id == "dash" and self.live_rows is not None:
+            extra = footer_extra(bool(self.connection_error), self.demo, self.alerts.muted)
+            if self.home_layout.height != SOURCE_HEIGHT + extra:
+                # A stale/demo/mute chip appearing or clearing changes the
+                # available height. Keep drawing, scrolling and row taps on
+                # the same layout instead of leaving an empty reserved band.
+                self.home_layout = build_home_layout(
+                    self.display, self.live_rows, self.home_layout.setting, self.width,
+                    dock=bool(self.lifecycle_notice), extra=extra)
+                self.home_scroll.set_height(self.home_layout.total, SOURCE_TOP,
+                                            self.home_layout.height, self.home_layout.region)
             draw_sources(self.display, self.palette, self.live_rows,
                          self.index, len(self.cards), status=card.status,
                          muted=self.alerts.muted, width=self.width, height=self.height,

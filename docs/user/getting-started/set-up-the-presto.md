@@ -398,8 +398,14 @@ and **Check Presto sync**.
 
 ## 5. Start it
 
-Press **RESET** on the Presto, find **AI Dash** in the firmware carousel and
+Press **RESET** on the Presto, find **Presto AI Dash** in the firmware carousel and
 tap it.
+
+The entry uses the tagline **Always in view. Never in your way.** Older app
+installations may still be labelled **AI Dash**. The stock carousel supports
+only its built-in icons, so it retains the chart icon; the app's startup screen
+shows the Watchful Meter product icon. Routine app updates preserve the stock
+launcher and firmware.
 
 The app joins the Wi-Fi network, then polls the daemon every
 `POLL_INTERVAL` seconds (15 by default). The first screen is Home, listing

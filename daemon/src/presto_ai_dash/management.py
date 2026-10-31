@@ -150,6 +150,8 @@ class SourceConfiguration:
     def __init__(self, storage, config, config_path=None, started_at=None):
         self.storage = storage
         self.config = config
+        # The port of the Presto preview page when this daemon serves one.
+        self.preview_port = None
         # The bootstrap file and the start time are only used to explain the
         # effective configuration and the uptime on the Status tab.
         self.config_path = config_path
@@ -199,14 +201,9 @@ class SourceConfiguration:
             if record["credential"] is not None:
                 self.cipher.decrypt(record["id"], record["credential"])
         self.codex_logins = CodexLoginManager(self)
-        # Durable device identity and update state. The updater exists, but
-        # operational OTA stays off unless this daemon was explicitly built
-        # with the deployment gate passed: the default configuration issues no
-        # command and acknowledges no confirmation, so a known mismatch asks
-        # for a USB update instead.
-        self.lifecycle = DeviceLifecycle(
-            storage, ota_enabled=bool(self.config["daemon"].get(
-                "presto_ota_enabled", False)))
+        # Durable device identity and update state. Updates over the air are
+        # always on: a device set up for them is offered this daemon's app.
+        self.lifecycle = DeviceLifecycle(storage, ota_enabled=True)
         # The exact slot bundle this running daemon serves to a device.
         self.device_app = DeviceApp()
         # The background daemon-release checker, attached by the daemon. The
@@ -768,6 +765,7 @@ class SourceConfiguration:
             "devices": devices["devices"],
             "device_attention_count": attention,
             "release": self.release_view(),
+            "preview": {"port": self.preview_port} if self.preview_port else None,
         }
 
     def devices_view(self):

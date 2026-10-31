@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import socket
+import ssl
 import sys
 import threading
 import time
@@ -109,17 +110,22 @@ class _AlertRateLimiter:
 class _DeadlineReader(io.RawIOBase):
     """Reads a request off a socket, giving up after a total deadline.
 
-    The socket timeout alone only bounds each ``recv``: a client sending one
+    A socket timeout alone only bounds each ``recv``: a client sending one
     byte every few seconds would keep a handler thread for as long as it
-    liked. Here every read is also checked against a deadline for the whole
-    request.
+    liked. Here every read waits only for what is left of the deadline for the
+    whole request. There is no shorter per-read limit: a Wi-Fi device whose
+    request is delayed by a retransmission would otherwise be dropped with no
+    answer at all, which it can only report as a failed fetch.
     """
 
-    def __init__(self, sock, deadline, io_timeout):
+    SLICE_SECONDS = 1.0
+
+    def __init__(self, sock, deadline, stopping=None):
         super().__init__()
         self._sock = sock
         self._deadline = deadline
-        self._io_timeout = io_timeout
+        # Asked between slices: true once the server is cutting its connections.
+        self._stopping = stopping or (lambda: False)
 
     def readable(self):
         return True
@@ -128,8 +134,17 @@ class _DeadlineReader(io.RawIOBase):
         remaining = self._deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError("request took too long")
-        self._sock.settimeout(min(self._io_timeout, remaining))
-        return self._sock.recv_into(buffer)
+        # Wait in short slices: on Windows, a connection cut by stop() does not
+        # end a recv in another thread (it keeps timing out), so a single long
+        # wait would hold the shutdown for the rest of the deadline.
+        while True:
+            self._sock.settimeout(min(self.SLICE_SECONDS, remaining))
+            try:
+                return self._sock.recv_into(buffer)
+            except TimeoutError:
+                remaining = self._deadline - time.monotonic()
+                if remaining <= 0 or self._stopping():
+                    raise
 
 
 class _TimedWriter(io.RawIOBase):
@@ -222,6 +237,7 @@ class BoundedRequestHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     request_deadline = 10.0
+    # Each write of an answer. Reads are bounded by request_deadline alone.
     io_timeout = 3.0
     # Pause before answering a bearer token that did not match. It caps how
     # fast one connection can guess, and a correct client never waits.
@@ -241,6 +257,17 @@ class BoundedRequestHandler(BaseHTTPRequestHandler):
     def finish(self):
         super().finish()
         self._drain_unread()
+
+    def log_error(self, fmt, *args):
+        # The standard handler closes a connection whose request did not
+        # arrive in time without answering, and says so only at debug level.
+        # The client sees an empty answer, so make it visible: it is the
+        # daemon's half of a device's "NetworkUnavailable (head)".
+        if fmt.startswith("Request timed out"):
+            log.info("no complete request from %s within %d s; closed without an answer",
+                     self.client_address[0], self.request_deadline)
+            return
+        super().log_error(fmt, *args)
 
     def _drain_unread(self):
         """Read and discard what the client is still sending, then let it close.
@@ -287,7 +314,8 @@ class BoundedRequestHandler(BaseHTTPRequestHandler):
         super().setup()
         self.rfile.close()
         self.rfile = io.BufferedReader(_DeadlineReader(
-            self.connection, time.monotonic() + self.request_deadline, self.io_timeout))
+            self.connection, time.monotonic() + self.request_deadline,
+            lambda: getattr(self.server, "aborting", False)))
         self.wfile = _TimedWriter(self.connection, self.io_timeout)
 
 
@@ -374,6 +402,20 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
             if LAZY_QUERY in (query or ""):
                 lazy_cards(payload)
             return payload
+
+        def parse_request(self):
+            # A TLS connection is only ever a Presto fetching its app: every
+            # other route stays on plain HTTP, where it has always been.
+            if not super().parse_request():
+                return False
+            if isinstance(self.connection, ssl.SSLSocket):
+                path = urlparse(self.path).path
+                if (self.command not in ("GET", "HEAD") or
+                        not (path == DEVICE_APP_MANIFEST_PATH or DEVICE_APP_FILE_PATH.match(path))):
+                    self.close_connection = True
+                    self._send_json(404, {"error": "not_found"})
+                    return False
+            return True
 
         def do_GET(self):
             parsed = urlparse(self.path)
@@ -808,11 +850,62 @@ class _ExclusiveHTTPServer(ThreadingHTTPServer):
             self._release(request)
             raise
 
+    # Set by ApiServer when the daemon serves Presto app downloads over TLS.
+    tls_context = None
+    # How long a connection may stay silent before its first byte, when the
+    # server has to look at that byte to tell TLS from plain HTTP.
+    first_byte_seconds = 10.0
+    aborting = False
+
     def process_request_thread(self, request, client_address):
         try:
+            if self.tls_context is not None:
+                wrapped = self._maybe_tls(request, client_address)
+                if wrapped is None:
+                    return
+                if wrapped is not request:
+                    with self._slots_lock:
+                        if request in self._open_requests:
+                            self._open_requests[wrapped] = self._open_requests.pop(request)
+                    request = wrapped
             super().process_request_thread(request, client_address)
         finally:
             self._release(request)
+
+    def _maybe_tls(self, request, client_address):
+        """The connection as TLS when it opens with a handshake, else as it is.
+
+        One port carries both: a TLS handshake always starts with byte 0x16,
+        and an HTTP request never does. Only the Presto's app downloads use
+        TLS; the handler refuses every other route on it. Returns None when
+        the connection is closed here.
+        """
+        deadline = time.monotonic() + self.first_byte_seconds
+        first = b""
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or self.aborting:
+                # Silent: leave it to the handler, which times it out and logs it.
+                return request
+            request.settimeout(min(1.0, remaining))
+            try:
+                first = request.recv(1, socket.MSG_PEEK)
+                break
+            except TimeoutError:
+                continue
+            except OSError:
+                return request
+        if first != b"\x16":
+            return request
+        request.settimeout(max(0.5, deadline - time.monotonic()))
+        try:
+            return self.tls_context.wrap_socket(request, server_side=True)
+        except (ssl.SSLError, OSError) as exc:
+            log.info("app update connection from %s failed its TLS handshake (%s)",
+                     client_address[0] if client_address else "unknown",
+                     type(exc).__name__)
+            self.shutdown_request(request)
+            return None
 
     def _release(self, request):
         with self._slots_lock:
@@ -835,6 +928,7 @@ class _ExclusiveHTTPServer(ThreadingHTTPServer):
 
     def abort_open_requests(self):
         """Cut every connection still being handled, ending its blocked read."""
+        self.aborting = True
         with self._slots_lock:
             requests = list(self._open_requests)
         for request in requests:
@@ -855,7 +949,7 @@ class ApiServer:
                  handler_class=None, client_registry=None, alert_writer=None,
                  alert_rate_limiter=None, card_provider=None, demo_enabled=None,
                  demo_second=None, demo_device_alerts=None, device_lifecycle=None,
-                 device_app=None):
+                 device_app=None, tls_context=None):
         self.host = host
         self._server = _ExclusiveHTTPServer(
             (host, port), handler_class or make_handler(
@@ -889,6 +983,8 @@ class ApiServer:
 
         self._server.process_request_thread = tracked_process_request_thread
         self._server.timeout = 0.25
+        # Presto app downloads over TLS, on this same port (see _maybe_tls).
+        self._server.tls_context = tls_context
         self._thread = None
         self._stopped = False
 

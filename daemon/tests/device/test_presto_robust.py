@@ -513,6 +513,7 @@ class RolloverBehaviourTests(PatchedModule):
         app.uptime.ms()
         app.last_good_at = app.uptime.ms()
         app.connection_error = ("Daemon offline", "refused", False)
+        app.failed_polls = 2
         self.assertIsNone(app._connection_screen())  # a fresh reading: no screen yet
         for day in range(1, 14):
             clock.advance(24 * 3600 * 1000)

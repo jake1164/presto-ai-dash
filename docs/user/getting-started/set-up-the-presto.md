@@ -36,10 +36,22 @@ computer. The script looks at the Presto and does what is needed.
 | Change the Wi-Fi network or password | The same steps, with **Set the Wi-Fi network on the Presto** ticked |
 | Move a Presto to a new daemon (the database and settings stay where they are) | The same steps on the **new** daemon's admin page; the script changes only the daemon address and token |
 
-On a new or single-folder Presto the script installs the app and writes the
-settings. On a Presto that already updates its app over the air, it leaves the
-app alone and changes only the settings, because the app never comes from this
-script.
+Every run leaves the Presto updating its app over the air. The script installs
+the app twice, in two app slots, with a small bootstrap that starts one and
+falls back to the other if a new version fails. It also gives the Presto the
+daemon's update certificate, so later app updates arrive from the daemon with
+no cable. USB is only needed again to recover a Presto, to move it to another
+daemon, or after a firmware update (see *If something goes wrong*).
+
+- **A new Presto** gets the app, its settings and the update certificate.
+- **A Presto set up before over-the-air updates existed** (the app as
+  `/ai_dash.py` and `/ai_dash_files`) is moved to the new layout. Its settings,
+  name and device identifier stay; the old app files are removed only after the
+  new ones have verified.
+- **A Presto that already updates over the air** is reinstalled, which is also
+  how one is repaired, and its settings stay.
+
+The app takes about 650 KiB, a minute or two to copy over USB.
 
 ### 1. Open the admin page and choose Set up a Presto
 
@@ -156,6 +168,8 @@ the file, explains what to check, and lets you run the same command again.
 | `could not join the Wi-Fi network` | The settings are saved and the Presto keeps trying on its own. If you entered a new network, check its name and password (2.4 GHz only). A weak signal can also cause this: run the script again to retry. |
 | `has no Wi-Fi settings` | You unticked **Set the Wi-Fi network on the Presto**, but this Presto has none. Nothing was written. Prepare the download again with the box ticked |
 | `did not come back after a restart` | A Presto that updates over the air is restarted first. Unplug and replug it, then run the script again |
+| `KiB free and the app needs` | The Presto's storage is nearly full. Remove files you do not need from it, then run the script again |
+| `app updates over the air stay off` | The daemon could not make its update certificate. Check the daemon log for "update certificate", fix it, then run the script again |
 | `reached the daemon, but the daemon refused the device token` | Set `daemon.shared_token` to a fixed value, restart the daemon, and prepare a new download. |
 | `could not reach the daemon` | Check the address and port, and that the daemon is running and reachable from the Presto's network. |
 
@@ -166,11 +180,19 @@ device that uses it.
 
 ### A note on updates
 
-This one-time setup installs the app of the build that served it. Upgrading
-the daemon does **not** change the app on a Presto that is already installed;
-run **Set up a Presto** again (or the repository's sync tool, below) to move a
-device to the new build. Unattended Wi-Fi updates and a two-slot launcher are
-future work and are not part of this setup.
+A Presto set up this way updates its own app. When the daemon is upgraded to a
+release with a different app, the Presto is offered that app on its next poll,
+downloads it over TLS from the daemon, installs it into its spare app slot and
+switches to it. If the new app does not start properly, the Presto goes back to
+the app it had. The Status tab's **Presto devices** row shows each update and
+how it ended. Nothing is downloaded from the internet by the Presto: it only
+ever fetches the app of the daemon it was set up with.
+
+Run **Set up a Presto** again over USB only to recover a Presto, to move it to
+another daemon, to change its Wi-Fi, or after flashing new Presto firmware:
+updates over the air are tied to the firmware the Presto had at setup, and
+switch themselves off until setup runs again. The admin page says so on the
+device's row.
 
 ## Moving a Presto to a different daemon
 
@@ -185,8 +207,8 @@ Presto should use:
 2. Run the script on the USB computer. It finds the Presto, changes only the
    daemon address and the device token in its settings, keeps every other setting
    including the name and the device identifier, checks that the Presto can reach
-   the new daemon, and starts AI Dash. A Presto that updates over the air keeps
-   its app.
+   the new daemon, and starts AI Dash. It also gives the Presto the new daemon's
+   update certificate, so app updates then come from the new daemon.
 
 The new token arrives inside the download, so you never copy it from the old
 daemon. The old daemon lists the Presto as *not connected* and forgets the row
@@ -222,168 +244,33 @@ download. The new settings are already saved and the Presto keeps trying on its
 own, so check the name and the password (and that the network has a 2.4 GHz
 band) and run the script again.
 
-## The manual route
+## Firmware
 
-The rest of this page is the manual path, for a development checkout or for
-understanding exactly which files go where. It does the same thing the guided
-setup does, one file at a time.
-
-## 1. Flash the firmware (only if you need to)
+<span id="the-manual-route"></span><span id="1-flash-the-firmware-only-if-you-need-to"></span>
 
 If the Presto already shows its launcher carousel when you press **RESET**,
-skip this step.
+the firmware is fine and setup needs nothing else.
 
 Otherwise, download the latest `with-filesystem` `.uf2` from the
 [Presto releases page](https://github.com/pimoroni/presto/releases/latest),
 hold **BOOT** while tapping **RESET**, and drag the `.uf2` onto the `RP2350`
-drive that appears.
+drive that appears. Then run **Set up a Presto** as above. After flashing new
+firmware on a Presto that is already set up, run setup once again: updates over
+the air switch themselves off when the firmware changes.
 
-## 2. Copy the app files
+<span id="2-copy-the-app-files"></span><span id="3-the-device-settings"></span><span id="ai_dash_filesconfigpy"></span><span id="secretspy"></span><span id="copying-the-private-files"></span><span id="4-install-the-app"></span><span id="from-a-release-no-checkout-needed"></span>
+There is no manual install. **Set up a Presto** is the one way onto a Presto,
+because only the setup download carries the daemon's update certificate.
 
-There is one app implementation, in the `presto/` directory of the
-repository. The physical device runs copies of exactly those files, so it
-cannot see edits on your computer until you sync them.
+## For developers: the repository sync tool
 
-Keep the device's existing `/main.py` carousel launcher. Copy the app with
-[Thonny](https://thonny.org/) (interpreter: *MicroPython (Raspberry Pi Pico)*)
-or with `mpremote`:
+<span id="from-the-repository"></span>
 
-| Repository file | Device path |
-| --- | --- |
-| `presto/launcher/ai_dash.py` | `/ai_dash.py` |
-| `presto/main.py` | `/ai_dash_files/ai_dash_app.py` |
-| `presto/config.example.py` | `/ai_dash_files/config.py` |
-| `presto/home.py` | `/ai_dash_files/home.py` |
-| `presto/net.py` | `/ai_dash_files/net.py` |
-| `presto/cards.py` | `/ai_dash_files/cards.py` |
-| `presto/gestures.py` | `/ai_dash_files/gestures.py` |
-| `presto/alerts.py` | `/ai_dash_files/alerts.py` |
-| `presto/popup.py` | `/ai_dash_files/popup.py` |
-| `presto/ticks.py` | `/ai_dash_files/ticks.py` |
-| `presto/ui.py` | `/ai_dash_files/ui.py` |
-
-Only the entry script lives at the root, so the helper modules do not appear
-as extra apps in the carousel. The folder is named `ai_dash_files` on
-purpose: MicroPython would import a folder called `/ai_dash` instead of
-running the root `/ai_dash.py` entry.
-
-The `tools/presto_device.py` sync command does all of this for you and
-verifies it afterwards. Use it instead of copying files by hand.
-
-## 3. The device settings
-
-Two files on the device hold the settings. Neither is in version control,
-and neither belongs in a screenshot.
-
-### `/ai_dash_files/config.py`
-
-Where the device finds your daemon and how it identifies itself:
-
-```python
-DAEMON_HOST = "192.168.1.50"
-DAEMON_PORT = 8787
-SHARED_TOKEN = "the same value as daemon.shared_token"
-DEVICE_NAME = "presto"
-```
-
-The app always polls the daemon. It has no demo data of its own: sample data
-comes from the daemon's [demo mode](../guides/admin-page.md#demo-mode).
-
-`DAEMON_HOST` is the LAN IPv4 address of the machine running the daemon.
-Use an address, not a hostname: name lookup can block on MicroPython and
-stall the touch loop.
-
-### `/secrets.py`
-
-The Wi-Fi credentials:
-
-```python
-WIFI_SSID = "your-network-name"
-WIFI_PASSWORD = "your-network-password"
-```
-
-The firmware reads this root-level file for Wi-Fi. The credentials go to your
-access point and nowhere else: they are never sent to the daemon.
-
-The Presto's radio is 2.4 GHz only. A 5 GHz-only network will not work.
-
-To change the network later, use the admin page rather than editing this file:
-see [Changing the Wi-Fi network](#changing-the-wi-fi-network).
-
-### Copying the private files
-
-These two files go on the device first. `install-presto` refuses a device that
-has no `/ai_dash_files/config.py`, because it never creates your settings (or
-chooses a Wi-Fi network) for you: it points at **Set up a Presto** instead.
-
-**With a checkout of the repository.** The files are `presto/config.py` and
-`presto/secrets.py`. From the repository root, with `mpremote` installed:
-
-```bash
-python -m mpremote connect COM3 fs cp presto/config.py :/ai_dash_files/config.py
-python -m mpremote connect COM3 fs cp presto/secrets.py :/secrets.py
-```
-
-**Without a checkout (installed with pipx, or the daemon runs in Docker).**
-Make two small text files in any folder, named `config.py` and `secrets.py`,
-with the contents shown above. The USB tool `mpremote` is installed with the
-`[device]` extra (step 4), and `pipx run` starts it:
-
-```bash
-pipx run mpremote connect COM3 fs mkdir :/ai_dash_files
-pipx run mpremote connect COM3 fs cp config.py :/ai_dash_files/config.py
-pipx run mpremote connect COM3 fs cp secrets.py :/secrets.py
-```
-
-If the first command says the folder already exists, carry on with the other two.
-
-Replace `COM3` with the port of your Presto. List the ports with:
-
-```bash
-python -m mpremote connect list
-```
-
-(`pipx run mpremote connect list` does the same without a checkout.)
-
-When `mpremote` copies a file it stops the running app, so the screen goes
-black. Restart the board with `mpremote connect COM3 reset` (or unplug and
-replug it), or run the app install in step 4, which relaunches it.
-
-Never put a provider API key on the device. It has no use for one.
-
-## 4. Install the app
-
-### From a release (no checkout needed)
-
-A release wheel carries the Presto app, so the device always gets the version
-that matches your daemon. Install the package with its USB tools, then install
-the app with the port you found above:
-
-```bash
-pipx install "presto-ai-dash[device]"      # or the wheel from the GitHub Release
-presto-ai-dash install-presto --port COM3
-presto-ai-dash check-presto --port COM3          # compares only, writes nothing
-```
-
-Run these on the computer the Presto is plugged into by USB. If the daemon runs
-in Docker or on a server, that is usually a different computer: the container
-never touches USB. Install the same version as the image, for example
-`pipx install "presto-ai-dash[device]==0.50.0"` for the `0.50.0` image. A
-release candidate image such as `0.50.0-rc4` matches the package version
-`0.50.0rc4`.
-
-On macOS or Linux the port looks like `/dev/ttyACM0`. After an upgrade of the
-daemon (`pipx upgrade presto-ai-dash`), run `install-presto` again. It does the same verified, rolled-back copy
-as the repository tool below, and leaves the firmware and your private settings
-alone. A daemon built from the source tree (not from a release wheel) does not
-include the app: use the repository tool.
-
-### From the repository
-
-The sync tool uploads the current app files, verifies every file by its
-SHA-256, replaces the installed files with a rollback if a write fails, and
-verifies the installed bytes afterwards. It leaves the firmware, your private
-settings and the secrets alone.
+In a checkout, the sync tool installs the current `presto/` sources into the
+spare app slot of a USB-connected Presto, verifies every file by its SHA-256
+and switches to it. A Presto still on the single-folder layout is moved to the
+slots first. It never writes your settings, secrets, the update certificate or
+the firmware, so set a Presto up with **Set up a Presto** before using it.
 
 ```bash
 .venv/Scripts/python tools/presto_device.py sync --port COM3
@@ -391,12 +278,13 @@ settings and the secrets alone.
 ```
 
 On macOS or Linux use `.venv/bin/python`. The tool refuses to pick a board
-automatically: you name the port.
+automatically: you name the port. List the ports with
+`python -m mpremote connect list`.
 
 In VS Code the same two actions are **Terminal -> Run Task -> Sync Presto**
 and **Check Presto sync**.
 
-## 5. Start it
+## Start it {#5-start-it}
 
 Press **RESET** on the Presto, find **Presto AI Dash** in the firmware carousel and
 tap it.
@@ -414,7 +302,7 @@ your accounts.
 If the daemon is not reachable yet, the screen says **Daemon offline** and
 keeps trying. See [Daemon offline and Wi-Fi drops](../troubleshooting/daemon-offline.md).
 
-## 6. The demo first
+## The demo first {#6-the-demo-first}
 
 To see the screens without any account, turn on **demo mode** in the daemon's
 admin page (Settings, Demo mode), or start the daemon with `DASH_DEMO=1`. The
@@ -442,9 +330,10 @@ nothing to show yet.
 | `OFFLINE_AFTER_S` | 30 | Seconds without a good poll before the offline screen |
 
 After an interruption the last good screens stay visible, marked
-**STALE - retrying**. When they reach `OFFLINE_AFTER_S` the app shows the
-error screen instead. A successful poll brings the selected card back on its
-own.
+**STALE - retrying**. Once `OFFLINE_AFTER_S` has passed **and** at least two
+polls in a row have failed, the app shows the error screen instead. A single
+failed poll that the next retry recovers never takes the screen away. A
+successful poll brings the selected card back on its own.
 
 ## Next
 

@@ -7,7 +7,7 @@
 > - Seven source types are implemented, including Codex, Claude, OpenCode Go and Ollama Cloud; remote collectors push readings over the ingest route.
 > - The optional Docker image is built; the tray runner and binaries are not.
 > - The admin listener binds to loopback by default and can be bound elsewhere with an allowed-host list. The Presto app also has `popup.py` (pop-to-top rules).
-> - Corrections (2026-10-29): the daemon also serves two authenticated device-app routes, `GET /api/v1/device-app/manifest` and `GET /api/v1/device-app/file/<canonical name>`, which expose only the running daemon's own `slot-v1` bundle for a permitted update. Operational Presto OTA is implemented but disabled (`daemon.presto_ota_enabled` defaults to false), and the installed device layout is still the legacy one.
+> - Corrections (2026-10-29): the daemon also serves two authenticated device-app routes, `GET /api/v1/device-app/manifest` and `GET /api/v1/device-app/file/<canonical name>`, which expose only the running daemon's own `slot-v1` bundle for a permitted update. From 0.50.0-rc6 Presto OTA is always on: the setup utility installs every Presto on the bootstrap and A/B slots with an update profile, and the app routes are served over TLS on the device port with the daemon's own certificate authority (`ota_tls.py`). `daemon.presto_ota_enabled` is gone; an old setting is ignored with a warning.
 
 # Architecture
 

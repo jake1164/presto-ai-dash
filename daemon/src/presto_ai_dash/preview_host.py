@@ -54,9 +54,11 @@ def preview_settings(environ=None):
 class RunningPreview(object):
     """One running preview: the app thread and the page's server."""
 
-    def __init__(self, runner, server):
+    def __init__(self, runner, server, port=None):
         self.runner = runner
         self.server = server
+        # The port the page listens on, so the admin page can link to it.
+        self.port = port
         self.thread = threading.Thread(target=server.serve_forever, args=(0.02,), name="presto-preview",
                                        daemon=True)
 
@@ -113,7 +115,7 @@ def start_preview(daemon_port, shared_token, root=PREVIEW_ROOT, environ=None):
             log.error("the Presto preview stays off: cannot listen on %s:%d (%s)",
                       host, port, type(exc).__name__)
             return None
-        preview = RunningPreview(runner, server).start()
+        preview = RunningPreview(runner, server, port).start()
     except Exception as exc:  # a test aid: never take the daemon down
         log.error("the Presto preview stays off: %s", type(exc).__name__)
         return None

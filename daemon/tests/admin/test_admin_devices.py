@@ -225,13 +225,15 @@ class RetryRouteTests(DeviceRouteBase):
         self.assertEqual(self.request(path, "POST", body, token=None, headers=headers)[0], 403)
         headers["X-CSRF-Token"] = session["csrf_token"]
         status, _, answer = self.request(path, "POST", body, token=None, headers=headers)
-        self.assertEqual(status, 409)
-        self.assertEqual(answer, {"error": "ota_not_enabled"})
+        # Past the CSRF check the request itself is judged: OTA is always on.
+        self.assertEqual(status, 400)
+        self.assertEqual(answer, {"error": "invalid_request"})
 
-    def test_a_known_device_is_refused_as_not_enabled(self):
+    def test_a_legacy_target_is_refused(self):
+        # Over-the-air updates only install slot builds.
         status, _, body = self.mutation(self.device_path() + "/retry")
-        self.assertEqual(status, 409)
-        self.assertEqual(body, {"error": "ota_not_enabled"})
+        self.assertEqual(status, 400)
+        self.assertEqual(body, {"error": "invalid_request"})
 
     def test_an_unknown_device_is_not_found(self):
         self.assertEqual(self.mutation(self.device_path("a" * 32) + "/retry")[0], 404)
@@ -262,10 +264,10 @@ class RetryRouteTests(DeviceRouteBase):
 
 
 class RecoveryRouteTests(DeviceRouteBase):
-    def test_a_known_device_is_refused_as_not_enabled(self):
+    def test_a_legacy_target_is_refused(self):
         status, _, body = self.mutation(self.device_path() + "/confirm-recovery")
-        self.assertEqual(status, 409)
-        self.assertEqual(body, {"error": "ota_not_enabled"})
+        self.assertEqual(status, 400)
+        self.assertEqual(body, {"error": "invalid_request"})
 
     def test_it_needs_authorization(self):
         self.assertEqual(self.mutation(self.device_path() + "/confirm-recovery",

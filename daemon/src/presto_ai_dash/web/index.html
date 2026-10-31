@@ -47,11 +47,19 @@
       <button id="demo-banner-off" type="button">Turn demo off</button>
       <span id="demo-banner-lock" class="note" hidden>DASH_DEMO keeps demo mode on; edit the
         environment to turn it off.</span></p>
+    <p id="update-banner" class="banner" role="status" hidden>
+      <span id="update-banner-text"></span>
+      <button id="update-banner-open" type="button">How to update</button>
+      <button id="update-banner-dismiss" type="button">Dismiss</button></p>
+    <p id="device-banner" class="banner" role="status" hidden>
+      <span id="device-banner-text"></span>
+      <button id="device-banner-open" type="button">What to do</button>
+      <button id="device-banner-dismiss" type="button">Dismiss</button></p>
     <div id="tablist" class="tablist" role="tablist" aria-label="Sections">
       <button type="button" role="tab" id="tab-services" data-tab="services"
         aria-controls="panel-services" aria-selected="true" tabindex="0">Services</button>
       <button type="button" role="tab" id="tab-status" data-tab="status"
-        aria-controls="panel-status" aria-selected="false" tabindex="-1">Status</button>
+        aria-controls="panel-status" aria-selected="false" tabindex="-1">Status<span id="tab-status-dot" class="tab-dot" hidden> <span class="visually-hidden">(update available)</span></span></button>
       <button type="button" role="tab" id="tab-settings" data-tab="settings"
         aria-controls="panel-settings" aria-selected="false" tabindex="-1">Settings</button>
     </div>

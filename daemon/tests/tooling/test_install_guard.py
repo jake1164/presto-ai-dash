@@ -30,19 +30,17 @@ class SlotDeviceGuardTests(unittest.TestCase):
             code = device_install.run("sync", "COM3", {"revision": "a" * 64}, out=out, err=err)
         return code, err.getvalue(), operate, launches
 
-    def test_a_bootstrap_device_is_refused_and_relaunched(self):
-        code, err, operate, launches = self.run_install({"boot": True, "legacy": False})
-        self.assertEqual(code, 2)
-        self.assertIn("A/B app slots", err)
-        operate.assert_not_called()
-        self.assertEqual(launches, [["soft-reset", "exec", "--no-follow", device_install.LAUNCH_AUTO]])
-
-    def test_a_legacy_device_goes_ahead_as_before(self):
-        for layout in ({"boot": False, "legacy": True}, {"boot": True, "legacy": True}):
+    def test_install_points_to_the_setup_on_every_layout(self):
+        # Only the setup download carries the update certificate, so it is the
+        # one install path; nothing is copied and the device is not touched.
+        for layout in ({"boot": True, "legacy": False}, {"boot": False, "legacy": True},
+                       {"boot": True, "legacy": True}):
             with self.subTest(layout=layout):
-                code, _err, operate, _launches = self.run_install(layout)
-                self.assertEqual(code, 0)
-                operate.assert_called_once()
+                code, err, operate, launches = self.run_install(layout)
+                self.assertEqual(code, 2)
+                self.assertIn("Set up a Presto", err)
+                operate.assert_not_called()
+                self.assertEqual(launches, [])
 
 
 if __name__ == "__main__":

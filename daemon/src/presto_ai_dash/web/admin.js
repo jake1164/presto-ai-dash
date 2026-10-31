@@ -276,6 +276,20 @@
     return cell;
   }
 
+  // The daemon's own Presto preview polls it as "psl" over loopback, so the
+  // address says nothing a browser can open. The link is built from the host the
+  // admin page was opened on and the port the daemon reports, never from client
+  // data. The preview listens on the daemon computer's loopback by default, so
+  // it opens only from a browser on that computer.
+  function previewLink(client) {
+    const preview = statusState && statusState.preview;
+    if (!preview || client.name !== "psl" || !Number.isInteger(preview.port)) return null;
+    const link = el("a", "", client.address);
+    link.href = window.location.protocol + "//" + window.location.hostname + ":" + preview.port + "/";
+    link.target = "_blank"; link.rel = "noopener noreferrer";
+    link.title = "Open the Presto preview (only reachable from the computer running the daemon)";
+    return link;
+  }
   function buildClientTable(clients) {
     const table = el("table", "grid compact clients");
     const head = el("thead");
@@ -305,6 +319,8 @@
         client.connected ? "connected" : "not connected",
       ];
       for (const cell of before) line.append(el("td", "", cell));
+      const preview = previewLink(client);
+      if (preview) line.children[1].replaceChildren(preview);
       line.append(failureCell(client, detail));
       for (const cell of after) line.append(el("td", "", cell));
       body.append(line);
@@ -347,6 +363,56 @@
   function storeTab(name) {
     try { window.localStorage.setItem(STORAGE_KEY, name); } catch (_) { /* not available */ }
   }
+  // -- the update and device banners --------------------------------------------
+
+  // Both sit above every tab but Status (which carries the full details). A
+  // dismissal is remembered for what it was about, so something new brings the
+  // banner back; the Status tab dot stays while either condition holds.
+  const DISMISS_KEY = "presto-ai-dash.update-dismissed";
+  const DEVICE_DISMISS_KEY = "presto-ai-dash.device-dismissed";
+  let updateRelease = null, deviceAttention = [];
+  function dismissed(key) {
+    try { return window.localStorage.getItem(key); } catch (_) { return null; }
+  }
+  function remember(key, value) {
+    try { window.localStorage.setItem(key, value); } catch (_) { /* not stored */ }
+  }
+  function deviceSignature() {
+    return deviceAttention.map(device => device.device_id + ":" + (device.update.reason || "")).sort().join(",");
+  }
+  function renderUpdateBanner() {
+    const release = updateRelease;
+    const available = !!release && release.state === "available" && !!release.latest;
+    const quiet = activeTab === "status";
+    element("update-banner").hidden = !available || quiet || dismissed(DISMISS_KEY) === release.latest;
+    if (available) {
+      element("update-banner-text").textContent = "Presto AI Dash " + release.latest +
+        " is available (running " + release.running + ").";
+    }
+    const count = deviceAttention.length;
+    element("device-banner").hidden = !count || quiet || dismissed(DEVICE_DISMISS_KEY) === deviceSignature();
+    element("device-banner-text").textContent = count + (count === 1
+      ? " Presto needs attention." : " Presto devices need attention.");
+    element("tab-status-dot").hidden = !available && !count;
+  }
+  function applyRelease(release) {
+    updateRelease = release || null;
+    renderUpdateBanner();
+  }
+  function applyDevices(view) {
+    deviceAttention = ((view && view.devices) || []).filter(
+      device => device.update && device.update.needs_attention);
+    renderUpdateBanner();
+  }
+  // Cached or stored answers only: neither read contacts a registry or a device.
+  async function loadRelease() {
+    if (!unlocked) return;
+    try { applyRelease(await request("/api/admin/releases")); }
+    catch (_) { /* the banner is a convenience; the Status tab reports problems */ }
+    try { applyDevices(await request("/api/admin/devices")); }
+    catch (_) { /* likewise */ }
+  }
+
   function tabFromHash() {
     const name = (window.location.hash || "").replace(/^#/, "");
     return TABS.includes(name) ? name : null;
@@ -364,6 +430,7 @@
       panel.hidden = !selected;
     }
     storeTab(tab);
+    renderUpdateBanner();
     if (updateHash) {
       try { window.history.replaceState(null, "", TAB_HASHES[tab]); }
       catch (_) { window.location.hash = TAB_HASHES[tab]; }
@@ -1853,6 +1920,7 @@
     if (!unlocked || busy) return;
     try {
       statusState = await request("/api/admin/status");
+      applyRelease(statusState.release); applyDevices({devices: statusState.devices});
       renderStatus();
       await refreshLog();
     } catch (error) { message(error.message, true); }
@@ -1922,8 +1990,16 @@
   function deviceAdvice(device) {
     const reason = (device.update || {}).reason;
     if (reason === "usb_update_required") {
-      return "The installed app does not match the app this daemon serves. Update it over USB: " +
-        "Settings, Set up a Presto, run presto_setup.py on a computer plugged into the Presto.";
+      // Setup always turns on updates over the air. A Presto on the slot layout
+      // that still needs USB has lost them; one on the old layout never had them.
+      if ((device.reported || {}).scheme === "slot-v1") {
+        return "This Presto is not accepting app updates over the air: its firmware changed " +
+          "since it was set up, or its update settings are missing. Run Set up a Presto again " +
+          "once over USB to turn them back on.";
+      }
+      return "This Presto was set up before app updates over the air existed. Run Set up a " +
+        "Presto once over USB: it moves the Presto to the new layout, and later updates " +
+        "arrive from the daemon.";
     }
     if (reason === "revision_uncomparable") {
       return "The reported and expected revisions cannot be compared. Check the device over USB " +
@@ -1949,7 +2025,7 @@
       "Open the Settings tab and choose Set up a Presto.",
       "Download presto_setup.py and the setup file it prepares, to the computer the Presto is plugged into by USB.",
       "Run: python presto_setup.py",
-      "The installed revision here changes to the expected one when the Presto reports again.",
+      "The installed revision here changes to the expected one when the Presto reports again; later updates arrive over the air.",
     ],
     revision_uncomparable: [
       "Plug the Presto into a computer by USB.",
@@ -2321,7 +2397,7 @@
     codexLogins.clear();
     csrfToken = ""; unlocked = false; sources = []; catalog = []; editing = null;
     ingestState = null; tokenReveal = null; displayState = null;
-    demoState = null;
+    demoState = null; applyRelease(null); applyDevices(null);
     ++demoReadVersion;
     // A setup unlock code must not survive a locked page.
     setupState = null; setupPrepared = null;
@@ -2367,6 +2443,7 @@
     element("login-panel").hidden = true; element("workspace").hidden = false;
     element("logout").hidden = false; message("Configuration unlocked. Login remembered for seven days.");
     showTab(tabFromHash() || readStoredTab() || "services");
+    loadRelease();
   }
 
   // -- events ---------------------------------------------------------------
@@ -2551,6 +2628,25 @@
     if (document.visibilityState !== "visible") return;
     refreshStatus();
   }, 10000);
+  element("update-banner-open").addEventListener("click", () => {
+    showTab("status"); element("tab-status").focus();
+  });
+  element("update-banner-dismiss").addEventListener("click", () => {
+    remember(DISMISS_KEY, updateRelease.latest);
+    renderUpdateBanner();
+  });
+  element("device-banner-open").addEventListener("click", () => {
+    showTab("status"); element("tab-status").focus();
+  });
+  element("device-banner-dismiss").addEventListener("click", () => {
+    remember(DEVICE_DISMISS_KEY, deviceSignature());
+    renderUpdateBanner();
+  });
+  // The daemon checks the registry about once a day, so a slow read of its
+  // cached answer is enough to keep the banner current.
+  setInterval(() => {
+    if (unlocked && !busy && document.visibilityState === "visible") loadRelease();
+  }, 60000);
   async function restoreLogin() {
     busy = true; element("unlock").disabled = true;
     try {

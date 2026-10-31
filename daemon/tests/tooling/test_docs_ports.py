@@ -112,7 +112,8 @@ class LimitsDocsTests(unittest.TestCase):
 
     def test_the_request_and_connection_limits(self):
         self.assertIn("within %d seconds" % BoundedRequestHandler.request_deadline, DOC)
-        self.assertIn("each read within %d" % BoundedRequestHandler.io_timeout, DOC)
+        self.assertIn("each write of an answer must finish within %d"
+                      % BoundedRequestHandler.io_timeout, DOC)
         self.assertIn("At most %d requests" % _ExclusiveHTTPServer.max_handlers, DOC)
         self.assertIn("at most %d from one address" % _ExclusiveHTTPServer.max_per_address, DOC)
 

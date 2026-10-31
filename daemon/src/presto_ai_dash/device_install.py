@@ -753,6 +753,12 @@ def device_layout(port, remote=run_remote, receipt=DEFAULT_RECEIPT):
         return parse_state(remote(port, ["soft-reset", "exec", probe]))
 
 
+INSTALL_MOVED_MESSAGE = (
+    "install-presto no longer installs the app. Open the daemon's admin page, choose "
+    "Settings, Set up a Presto, and run the presto_setup.py it gives you on the computer "
+    "the Presto is plugged into: it installs the app with updates over the air. "
+    "check-presto still compares a Presto with this release.")
+
 SLOT_DEVICE_MESSAGE = (
     "This Presto uses the bootstrap and A/B app slots. This command installs the older "
     "single-folder app, which would put a second copy beside them and confuse the next "
@@ -947,6 +953,12 @@ def run(action, port, snapshot, receipt=DEFAULT_RECEIPT, out=None, err=None):
         print('USB tools are missing. Install them with: pipx install --force '
               '"presto-ai-dash[device]"  (or: pip install "presto-ai-dash[device]")',
               file=err)
+        return 2
+    if action == "sync":
+        # Only the setup download carries the daemon's update certificate, so
+        # it is the one install path: a copy from here would leave a Presto that
+        # cannot update over the air.
+        print(INSTALL_MOVED_MESSAGE, file=err)
         return 2
     try:
         layout = device_layout(port, receipt=receipt)

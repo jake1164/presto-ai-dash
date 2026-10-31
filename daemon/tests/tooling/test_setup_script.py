@@ -35,8 +35,24 @@ for folder in (TOOLS, SRC):
 
 import presto_bundle  # noqa: E402
 from presto_ai_dash import device_setup  # noqa: E402
+from presto_ai_dash import ota_tls  # noqa: E402
 
 BUNDLE = presto_bundle.snapshot()
+# The daemon's update identity. Made once: RSA key generation is the slow part.
+IDENTITY = ota_tls.OtaTls(*ota_tls._authority(ota_tls._now()))
+JOURNAL = "/ai_dash_state/journal.json"
+PROFILE = "/ai_dash_state/ota.json"
+CA = "/ai_dash_state/ota-ca.der"
+
+
+def slot_files():
+    """Every file setup installs: both slots and the bootstrap, path -> bytes."""
+    files = {}
+    for name in ("a", "b"):
+        for file_name, data in BUNDLE["slot"]["files"].items():
+            files["/ai_dash_slots/%s/%s" % (name, file_name)] = data
+    files.update(BUNDLE["bootstrap"]["files"])
+    return files
 TOKEN = "device-token-0123456789-abcdefghij"
 MARK = "PRESTO_SETUP:"
 CONFIG = "/ai_dash_files/config.py"
@@ -58,8 +74,10 @@ class FakeDevice:
     """The device primitives the installer uses, over an in-memory filesystem."""
 
     def __init__(self, files=None, board="Pimoroni Presto with RP2350", reach="ok",
-                 device_id=None, name=None, fail_write=None, corrupt=None, fail_rename=None):
+                 device_id=None, name=None, fail_write=None, corrupt=None, fail_rename=None,
+                 free=4 * 1024 * 1024):
         self.files = dict(files if files is not None else {})
+        self.free = free
         self.board = board
         self.reach = reach
         self.device_id = device_id
@@ -79,7 +97,8 @@ class FakeDevice:
     def run(self, code, timeout=20):
         text = bytes(code).decode("utf-8")
         if "os.uname().machine" in text:
-            return self._marker({"micropython": True, "machine": self.board})
+            return self._marker({"micropython": True, "machine": self.board,
+                                 "firmware": "v1.25.0-presto", "free": self.free})
         if "'reach': result" in text:
             return self._marker({"reach": self.reach})
         if "DEVICE_ID" in text:
@@ -120,6 +139,10 @@ class FakeDevice:
 
     def remove(self, path):
         self.files.pop(path, None)
+
+    def mkdir(self, path):
+        self.folders = getattr(self, "folders", set())
+        self.folders.add(path)
 
     def listdir(self, folder):
         prefix = folder.rstrip("/") + "/"
@@ -166,9 +189,9 @@ class ScriptCase(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.folder = Path(self.temp.name)
 
-    def handoff(self, code, bundle=BUNDLE, host="192.168.1.50", wifi="set"):
+    def handoff(self, code, bundle=BUNDLE, host="192.168.1.50", wifi="set", ota=IDENTITY):
         payload = device_setup.build_payload(bundle, host, 8787, TOKEN, "presto", "0.50.0",
-                                             wifi=wifi)
+                                             wifi=wifi, ota=ota)
         path = self.folder / device_setup.HANDOFF_NAME
         path.write_bytes(device_setup.build_handoff(payload, code))
         return path
@@ -192,6 +215,14 @@ class ScriptCase(unittest.TestCase):
                            device_factory=lambda port: device, ask=ask, say=say)
         return code, said
 
+    def assert_slot_layout(self, device):
+        for target, data in slot_files().items():
+            self.assertEqual(device.files.get(target), data, target)
+        journal = json.loads(device.files[JOURNAL])
+        self.assertEqual((journal["active"], journal["confirmed"]), ("a", "a"))
+        self.assertIsNone(journal["pending"])
+        self.assertNotIn("/ai_dash.py", device.files)
+
     def assert_no_secret(self, said, *secrets):
         blob = "\n".join(said)
         for secret in secrets:
@@ -206,9 +237,15 @@ class FirstTimeTests(ScriptCase):
         status, said = self.run_script(path, [code, "Home Wi-Fi", "s3cret-pass", "yes"],
                                        device)
         self.assertEqual(status, 0)
-        # The app, its revision and both private files are on the device now.
-        for target, data in BUNDLE["files"].items():
-            self.assertEqual(device.files[target], data)
+        # The app in both slots, its bootstrap, both private files and the
+        # update profile are on the device now.
+        self.assert_slot_layout(device)
+        self.assertEqual(device.files[CA], IDENTITY.ca_der)
+        profile = json.loads(device.files[PROFILE])
+        self.assertEqual(profile, {"enabled": True, "host": "192.168.1.50", "port": 8787,
+                                   "hostname": ota_tls.HOSTNAME, "ca_file": CA,
+                                   "firmware": "v1.25.0-presto"})
+        self.assertIn("app updates over the air", "\n".join(said))
         config = device.files[CONFIG].decode("ascii")
         self.assertIn("DAEMON_HOST = '192.168.1.50'", config)
         self.assertIn("DAEMON_PORT = 8787", config)
@@ -686,8 +723,10 @@ class PreservationTests(ScriptCase):
         self.assertEqual(device.files[SECRETS], before[SECRETS])
         self.assertEqual(device.files["/main.py"], before["/main.py"])
         self.assertIn("Every other setting in it stays.", "\n".join(said))
-        for target, data in BUNDLE["files"].items():
-            self.assertEqual(device.files[target], data)
+        self.assert_slot_layout(device)
+        for target in BUNDLE["files"]:
+            if target not in (CONFIG,):
+                self.assertNotIn(target, device.files, "the single-folder app is retired")
         self.assertNotIn("/ai_dash_files/old_helper.py", device.files)
 
     def test_the_identifier_and_name_already_in_the_file_are_kept_once(self):
@@ -798,7 +837,7 @@ class FailureAndRetryTests(ScriptCase):
         code = device_setup.new_unlock_code()
         path = self.handoff(code, wifi="keep")
         device = FakeDevice(existing_install(), device_id="a" * 32, name="x",
-                            fail_write="/ai_dash_files/ui.py.presto-new")
+                            fail_write="/ai_dash_slots/a/ui.py.presto-new")
         before = dict(device.files)
         status, said = self.run_script(path, [code, "yes"], device)
         self.assertTrue(any("Continue? [Y/n]" in text for text in said), said)
@@ -812,13 +851,14 @@ class FailureAndRetryTests(ScriptCase):
         code = device_setup.new_unlock_code()
         path = self.handoff(code, wifi="keep")
         device = FakeDevice(existing_install(), device_id="a" * 32, name="x",
-                            corrupt={"/ai_dash_files/cards.py.presto-new"})
+                            corrupt={"/ai_dash_slots/b/cards.py.presto-new"})
         before = dict(device.files)
         status, said = self.run_script(path, [code, "yes"], device)
         self.assertTrue(any("Continue? [Y/n]" in text for text in said), said)
         self.assertEqual(status, 1)
-        for target in BUNDLE["files"]:
-            self.assertEqual(device.files[target], before[target])
+        for target, data in before.items():
+            self.assertEqual(device.files[target], data, "the running app is untouched")
+        self.assertNotIn("/ai_dash_boot.py", device.files)
         self.assertTrue(path.exists())
 
     def test_a_corrupt_settings_file_is_caught_by_reading_it_back(self):
@@ -839,21 +879,26 @@ class FailureAndRetryTests(ScriptCase):
     def test_a_failed_commit_restores_every_file_it_moved(self):
         code = device_setup.new_unlock_code()
         path = self.handoff(code, wifi="keep")
+        # The bootstrap entry is committed last, so a failure there must put
+        # back both slots and the journal too.
         device = FakeDevice(existing_install(), device_id="a" * 32, name="x",
-                            fail_rename="/ai_dash_files/cards.py")
+                            fail_rename="/ai_dash_boot.py")
         before = dict(device.files)
         status, said = self.run_script(path, [code, "yes"], device)
         self.assertTrue(any("Continue? [Y/n]" in text for text in said), said)
         self.assertEqual(status, 1)
-        for target in BUNDLE["files"]:
-            self.assertEqual(device.files[target], before[target])
+        for target, data in before.items():
+            self.assertEqual(device.files[target], data, target)
+        for target in list(slot_files()) + [JOURNAL]:
+            self.assertNotIn(target, device.files, target)
         self.assertTrue(path.exists())
 
     def test_the_same_download_finishes_a_retry_and_leaves_no_staging_files(self):
         code = device_setup.new_unlock_code()
         path = self.handoff(code, wifi="keep")
         device = FakeDevice(existing_install(), device_id="a" * 32, name="x")
-        device.files["/ai_dash_files/ui.py.presto-new"] = b"left behind"
+        device.files["/ai_dash_slots/a/ui.py.presto-new"] = b"left behind"
+        device.files["/ai_dash_slots/b/home.py.presto-prev"] = b"left behind"
         device.files["/ai_dash_files/home.py.presto-prev"] = b"left behind"
         status, said = self.run_script(path, [code, "yes"], device)
         self.assertEqual(status, 0, said)
@@ -967,7 +1012,7 @@ class StandaloneExecutionTests(unittest.TestCase):
             elif isinstance(node, ast.ImportFrom) and node.level == 0:
                 top_level.add((node.module or "").split(".")[0])
         self.assertEqual(top_level, {"argparse", "ast", "base64", "binascii", "getpass",
-                                     "importlib", "json", "os", "re", "shutil",
+                                     "hashlib", "importlib", "json", "os", "re", "shutil",
                                      "subprocess", "sys", "tempfile", "time", "traceback"})
 
 
@@ -1135,29 +1180,26 @@ class DependencyTests(ScriptCase):
 
 
 class SlotDeviceTests(ScriptCase):
-    """A Presto that updates over the air keeps its app: only its settings change."""
+    """Setup is how a Presto on the over-the-air layout is repaired: it is reinstalled."""
 
-    def test_a_slot_presto_gets_settings_only_and_keeps_every_app_file(self):
+    def test_a_slot_presto_is_reinstalled_and_keeps_its_settings(self):
         code = device_setup.new_unlock_code()
         path = self.handoff(code, wifi="keep")
         device = FakeDevice(slot_install(), device_id="a" * 32, name="desk")
         before = dict(device.files)
         status, said = self.run_script(path, [code, "yes"], device)
         self.assertEqual(status, 0, said)
-        for target, data in before.items():
-            if target != CONFIG:
-                self.assertEqual(device.files[target], data, target)
-        self.assertEqual(sorted(set(device.files) - set(before)), [])
+        self.assert_slot_layout(device)
+        self.assertEqual(device.files[SECRETS], before[SECRETS])
+        self.assertEqual(device.files["/main.py"], before["/main.py"])
         written = device.files[CONFIG].decode("ascii")
         self.assertIn("DAEMON_HOST = '192.168.1.50'", written)
         self.assertIn("DEVICE_ID = '%s'" % ("a" * 32), written)
         self.assertIn("DEVICE_NAME = 'desk'", written)
-        self.assertTrue(all(target.startswith(CONFIG) for target in device.writes), device.writes)
         self.assertTrue(device.launched)
         self.assertFalse(path.exists(), "the handoff is removed once the Presto reached the daemon")
         blob = "\n".join(said)
-        self.assertIn("over the air", blob)
-        self.assertNotIn("app files,", blob)
+        self.assertIn("already updates over the air", blob)
         self.assertIn("/secrets.py: keep the existing file", blob)
 
     def test_the_board_goes_back_to_the_launcher_before_anything_else_happens(self):
@@ -1176,7 +1218,7 @@ class SlotDeviceTests(ScriptCase):
                                        [code, "Office 2G", "new-wifi-pass", "yes"], device)
         self.assertEqual(status, 0, said)
         self.assertIn("WIFI_SSID = 'Office 2G'", device.files[SECRETS].decode("ascii"))
-        self.assertEqual(device.files["/ai_dash_slots/a/ai_dash_app.py"], b"slot a app")
+        self.assert_slot_layout(device)
         files = slot_install()
         del files[SECRETS]
         empty = FakeDevice(files, device_id="a" * 32, name="desk")
@@ -1195,14 +1237,50 @@ class SlotDeviceTests(ScriptCase):
         self.assertTrue(path.exists(), "the handoff is kept for another try")
         self.assertTrue(any("could not reach" in text for text in said), said)
 
-    def test_a_single_folder_presto_is_never_reset_and_still_gets_its_app(self):
+    def test_a_single_folder_presto_is_never_reset_and_moves_to_the_slots(self):
         code = device_setup.new_unlock_code()
         device = FakeDevice(existing_install(), device_id="a" * 32, name="x")
         status, said = self.run_script(self.handoff(code, wifi="keep"), [code, "yes"], device)
         self.assertEqual(status, 0, said)
         self.assertEqual(device.resets, [])
-        for target, data in BUNDLE["files"].items():
-            self.assertEqual(device.files[target], data)
+        self.assert_slot_layout(device)
+        self.assertIn("single-folder app", "\n".join(said))
+
+    def test_the_boot_count_carries_over_so_the_daemon_keeps_ordering_reports(self):
+        # The daemon orders a device's reports by (boot, sequence): counting from
+        # 1 again would make every new report look older than the last one.
+        code = device_setup.new_unlock_code()
+        files = existing_install()
+        files["/ai_dash_boot.txt"] = b"41\n"
+        device = FakeDevice(files, device_id="a" * 32, name="x")
+        status, said = self.run_script(self.handoff(code, wifi="keep"), [code, "yes"], device)
+        self.assertEqual(status, 0, said)
+        self.assertEqual(json.loads(device.files[JOURNAL])["boots"], 41)
+        files = slot_install()
+        files[JOURNAL] = json.dumps({"boots": 77}).encode()
+        device = FakeDevice(files, device_id="a" * 32, name="desk")
+        status, said = self.run_script(self.handoff(code, wifi="keep"), [code, "yes"], device)
+        self.assertEqual(status, 0, said)
+        self.assertEqual(json.loads(device.files[JOURNAL])["boots"], 77)
+
+    def test_too_little_room_stops_before_anything_is_written(self):
+        code = device_setup.new_unlock_code()
+        device = FakeDevice(existing_install(), device_id="a" * 32, name="x", free=100 * 1024)
+        before = dict(device.files)
+        status, said = self.run_script(self.handoff(code, wifi="keep"), [code, "yes"], device)
+        self.assertEqual(status, 1)
+        self.assertIn("KiB free", "\n".join(said))
+        self.assertEqual(device.files, before)
+
+    def test_a_daemon_without_an_update_certificate_still_installs(self):
+        code = device_setup.new_unlock_code()
+        device = FakeDevice(existing_install(), device_id="a" * 32, name="x")
+        status, said = self.run_script(self.handoff(code, wifi="keep", ota=None),
+                                       [code, "yes"], device)
+        self.assertEqual(status, 0, said)
+        self.assert_slot_layout(device)
+        self.assertNotIn(PROFILE, device.files)
+        self.assertIn("stay off", "\n".join(said))
 
 
 class ReconnectTests(unittest.TestCase):
@@ -1289,7 +1367,7 @@ class ReconnectTests(unittest.TestCase):
 
         self.assertEqual(module.check_reachability(Recorder()), "ok")
         code = sent[0]
-        revision = BUNDLE["revision"][:12]
+        revision = BUNDLE["slot"]["revision"][:12]
         self.assertIn("X-Presto-Client: setup", code)
         self.assertIn("X-Presto-Revision: " + revision, code)
         self.assertNotIn("@REVISION@", code)

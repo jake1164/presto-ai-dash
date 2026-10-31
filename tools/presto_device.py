@@ -13,10 +13,11 @@
   its active slot verified, and a sync installs the build into the inactive
   slot and activates it, keeping the previous one as the fallback.
 
-``migrate`` is the one deliberate USB migration from the legacy layout to the
-bootstrap and slots. It is never implied by a sync: a routine update must not
-silently rewrite how the device boots, because there is no over-the-air way
-back. Private settings, secrets and firmware are not touched by any action.
+A ``sync`` of a legacy device moves it to the bootstrap and slots, as the
+setup utility does: every Presto ends on the layout that updates over the air.
+``migrate`` does the same explicitly. Private settings, secrets and firmware are
+not touched by any action; the update profile is written only by the setup
+utility, which has the daemon's certificate.
 
 check/sync/migrate interrupt the device, then relaunch AI Dash.
 """
@@ -116,7 +117,7 @@ def main(argv=None):
                   file=sys.stderr)
             return 2
         state = layout(args.port)
-        if args.action == "migrate":
+        if args.action == "migrate" or (args.action == "sync" and state.get("legacy")):
             if bundle.get("slot") is None or bundle.get("bootstrap") is None:
                 print("This build has no bootstrap or slot bundle, so it cannot "
                       "migrate a device.", file=sys.stderr)
@@ -154,9 +155,8 @@ def main(argv=None):
             print("Verified: device and PSL app files match " + bundle["revision"][:12]
                   + ". AI Dash relaunched.")
             if bundle.get("slot") is not None:
-                print("This device is still on the legacy layout. Use "
-                      "'python tools/presto_device.py migrate --port <port>' to move "
-                      "it to the bootstrap and A/B slots.", file=sys.stderr)
+                print("This device is still on the legacy layout; Sync Presto moves it "
+                      "to the bootstrap and A/B slots.", file=sys.stderr)
             return 0
         print("This device has neither the legacy app nor the bootstrap, so there is "
               "nothing to check or sync. Provision it with 'Set up a Presto' first.",

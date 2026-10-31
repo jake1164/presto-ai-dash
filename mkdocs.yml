@@ -26,7 +26,7 @@ site_description: >-
   A tiny AI usage dashboard for a Pimoroni Presto: subscription quotas and
   local service health on a 240x240 touchscreen, collected by a small
   read-only Python daemon on your own LAN.
-site_url: https://jake1164.github.io/presto-ai-dash/
+site_url: https://jake1164.github.io/presto-ai-dash/docs/
 repo_url: https://github.com/jake1164/presto-ai-dash
 repo_name: jake1164/presto-ai-dash
 edit_uri: edit/main/docs/user/
@@ -110,6 +110,7 @@ extra_javascript:
 
 nav:
   - Home: index.md
+  - Product Website: https://jake1164.github.io/presto-ai-dash/
   - See It Running: demo/index.md
   - Getting Started:
       - What Presto AI Dash Does: getting-started/what-it-does.md

@@ -1,0 +1,631 @@
+{
+  "description": "Published documentation paths, heading anchors and homepage fragment links before the product/docs split. Keep old routes and anchors working; update page targets when moving content.",
+  "routes": {
+    "concepts/alerts/index.html": {
+      "page": "concepts/alerts/index.html",
+      "anchors": [
+        "alert-statuses-and-thresholds",
+        "what-raises-an-alert",
+        "the-sound",
+        "the-mute-that-expires",
+        "the-led",
+        "quiet-hours",
+        "pop-to-top",
+        "the-master-switch-and-per-service-settings",
+        "what-alerts-off-means",
+        "the-presto-can-switch-one-services-alerts",
+        "see-also"
+      ]
+    },
+    "concepts/quotas-and-provenance/index.html": {
+      "page": "concepts/quotas-and-provenance/index.html",
+      "anchors": [
+        "quotas-and-where-numbers-come-from",
+        "allowance-windows",
+        "the-provenance-rule",
+        "claudes-three-routes",
+        "everything-else",
+        "where-the-numbers-come-from-exactly",
+        "what-is-never-derived",
+        "resets",
+        "see-also"
+      ]
+    },
+    "concepts/remote-reports/index.html": {
+      "page": "concepts/remote-reports/index.html",
+      "anchors": [
+        "remote-reports",
+        "the-rules",
+        "turning-it-on",
+        "the-flow",
+        "what-a-report-contains",
+        "network-safety",
+        "see-also"
+      ]
+    },
+    "concepts/sources/index.html": {
+      "page": "concepts/sources/index.html",
+      "anchors": [
+        "sources",
+        "one-type-many-accounts",
+        "the-source-types",
+        "where-a-source-runs",
+        "the-status-vocabulary",
+        "what-a-source-is-allowed-to-do",
+        "settings-and-secrets",
+        "what-a-source-does-not-do-to-the-dashboard"
+      ]
+    },
+    "concepts/stale-readings/index.html": {
+      "page": "concepts/stale-readings/index.html",
+      "anchors": [
+        "stale-readings",
+        "two-kinds-of-staleness",
+        "when-a-reading-becomes-stale",
+        "what-makes-a-reading-old",
+        "the-hints",
+        "claude-terminal-export-only",
+        "claude-with-the-usage-cache-reader-on",
+        "claude-with-the-local-activity-reader-on",
+        "a-stale-reading-is-never-an-alert",
+        "where-the-age-is-shown",
+        "see-also"
+      ]
+    },
+    "demo/index.html": {
+      "page": "demo/index.html",
+      "anchors": [
+        "see-it-running",
+        "what-you-are-looking-at"
+      ]
+    },
+    "developers/architecture/index.html": {
+      "page": "developers/architecture/index.html",
+      "anchors": [
+        "architecture-overview",
+        "the-shape-of-the-system",
+        "the-daemons-modules",
+        "the-collection-loop",
+        "the-status-vocabulary",
+        "the-two-payloads",
+        "the-presto-app",
+        "one-implementation-two-places",
+        "storage",
+        "security-posture",
+        "see-also"
+      ]
+    },
+    "developers/contributing-sources/index.html": {
+      "page": "developers/contributing-sources/index.html",
+      "anchors": [
+        "request-or-contribute-a-source",
+        "request-a-source-no-code-needed",
+        "what-should-you-request",
+        "what-happens-to-a-request",
+        "submit-a-source-implementation",
+        "rules-every-implementation-must-preserve",
+        "more-details"
+      ]
+    },
+    "developers/how-a-source-works/index.html": {
+      "page": "developers/how-a-source-works/index.html",
+      "anchors": [
+        "how-a-source-works",
+        "registration",
+        "config_fields",
+        "secret_field",
+        "collect-and-sourcesnapshot",
+        "quota-reports",
+        "provenance-labels",
+        "the-read-only-rule",
+        "what-the-http-client-enforces",
+        "the-device-payload-whitelist",
+        "push-sources",
+        "demo-data",
+        "the-checklist",
+        "see-also"
+      ]
+    },
+    "developers/preview-and-device/index.html": {
+      "page": "developers/preview-and-device/index.html",
+      "anchors": [
+        "the-preview-and-the-device-sync",
+        "the-preview",
+        "rendering-every-card-without-a-server",
+        "the-revision-and-the-usb-check",
+        "the-sync",
+        "what-the-sync-does",
+        "what-the-preview-does-not-show",
+        "the-rule",
+        "see-also"
+      ]
+    },
+    "developers/running-the-tests/index.html": {
+      "page": "developers/running-the-tests/index.html",
+      "anchors": [
+        "running-the-tests",
+        "the-daemon-suite",
+        "what-the-suite-covers",
+        "the-device-payload-guard",
+        "the-presto-tests",
+        "the-documentation-site",
+        "the-demo-checks",
+        "the-browser-checks",
+        "before-you-call-the-work-done"
+      ]
+    },
+    "developers/worked-example/index.html": {
+      "page": "developers/worked-example/index.html",
+      "anchors": [
+        "the-worked-example",
+        "the-two-files",
+        "why-the-template-is-not-a-copy-of-a-real-source",
+        "building-it",
+        "1-copy-the-template",
+        "2-change-four-things",
+        "3-run-it",
+        "what-the-template-actually-does",
+        "the-configuration",
+        "the-parse",
+        "the-fetch",
+        "the-collect",
+        "turning-it-into-a-real-source",
+        "the-checklist",
+        "see-also"
+      ]
+    },
+    "developers/writing-a-collector/index.html": {
+      "page": "developers/writing-a-collector/index.html",
+      "anchors": [
+        "writing-a-collector",
+        "a-local-reader",
+        "the-rules",
+        "a-readers-output",
+        "a-push-collector",
+        "one-file-one-mode-per-service",
+        "the-version",
+        "the-envelope",
+        "the-responses",
+        "what-a-collector-must-do",
+        "the-one-exception",
+        "writing-a-new-collector",
+        "see-also"
+      ]
+    },
+    "getting-started/add-the-first-source/index.html": {
+      "page": "getting-started/add-the-first-source/index.html",
+      "anchors": [
+        "add-the-first-source",
+        "open-the-admin-page",
+        "the-three-tabs",
+        "the-first-source-pick-something-local",
+        "then-add-a-subscription-account",
+        "each-source-has-its-own-guide",
+        "what-happens-next"
+      ]
+    },
+    "getting-started/install-the-daemon/index.html": {
+      "page": "getting-started/install-the-daemon/index.html",
+      "anchors": [
+        "install-the-daemon",
+        "requirements",
+        "install",
+        "from-a-checkout-to-change-the-code",
+        "create-a-configuration-file",
+        "run-it",
+        "check-that-it-works",
+        "vs-code",
+        "what-the-daemon-keeps-on-disk",
+        "environment-variables",
+        "next"
+      ]
+    },
+    "getting-started/install-with-docker/index.html": {
+      "page": "getting-started/install-with-docker/index.html",
+      "anchors": [
+        "running-the-daemon-in-a-container",
+        "what-is-in-the-box",
+        "quick-start",
+        "the-ports",
+        "the-health-check",
+        "data-and-backups",
+        "upgrades",
+        "the-time-zone",
+        "a-reverse-proxy-in-front",
+        "security-notes",
+        "what-works-in-a-container-and-what-does-not",
+        "feeding-claude-data-to-a-containerised-daemon",
+        "seeing-the-presto-screen-without-a-presto",
+        "the-environment-variables",
+        "troubleshooting"
+      ]
+    },
+    "getting-started/set-up-the-presto/index.html": {
+      "page": "getting-started/set-up-the-presto/index.html",
+      "anchors": [
+        "set-up-the-presto",
+        "the-guided-setup",
+        "one-process-for-every-case",
+        "1-open-the-admin-page-and-choose-set-up-a-presto",
+        "2-confirm-the-address-the-presto-can-reach",
+        "3-run-the-setup-script-on-the-usb-computer",
+        "4-what-it-keeps",
+        "if-something-goes-wrong",
+        "a-note-on-updates",
+        "moving-a-presto-to-a-different-daemon",
+        "changing-the-wi-fi-network",
+        "the-manual-route",
+        "1-flash-the-firmware-only-if-you-need-to",
+        "2-copy-the-app-files",
+        "3-the-device-settings",
+        "ai_dash_filesconfigpy",
+        "secretspy",
+        "copying-the-private-files",
+        "4-install-the-app",
+        "from-a-release-no-checkout-needed",
+        "from-the-repository",
+        "5-start-it",
+        "6-the-demo-first",
+        "polling-and-failure-behaviour",
+        "next"
+      ]
+    },
+    "getting-started/what-it-does/index.html": {
+      "page": "getting-started/what-it-does/index.html",
+      "anchors": [
+        "what-presto-ai-dash-does",
+        "what-it-looks-like",
+        "the-two-halves",
+        "what-you-see-on-the-device",
+        "what-it-collects",
+        "what-it-deliberately-does-not-do",
+        "where-to-go-next"
+      ]
+    },
+    "guides/admin-page/index.html": {
+      "page": "guides/admin-page/index.html",
+      "anchors": [
+        "the-admin-page",
+        "logging-in",
+        "the-three-tabs",
+        "services",
+        "status",
+        "settings",
+        "demo-mode",
+        "adding-and-editing-an-account",
+        "the-accounts-own-actions",
+        "privacy-of-the-page",
+        "the-help-links",
+        "see-also"
+      ]
+    },
+    "guides/alerts-and-the-bell/index.html": {
+      "page": "guides/alerts-and-the-bell/index.html",
+      "anchors": [
+        "alerts-and-the-card-bell",
+        "what-the-bell-shows",
+        "tapping-it",
+        "what-the-write-is",
+        "the-shared-token-travels-over-plain-http",
+        "the-settings-behind-it",
+        "see-also"
+      ]
+    },
+    "guides/claude/index.html": {
+      "page": "guides/claude/index.html",
+      "anchors": [
+        "claude",
+        "the-terminal-status-line",
+        "the-local-usage-cache",
+        "the-local-activity-logs",
+        "which-one-should-i-use",
+        "the-weekly-reset-estimate",
+        "freshness-and-hints",
+        "privacy",
+        "see-also"
+      ]
+    },
+    "guides/codex/index.html": {
+      "page": "guides/codex/index.html",
+      "anchors": [
+        "codex",
+        "set-it-up",
+        "the-login-stays-with-codex",
+        "what-it-reads",
+        "banked-reset-credits",
+        "refresh-and-failure",
+        "when-the-daemon-is-somewhere-else",
+        "troubleshooting",
+        "see-also"
+      ]
+    },
+    "guides/home-display/index.html": {
+      "page": "guides/home-display/index.html",
+      "anchors": [
+        "home-display-and-the-overflow-strip",
+        "the-rows",
+        "scrolling",
+        "the-overflow-strip",
+        "the-setting",
+        "the-dots-at-the-bottom",
+        "see-also"
+      ]
+    },
+    "guides/litellm/index.html": {
+      "page": "guides/litellm/index.html",
+      "anchors": [
+        "litellm",
+        "set-it-up",
+        "step-1-create-a-monitoring-user",
+        "step-2-create-the-monitoring-key",
+        "step-3-add-it-to-presto-ai-dash",
+        "what-the-card-shows",
+        "what-it-reads",
+        "check-the-keys-permissions",
+        "revoke-or-replace-the-key",
+        "security",
+        "troubleshooting",
+        "three-things-that-matter",
+        "limits",
+        "see-also"
+      ]
+    },
+    "guides/ollama/index.html": {
+      "page": "guides/ollama/index.html",
+      "anchors": [
+        "ollama",
+        "set-it-up",
+        "what-it-reads",
+        "the-honest-limitation",
+        "the-measured-speed",
+        "failure-behaviour",
+        "see-also"
+      ]
+    },
+    "guides/ollama-cloud/index.html": {
+      "page": "guides/ollama-cloud/index.html",
+      "anchors": [
+        "ollama-cloud",
+        "a-warning-about-the-key",
+        "what-presto-collects",
+        "what-it-does-not-tell-you",
+        "set-it-up",
+        "check-that-it-works",
+        "revoke-or-replace-the-key",
+        "refresh",
+        "see-also"
+      ]
+    },
+    "guides/opencode-go/index.html": {
+      "page": "guides/opencode-go/index.html",
+      "anchors": [
+        "opencode-go",
+        "what-presto-collects",
+        "what-key-to-use",
+        "set-it-up-in-presto",
+        "check-that-it-works",
+        "revoke-or-replace-the-key",
+        "limits",
+        "refresh",
+        "see-also"
+      ]
+    },
+    "guides/remote-collectors/index.html": {
+      "page": "guides/remote-collectors/index.html",
+      "anchors": [
+        "remote-collectors",
+        "do-you-need-one",
+        "what-a-collector-is",
+        "claude-statusline",
+        "watch",
+        "the-collector-folder",
+        "trying-it",
+        "what-reports-remotely-and-what-does-not",
+        "setting-it-up",
+        "running-it-by-hand",
+        "if-the-daemon-does-not-accept-the-reports",
+        "if-no-report-arrives",
+        "keeping-it-up-to-date",
+        "how-it-behaves-when-the-network-is-bad",
+        "what-the-daemon-does-with-a-report",
+        "rotating-and-revoking",
+        "the-security-trade-off",
+        "see-also"
+      ]
+    },
+    "guides/run-in-the-background/index.html": {
+      "page": "guides/run-in-the-background/index.html",
+      "anchors": [
+        "running-the-daemon-in-the-background",
+        "which-computer",
+        "windows-a-task-that-starts-when-you-sign-in",
+        "hiding-the-window",
+        "if-the-presto-says-the-daemon-is-offline",
+        "docker",
+        "linux-and-macos",
+        "see-also"
+      ]
+    },
+    "guides/securing-a-deployment/index.html": {
+      "page": "guides/securing-a-deployment/index.html",
+      "anchors": [
+        "securing-a-deployment",
+        "the-short-version",
+        "who-can-reach-what",
+        "tokens",
+        "the-admin-page",
+        "the-database-and-its-key",
+        "docker",
+        "remote-collectors",
+        "if-something-leaks",
+        "what-this-does-not-cover",
+        "see-also"
+      ]
+    },
+    "guides/tapping/index.html": {
+      "page": "guides/tapping/index.html",
+      "anchors": [
+        "tapping-rows-and-dots",
+        "the-gestures",
+        "tapping-a-home-row",
+        "tapping-a-dot",
+        "tapping-a-card",
+        "tapping-the-bell",
+        "long-press",
+        "when-a-tap-does-nothing",
+        "see-also"
+      ]
+    },
+    "index.html": {
+      "page": "index.html",
+      "anchors": [
+        "presto-ai-dash",
+        "what-it-does",
+        "how-it-works",
+        "start-here",
+        "the-sources-it-can-read",
+        "want-another-source",
+        "what-it-will-never-do",
+        "licence",
+        "__codelineno-0-1",
+        "__codelineno-0-2",
+        "__codelineno-0-3",
+        "__codelineno-0-4",
+        "__consent"
+      ]
+    },
+    "privacy/index.html": {
+      "page": "privacy/index.html",
+      "anchors": [
+        "privacy",
+        "the-rule-in-one-sentence",
+        "what-it-reads",
+        "what-it-never-reads",
+        "what-it-never-does",
+        "what-is-stored-and-where",
+        "what-leaves-your-machine",
+        "the-documentation-site",
+        "the-one-write-the-presto-can-make",
+        "remote-reports",
+        "the-devices-own-diagnostics",
+        "a-note-on-the-shared-token",
+        "see-also"
+      ]
+    },
+    "reference/configuration/index.html": {
+      "page": "reference/configuration/index.html",
+      "anchors": [
+        "configuration-keys-and-environment-variables",
+        "daemon",
+        "logging",
+        "admin",
+        "display",
+        "alerts",
+        "environment-variables",
+        "where-each-value-comes-from",
+        "per-account-settings",
+        "command-line",
+        "see-also"
+      ]
+    },
+    "reference/ports-and-endpoints/index.html": {
+      "page": "reference/ports-and-endpoints/index.html",
+      "anchors": [
+        "ports-and-endpoints",
+        "the-ports",
+        "the-status-port",
+        "the-two-optional-objects-in-the-answer",
+        "the-status-codes",
+        "limits",
+        "the-headers-a-client-may-send",
+        "the-admin-port",
+        "the-setup-downloads",
+        "the-tokens",
+        "the-documentation-site",
+        "see-also"
+      ]
+    },
+    "reference/status-payload/index.html": {
+      "page": "reference/status-payload/index.html",
+      "anchors": [
+        "the-status-payload-and-its-size-budget",
+        "the-whole-payload",
+        "one-card",
+        "one-source",
+        "the-device-view",
+        "the-size-budget",
+        "the-two-shapes",
+        "see-also"
+      ]
+    },
+    "troubleshooting/admin-page/index.html": {
+      "page": "troubleshooting/admin-page/index.html",
+      "anchors": [
+        "the-admin-page-will-not-open",
+        "1-the-daemon-was-not-started-with-admin",
+        "2-the-daemon-is-not-running-at-all",
+        "3-you-are-on-the-wrong-machine-or-the-wrong-address",
+        "4-the-token-is-wrong-or-the-session-expired",
+        "other-symptoms",
+        "a-note-on-containers",
+        "see-also"
+      ]
+    },
+    "troubleshooting/daemon-offline/index.html": {
+      "page": "troubleshooting/daemon-offline/index.html",
+      "anchors": [
+        "daemon-offline-and-wi-fi-drops",
+        "1-is-the-daemon-actually-up",
+        "2-is-the-device-pointing-at-the-right-address",
+        "3-can-the-device-reach-the-port",
+        "4-wi-fi-from-the-routers-side",
+        "5-wi-fi-from-the-computers-side",
+        "6-what-the-device-tells-you-itself",
+        "7-the-daemons-own-view",
+        "the-devices-own-columns",
+        "8-other-causes",
+        "if-you-cannot-fix-it",
+        "see-also"
+      ]
+    },
+    "troubleshooting/no-claude-data/index.html": {
+      "page": "troubleshooting/no-claude-data/index.html",
+      "anchors": [
+        "no-claude-data",
+        "the-hints",
+        "the-status-line-produces-nothing",
+        "the-usage-cache-reader-complains",
+        "the-activity-reader-complains",
+        "checking-it-by-hand",
+        "the-admin-pages-view",
+        "see-also"
+      ]
+    },
+    "troubleshooting/stale-readings/index.html": {
+      "page": "troubleshooting/stale-readings/index.html",
+      "anchors": [
+        "stale-readings",
+        "why-it-happened",
+        "what-too-old-means",
+        "the-difference-between-stale-and-expired",
+        "a-stale-reading-never-alerts",
+        "where-to-look-first",
+        "see-also"
+      ]
+    },
+    "troubleshooting/vs-code-panel/index.html": {
+      "page": "troubleshooting/vs-code-panel/index.html",
+      "anchors": [
+        "the-vs-code-panel",
+        "the-symptom",
+        "the-fixes",
+        "use-the-usage-cache",
+        "use-the-activity-logs",
+        "what-this-does-not-give-you",
+        "if-you-want-both",
+        "see-also"
+      ]
+    }
+  },
+  "source_commit": "bdec42f"
+}

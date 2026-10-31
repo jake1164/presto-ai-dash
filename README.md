@@ -8,7 +8,7 @@
 ![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![MicroPython](https://img.shields.io/badge/Device-MicroPython-2b8a73)
 
-[**Live Demo**](https://jake1164.github.io/presto-ai-dash/demo/) · [**Documentation**](https://jake1164.github.io/presto-ai-dash/) · [**Get Started**](https://jake1164.github.io/presto-ai-dash/getting-started/install-the-daemon/) · [**Request a Source**](https://github.com/jake1164/presto-ai-dash/issues/new/choose) · [**♥ Support**](#support-development)
+[**Website**](https://jake1164.github.io/presto-ai-dash/) · [**Live Demo**](https://jake1164.github.io/presto-ai-dash/demo/) · [**Documentation**](https://jake1164.github.io/presto-ai-dash/docs/) · [**Get Started**](https://jake1164.github.io/presto-ai-dash/docs/getting-started/install-the-daemon/) · [**Request a Source**](https://github.com/jake1164/presto-ai-dash/issues/new/choose) · [**♥ Support**](#support-development)
 
 </div>
 
@@ -38,20 +38,20 @@ flowchart TB
 
 <table>
   <tr>
-    <td width="400"><a href="https://jake1164.github.io/presto-ai-dash/guides/claude/"><strong>Claude Code ↗</strong></a><br>Subscription quota &amp; activity</td>
-    <td width="400"><a href="https://jake1164.github.io/presto-ai-dash/guides/codex/"><strong>OpenAI Codex ↗</strong></a><br>Quotas, resets &amp; banked credits</td>
+    <td width="400"><a href="https://jake1164.github.io/presto-ai-dash/docs/guides/claude/"><strong>Claude Code ↗</strong></a><br>Subscription quota &amp; activity</td>
+    <td width="400"><a href="https://jake1164.github.io/presto-ai-dash/docs/guides/codex/"><strong>OpenAI Codex ↗</strong></a><br>Quotas, resets &amp; banked credits</td>
   </tr>
   <tr>
-    <td><a href="https://jake1164.github.io/presto-ai-dash/guides/opencode-go/"><strong>OpenCode Go ↗</strong></a><br>Subscription limits &amp; resets</td>
-    <td><a href="https://jake1164.github.io/presto-ai-dash/guides/ollama-cloud/"><strong>Ollama Cloud ↗</strong></a><br>Credit balance, quota &amp; rolling activity</td>
+    <td><a href="https://jake1164.github.io/presto-ai-dash/docs/guides/opencode-go/"><strong>OpenCode Go ↗</strong></a><br>Subscription limits &amp; resets</td>
+    <td><a href="https://jake1164.github.io/presto-ai-dash/docs/guides/ollama-cloud/"><strong>Ollama Cloud ↗</strong></a><br>Credit balance, quota &amp; rolling activity</td>
   </tr>
   <tr>
-    <td><a href="https://jake1164.github.io/presto-ai-dash/guides/ollama/"><strong>Ollama ↗</strong></a><br>Local models &amp; server health</td>
-    <td><a href="https://jake1164.github.io/presto-ai-dash/guides/litellm/"><strong>LiteLLM ↗</strong></a><br>Gateway usage, health &amp; spend</td>
+    <td><a href="https://jake1164.github.io/presto-ai-dash/docs/guides/ollama/"><strong>Ollama ↗</strong></a><br>Local models &amp; server health</td>
+    <td><a href="https://jake1164.github.io/presto-ai-dash/docs/guides/litellm/"><strong>LiteLLM ↗</strong></a><br>Gateway usage, health &amp; spend</td>
   </tr>
 </table>
 
-Each service links to its metrics, setup, collection method, and limitations. Also see [Source concepts](https://jake1164.github.io/presto-ai-dash/concepts/sources/) and [where quota numbers come from](https://jake1164.github.io/presto-ai-dash/concepts/quotas-and-provenance/).
+Each service links to its metrics, setup, collection method, and limitations. Also see [Source concepts](https://jake1164.github.io/presto-ai-dash/docs/concepts/sources/) and [where quota numbers come from](https://jake1164.github.io/presto-ai-dash/docs/concepts/quotas-and-provenance/).
 
 ### 🔌 Missing your favorite AI service?
 
@@ -61,13 +61,13 @@ Presto AI Dash is designed to grow. Request a new provider, subscription, or loc
 
 ## Get started
 
-1. [Install the daemon](https://jake1164.github.io/presto-ai-dash/getting-started/install-the-daemon/) or [run it with Docker](https://jake1164.github.io/presto-ai-dash/getting-started/install-with-docker/) **on your computer or server**.
-2. [Add your first source](https://jake1164.github.io/presto-ai-dash/getting-started/add-the-first-source/), or enable **Demo mode** on the admin page's **Settings** tab. It shows six sample accounts, marks them with a DEMO chip, and writes nothing.
-3. [Set up the Presto](https://jake1164.github.io/presto-ai-dash/getting-started/set-up-the-presto/) to connect over Wi-Fi.
+1. [Install the daemon](https://jake1164.github.io/presto-ai-dash/docs/getting-started/install-the-daemon/) or [run it with Docker](https://jake1164.github.io/presto-ai-dash/docs/getting-started/install-with-docker/) **on your computer or server**.
+2. [Add your first source](https://jake1164.github.io/presto-ai-dash/docs/getting-started/add-the-first-source/), or enable **Demo mode** on the admin page's **Settings** tab. It shows six sample accounts, marks them with a DEMO chip, and writes nothing.
+3. [Set up the Presto](https://jake1164.github.io/presto-ai-dash/docs/getting-started/set-up-the-presto/) to connect over Wi-Fi.
 
-For Claude and Codex with a Docker daemon, run a [remote collector](https://jake1164.github.io/presto-ai-dash/guides/remote-collectors/) on the computer where you use them.
+For Claude and Codex with a Docker daemon, run a [remote collector](https://jake1164.github.io/presto-ai-dash/docs/guides/remote-collectors/) on the computer where you use them.
 
-For configuration, troubleshooting, security, and detailed limitations, see the [documentation](https://jake1164.github.io/presto-ai-dash/) and [privacy notes](https://jake1164.github.io/presto-ai-dash/privacy/). The app itself sends nothing anywhere; only the documentation website counts page views, with Google Analytics, as the privacy notes explain.
+For configuration, troubleshooting, security, and detailed limitations, see the [documentation](https://jake1164.github.io/presto-ai-dash/docs/) and [privacy notes](https://jake1164.github.io/presto-ai-dash/docs/privacy/). The app itself sends nothing anywhere; only the documentation website counts page views, with Google Analytics, as the privacy notes explain.
 
 ## Support development
 
@@ -84,6 +84,6 @@ If Presto AI Dash is useful, a **GitHub star** helps others discover it. Sponsor
 
 **Self-hosted software:** [Family Librarian](https://github.com/jake1164/family-librarian) · [M3Undle](https://github.com/Sydney-Elvis/M3Undle)
 
-Developers: [contribution guide](CONTRIBUTING.md) · [running the tests](https://jake1164.github.io/presto-ai-dash/developers/running-the-tests/) · [internal notes](docs/README.md).
+Developers: [contribution guide](CONTRIBUTING.md) · [running the tests](https://jake1164.github.io/presto-ai-dash/docs/developers/running-the-tests/) · [internal notes](docs/README.md).
 
 MIT licensed. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).

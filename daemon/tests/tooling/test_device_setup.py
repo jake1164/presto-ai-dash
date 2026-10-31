@@ -81,9 +81,12 @@ class UnlockCodeTests(unittest.TestCase):
 class EnvelopeTests(unittest.TestCase):
     def test_a_handoff_round_trips_and_carries_the_device_token(self):
         code = device_setup.new_unlock_code()
-        envelope = device_setup.build_handoff(payload(), code)
+        # One payload: each build stamps the current second, so two calls made
+        # across a second boundary would differ and fail this for no reason.
+        original = payload()
+        envelope = device_setup.build_handoff(original, code)
         opened = device_setup.open_handoff(envelope, code)
-        self.assertEqual(opened, payload())
+        self.assertEqual(opened, original)
         self.assertEqual(opened["daemon"]["token"], TOKEN)
 
     def test_the_envelope_is_json_with_exactly_the_documented_fields(self):
@@ -214,8 +217,9 @@ class StandaloneScriptTests(unittest.TestCase):
     def test_the_standalone_decryptor_opens_the_daemons_handoff(self):
         module = rendered_module()
         code = device_setup.new_unlock_code()
-        envelope = device_setup.build_handoff(payload(), code)
-        self.assertEqual(module.open_handoff(envelope, code), payload())
+        original = payload()   # built once: it carries the current second
+        envelope = device_setup.build_handoff(original, code)
+        self.assertEqual(module.open_handoff(envelope, code), original)
 
     def test_the_standalone_decryptor_refuses_a_tampered_file(self):
         module = rendered_module()

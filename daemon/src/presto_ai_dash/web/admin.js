@@ -560,7 +560,7 @@
 
   let copiedTimer = null;
   // The clipboard API exists only on HTTPS or on this same computer (localhost). A
-  // daemon on another machine is plain http://, so the older copy command is the
+  // daemon on another machine is plain HTTP, so the older copy command is the
   // fallback; failing that, the code is left selected for Ctrl+C.
   function copyWithCommand(text) {
     const area = document.createElement("textarea");

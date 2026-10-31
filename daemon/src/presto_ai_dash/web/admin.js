@@ -487,11 +487,19 @@
     element("setup-wifi-label").classList.toggle("wifi-off", !wifiOn);
     if (!setupState?.daemon) return;
     if (!element("setup-host").value) element("setup-host").value = setupState.daemon.host || "";
+    showBareHostWarning();
     if (!element("setup-port").value) element("setup-port").value = String(setupState.daemon.port || 8787);
     const suggested = (setupState.daemon.suggested || []).join(", ");
     element("setup-host-note").textContent = suggested
       ? "Suggested for this daemon: " + suggested + ". Use the address the Presto can reach; never localhost or a container's internal address."
       : "Use the daemon computer's LAN address, not localhost and not a container's internal address.";
+  }
+
+  // A short name with no dot resolves on most computers (they add the network's
+  // domain) but not on the Presto, which then never reaches the daemon.
+  function showBareHostWarning() {
+    const host = element("setup-host").value.trim();
+    element("setup-host-bare").hidden = !(host && !host.includes(".") && !host.includes(":"));
   }
 
   async function preparePrestoSetup() {
@@ -551,20 +559,44 @@
   }
 
   let copiedTimer = null;
+  // The clipboard API exists only on HTTPS or on this same computer (localhost). A
+  // daemon on another machine is plain HTTP, so the older copy command is the
+  // fallback; failing that, the code is left selected for Ctrl+C.
+  function copyWithCommand(text) {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed"; area.style.opacity = "0";
+    document.body.append(area);
+    area.select();
+    let copied = false;
+    try { copied = document.execCommand("copy"); } catch (_) { copied = false; }
+    area.remove();
+    return copied;
+  }
+
   async function copySetupCode() {
     const text = element("setup-unlock-code").textContent || "";
     if (!text) return;
     const button = element("copy-setup-code");
-    try {
-      await navigator.clipboard.writeText(text);
+    let copied = false;
+    if (navigator.clipboard && window.isSecureContext) {
+      try { await navigator.clipboard.writeText(text); copied = true; } catch (_) { copied = false; }
+    }
+    if (!copied) copied = copyWithCommand(text);
+    if (copied) {
       message("Setup unlock code copied.");
       // The message is up at the top of the page; say it where the eye already is.
       button.textContent = "Copied";
       clearTimeout(copiedTimer);
       copiedTimer = setTimeout(() => { button.textContent = "Copy"; }, 2000);
-    } catch (_) {
-      message("Select the code and copy it.", true);
+      return;
     }
+    const range = document.createRange();
+    range.selectNodeContents(element("setup-unlock-code"));
+    const selection = window.getSelection();
+    selection.removeAllRanges(); selection.addRange(range);
+    message("This browser would not copy it. The code is selected: press Ctrl+C.", true);
   }
   // The reason the reader sees in words when the master switch is off.
   // It is text, not only a colour, so it is never missed.
@@ -2362,6 +2394,7 @@
   element("setup-wifi").addEventListener("change", renderPrestoSetup);
   element("copy-setup-code").addEventListener("click", copySetupCode);
   element("prepare-another-setup").addEventListener("click", prepareAnotherSetup);
+  element("setup-host").addEventListener("input", showBareHostWarning);
   element("overflow-rows").addEventListener("change", async () => {
     if (busy) { renderDisplay(); return; }
     busy = true;

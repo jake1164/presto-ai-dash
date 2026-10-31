@@ -140,6 +140,22 @@ class SetupPageTextTests(unittest.TestCase):
         self.assertIn('id="setup-actions"', page)
         self.assertIn('id="prepare-another-setup"', page)
 
+    def test_copy_works_without_https_and_a_short_host_is_warned_about(self):
+        folder = Path(device_setup.__file__).parent / "web"
+        script = (folder / "admin.js").read_text(encoding="utf-8")
+        page = self.page()
+        copy = script[script.index("async function copySetupCode"):]
+        copy = copy[:copy.index("\n  }\n")]
+        # The clipboard API is missing on plain http:// from another computer.
+        self.assertIn("window.isSecureContext", copy)
+        self.assertIn("copyWithCommand(text)", copy)
+        self.assertIn('document.execCommand("copy")', script)
+        self.assertIn('id="setup-host-bare"', page)
+        self.assertIn('element("setup-host").addEventListener("input", showBareHostWarning)',
+                      script)
+        warning = page[page.index('id="setup-download-warning"'):]
+        self.assertIn("cannot be downloaded securely", warning[:warning.index("</p>")])
+
     def test_prepare_another_makes_the_next_download_in_one_click(self):
         # It used to only reveal the form again, so the second download took two clicks.
         folder = Path(device_setup.__file__).parent / "web"

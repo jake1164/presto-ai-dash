@@ -79,6 +79,8 @@ AAD = b"presto-ai-dash:presto-setup:v1"
 KDF_INFO = b"presto-ai-dash:presto-setup:v1"
 
 UNLOCK_ATTEMPTS = 3
+# Empty entries do not count as attempts, but they do not go on for ever.
+EMPTY_CODE_LIMIT = 5
 DEVICE_ID_CHARS = 32
 
 # The same bounds the daemon applies before it seals a handoff. They are
@@ -201,13 +203,21 @@ try:
             time.sleep(0.25)
         if wlan.isconnected():
             break
+    address = None
     if not wlan.isconnected():
         result = 'wifi'
     else:
+        # A name lookup is tried on its own: the Presto adds no DNS search domain,
+        # so a bare name that works on a computer can fail here.
+        try:
+            address = socket.getaddrinfo(config.DAEMON_HOST, int(config.DAEMON_PORT))[0][-1]
+        except Exception:
+            result = 'dns'
+    if address is not None:
         link = socket.socket()
         try:
             link.settimeout(8)
-            link.connect(socket.getaddrinfo(config.DAEMON_HOST, int(config.DAEMON_PORT))[0][-1])
+            link.connect(address)
             link.send(b'GET /api/v1/status?cards=lazy HTTP/1.0\r\nHost: presto\r\n'
                       b'X-Presto-Client: setup\r\nX-Presto-Revision: @REVISION@\r\n'
                       b'Authorization: Bearer ' + config.SHARED_TOKEN.encode() + b'\r\n\r\n')
@@ -1009,8 +1019,18 @@ def read_handoff(path, ask, say):
                            "the admin page.") from None
     if len(data) > MAX_ENVELOPE_BYTES:
         raise SetupStopped("The setup file is larger than a setup handoff can be.")
-    for _attempt in range(UNLOCK_ATTEMPTS):
+    attempts, empty = 0, 0
+    while attempts < UNLOCK_ATTEMPTS:
         code = ask("Setup unlock code: ", secret=True)
+        if not str(code).strip():
+            # Enter on its own (or a paste that did not arrive) is not a wrong code.
+            empty += 1
+            if empty > EMPTY_CODE_LIMIT:
+                raise SetupStopped("No unlock code was entered. Run this script again and "
+                                   "paste or type the code shown in the admin page.")
+            say("Nothing was entered. Paste or type the code shown in the admin page.")
+            continue
+        attempts += 1
         try:
             return open_handoff(data, code)
         except SetupStopped:
@@ -1080,7 +1100,7 @@ def run(arguments, device_factory, ask, say):
         reach = check_reachability(device)
         device.launch()
         if reach != "ok":
-            raise SetupStopped(reach_message(reach))
+            raise SetupStopped(reach_message(reach, safe_text(payload["daemon"]["host"], 253)))
         say("The Presto reached the daemon. AI Dash is running; it will appear in the "
             "admin page's Status tab on its next poll.")
         remove_handoff(handoff_path, say)
@@ -1098,7 +1118,15 @@ NO_WIFI_MESSAGE = (
     "Presto' ticked.")
 
 
-def reach_message(reach):
+def reach_message(reach, host=""):
+    if reach == "dns":
+        bare = "." not in host
+        return ("The Presto could not look up the daemon's name (%s). %s Prepare a new "
+                "download in the admin page with the daemon's IP address or its full name, "
+                "and run this script again." % (
+                    host, "A computer often adds its network's domain to a short name, "
+                    "but the Presto does not, so use the full name (with its domain)."
+                    if bare else "Check the name, or use the IP address."))
     if reach == "unauthorised":
         return ("The Presto reached the daemon, but the daemon refused the device token. "
                 "Prepare a new download in the admin page and run this script again.")

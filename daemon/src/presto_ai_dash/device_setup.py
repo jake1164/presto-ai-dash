@@ -230,6 +230,12 @@ def _decode(value, length):
 
 # -- the payload -----------------------------------------------------------
 
+def bare_host(host):
+    """A single-label name the Presto cannot resolve: no dot, and not IPv6."""
+    host = str(host or "")
+    return bool(host) and "." not in host and ":" not in host
+
+
 def valid_host(value):
     """Whether a value can be the daemon's host as the device reaches it.
 
@@ -457,6 +463,10 @@ class SetupService:
         for name in candidates:
             if valid_host(name) and name not in unique:
                 unique.append(name)
+        # A bare name ("server", no dot) works on a computer that adds its network's
+        # DNS domain, but the Presto adds none and cannot look it up (measured), so a
+        # full name or an address comes first. The order is otherwise kept.
+        unique.sort(key=bare_host)
         return unique[:5]
 
     # -- preparing a handoff ----------------------------------------------

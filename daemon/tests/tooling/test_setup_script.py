@@ -264,6 +264,26 @@ class FirstTimeTests(ScriptCase):
         self.assertTrue(device.launched)
         self.assertFalse(path.exists())
 
+    def test_an_empty_entry_is_asked_again_and_is_not_a_wrong_code(self):
+        # A Copy that did not reach the clipboard leaves Enter on its own; that must
+        # not use up the three tries a wrong code gets.
+        code = device_setup.new_unlock_code()
+        path = self.handoff(code)
+        device = FakeDevice()
+        wrong = "0000-0000-0000-0000-0000-0000-0000-0000"
+        status, said = self.run_script(
+            path, ["", "  ", wrong, "", wrong, code, "net", "pw", "yes"], device)
+        self.assertEqual(status, 0, said)
+        self.assertEqual(sum("Nothing was entered" in text for text in said), 3)
+
+    def test_endless_empty_entries_stop_with_a_clear_message(self):
+        code = device_setup.new_unlock_code()
+        path = self.handoff(code)
+        status, said = self.run_script(path, [""] * 10, FakeDevice())
+        self.assertEqual(status, 1)
+        self.assertIn("No unlock code was entered", "\n".join(said))
+        self.assertTrue(path.exists())
+
     def test_a_mismatched_bundle_revision_stops_before_the_device(self):
         other = dict(BUNDLE)
         other["revision"] = "0" * 64
@@ -841,6 +861,28 @@ class FailureAndRetryTests(ScriptCase):
                      if path.endswith((".presto-new", ".presto-prev"))]
         self.assertEqual(leftovers, [])
         self.assertFalse(path.exists())
+
+    def test_a_name_the_presto_cannot_look_up_is_named_with_the_fix(self):
+        # Measured: the Presto adds no DNS search domain, so "server" fails where a
+        # computer finds "server.localdomain".
+        code = device_setup.new_unlock_code()
+        for host, needle in (("toontown-int-srv1", "full name"),
+                             ("dash.example.lan", "Check the name")):
+            with self.subTest(host=host):
+                path = self.handoff(code, host=host)
+                device = FakeDevice(reach="dns")
+                status, said = self.run_script(path, [code, "net", "pw", "yes"], device)
+                text = "\n".join(said)
+                self.assertEqual(status, 1)
+                self.assertIn("could not look up the daemon's name (%s)" % host, text)
+                self.assertIn(needle, text)
+                self.assertIn("IP address", text)
+                self.assertTrue(path.exists())
+
+    def test_the_reach_check_looks_the_name_up_on_its_own(self):
+        code = rendered_module().REACH_CODE
+        lookup = code.index("address = socket.getaddrinfo")
+        self.assertIn("result = 'dns'", code[lookup:code.index("if address is not None")])
 
     def test_a_device_that_cannot_reach_the_daemon_is_reported_and_can_be_retried(self):
         code = device_setup.new_unlock_code()

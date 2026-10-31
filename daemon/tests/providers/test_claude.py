@@ -126,7 +126,7 @@ class ClaudeDatabaseTests(ManagementBase):
         with patch("presto_ai_dash.quotas.now_utc", return_value=NOW):
             result = restarted.status_payload()
         self.assertEqual([s["quota"]["windows"][0]["used_percent"] for s in result["sources"]], [10, 50])
-        self.assertEqual([c["title"] for c in result["cards"]], ["AI Dash", "Claude personal", "Claude work"])
+        self.assertEqual([c["title"] for c in result["cards"]], ["Presto AI Dash", "Claude personal", "Claude work"])
         self.assertNotIn("private", json.dumps(result))
 
     def test_disabled_deleted_and_wrong_type_reject_exports(self):

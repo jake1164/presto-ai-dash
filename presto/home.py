@@ -277,7 +277,7 @@ class HomeLayout(object):
     that changed height while the user scrolled would move the viewport under
     the finger.
 
-    Finding L: for L = 1..setting, take the region (204 - 18 * L pixels),
+    Finding L: for L = 1..setting, take the region (height - 18 * L pixels),
     walk the scroll offsets where the set of fully visible rows changes (two
     per row at most, so O(rows) offsets instead of O(pixels)), and measure the
     names of the rows that are not fully visible. The first L whose names fit
@@ -289,13 +289,14 @@ class HomeLayout(object):
     """
 
     def __init__(self, rows, setting=DEFAULT_OVERFLOW_ROWS, measure=None, width=0,
-                 dock_left=None, dock_top=None):
+                 dock_left=None, dock_top=None, height=SOURCE_HEIGHT):
         self.rows = home_layout(rows)
         self.total = 0
         for entry in self.rows:
             self.total += entry[1]
         self.measure = measure
         self.width = width
+        self.height = height
         # The shared dock, when one is drawn: the list stops at ``dock_top``
         # and the strip's text column at ``dock_left`` less the gap. Both are
         # None when no icon is shown, which releases the space again.
@@ -319,7 +320,7 @@ class HomeLayout(object):
 
     def _region_for(self, lines):
         """The list height with this many strip lines, clear of the dock."""
-        region = SOURCE_HEIGHT - STRIP_LINE_HEIGHT * lines
+        region = self.height - STRIP_LINE_HEIGHT * lines
         if self.dock_top is not None:
             region = min(region, self.dock_top - SOURCE_TOP)
         return max(0, region)

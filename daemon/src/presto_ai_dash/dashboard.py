@@ -302,7 +302,7 @@ def build_status_payload(snapshots):
     provider_names = " · ".join(
         ("Ollama" if key == "ollama" else "LiteLLM") for key in live)
     summary = Card(
-        "dash", "AI Dash", summary_status,
+        "dash", "Presto AI Dash", summary_status,
         primary="%d live source%s" % (len(live), "" if len(live) == 1 else "s"),
         secondary=provider_names,
         detail=["%s: %s" % ("Ollama" if key == "ollama" else "LiteLLM",
@@ -515,7 +515,7 @@ def build_instance_payload(snapshots, instances, alerts=None, now=None,
     all_alerts = [alert for snapshot in reporting.values() for alert in snapshot.alerts]
     worst = max(all_alerts, key=lambda alert: severity(alert.get("severity"))) if all_alerts else None
     home = Card(
-        "dash", "AI Dash", status, primary="%d live sources" % len(enabled),
+        "dash", "Presto AI Dash", status, primary="%d live sources" % len(enabled),
         secondary="Configured source status",
         detail=["%s: %s" % (card.title, card.status) for card in states],
         alert={"severity": worst["severity"], "message": worst["message"]} if worst else None

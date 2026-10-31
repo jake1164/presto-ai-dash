@@ -213,7 +213,7 @@ class CodexManagedTests(ManagementBase):
                    response(10 if home.endswith("personal") else 50)):
             ManagedCollector(self.manager, self.config, threading.Event()).collect_once()
         payload = self.manager.status_payload()
-        self.assertEqual([c["title"] for c in payload["cards"]], ["AI Dash", "Codex personal", "Codex work"])
+        self.assertEqual([c["title"] for c in payload["cards"]], ["Presto AI Dash", "Codex personal", "Codex work"])
         self.assertEqual([r["quota"]["windows"][0]["used_percent"] for r in payload["sources"]], [10, 50])
         self.storage.close()
         self.storage = Storage(self.database)

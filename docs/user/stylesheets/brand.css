@@ -1,0 +1,16 @@
+/* Watchful Meter identity; data/status colours remain part of the device UI. */
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: #17283f;
+  --md-primary-fg-color--light: #30425d;
+  --md-primary-fg-color--dark: #17283f;
+  --md-accent-fg-color: #087787;
+}
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #31d4e8;
+  --md-primary-fg-color--light: #31d4e8;
+  --md-primary-fg-color--dark: #17283f;
+  --md-accent-fg-color: #31d4e8;
+}
+.md-header, .md-tabs { background-color: #17283f; color: #fff; }
+.md-header .md-header__button.md-logo { display: flex; }
+.md-header__button.md-logo img { width: 2rem; height: 2rem; }

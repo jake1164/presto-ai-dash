@@ -1,9 +1,13 @@
 # Presto AI Dash
 
+**Always in view. Never in your way.**
+
 See how much of your AI usage and quota you have left, at a glance, on a
 [Pimoroni Presto](https://shop.pimoroni.com/products/presto) touchscreen on your
 desk. A small daemon collects the readings, an admin page sets it up in your
 browser, and the Presto shows it.
+
+**No windows. No screen clutter. Just the information you need.**
 
 It reads usage and limits only. It never sends a prompt, spends credit or
 changes anything on a provider account.

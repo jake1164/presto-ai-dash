@@ -29,7 +29,7 @@ dependencies = ["cryptography>=46.0.0", "packaging>=24.0"]
 # presto_app/ is the Presto device app, copied in at release time by
 # tools/build_release.py (it is not in git). setup/ holds the standalone
 # installer template the admin page renders for the exact running bundle.
-presto_ai_dash = ["web/*.html", "web/*.js", "web/*.css",
+presto_ai_dash = ["web/*.html", "web/*.js", "web/*.css", "web/*.svg", "web/*.ico",
                   "presto_app/*.py", "presto_app/ai_dash_files/*.py",
                   "presto_app/ai_dash_files/*.txt",
                   # The slot and bootstrap bundles, also copied in at release time.

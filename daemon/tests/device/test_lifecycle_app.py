@@ -121,6 +121,23 @@ class AppBase(unittest.TestCase):
 
 
 class NoticeTests(AppBase):
+    def test_footer_reflows_when_status_chips_appear_and_clear(self):
+        self.app._set_payload(self.payload("usb-required"))
+        self.app._maybe_load_detail = lambda: None
+        for stale, demo, muted, expected_height in (
+            (False, False, False, 220),
+            (True, False, False, 204),
+            (False, True, False, 204),
+            (False, False, True, 204),
+            (False, False, False, 220),
+        ):
+            self.app.connection_error = ("Daemon offline", "Retrying", False) if stale else None
+            self.app.demo = demo
+            self.app.alerts.muted = muted
+            self.module.App._render(self.app)
+            self.assertEqual(self.app.home_layout.height, expected_height)
+            self.assertEqual(self.app.home_layout.dock_top, expected_height - 20)
+
     def test_a_payload_without_the_extension_shows_nothing(self):
         self.app._set_payload(self.payload())
         self.assertIsNone(self.app.lifecycle_notice)
@@ -149,7 +166,7 @@ class NoticeTests(AppBase):
     def test_a_mismatch_reserves_the_dock(self):
         self.app._set_payload(self.payload("usb-required"))
         self.assertIsNotNone(self.app.lifecycle_notice)
-        self.assertEqual(self.app.home_layout.dock_top, 184)
+        self.assertEqual(self.app.home_layout.dock_top, 200)
         # The overflow column stops at the dock's left edge less the 4px gap.
         self.assertEqual(self.app.home_layout.strip_limit(), 204)
 
@@ -168,7 +185,7 @@ class NoticeTests(AppBase):
 class DockTapTests(AppBase):
     def test_a_tap_on_the_dock_opens_the_view(self):
         self.app._set_payload(self.payload("usb-required"))
-        self.tap(220, 196)
+        self.tap(220, 212)
         self.assertTrue(self.app.lifecycle_open)
 
     def test_a_tap_outside_the_dock_does_not(self):
@@ -178,12 +195,12 @@ class DockTapTests(AppBase):
 
     def test_the_dock_is_not_interactive_without_a_notice(self):
         self.app._set_payload(self.payload())
-        self.tap(220, 196)
+        self.tap(220, 212)
         self.assertFalse(self.app.lifecycle_open)
 
     def test_a_second_tap_closes_it(self):
         self.app._set_payload(self.payload("both"))
-        self.tap(220, 196)
+        self.tap(220, 212)
         self.assertTrue(self.app.lifecycle_open)
         self.tap(120, 120)
         self.assertFalse(self.app.lifecycle_open)
@@ -191,20 +208,20 @@ class DockTapTests(AppBase):
     def test_opening_the_view_changes_no_card_or_scroll_state(self):
         self.app._set_payload(self.payload("usb-required"))
         index, offset, detail = self.app.index, self.app.home_scroll.offset, self.app.detail_open
-        self.tap(220, 196)
+        self.tap(220, 212)
         self.assertEqual((self.app.index, self.app.home_scroll.offset, self.app.detail_open),
                          (index, offset, detail))
 
     def test_the_connection_screen_takes_the_view_with_it(self):
         self.app._set_payload(self.payload("usb-required"))
-        self.tap(220, 196)
+        self.tap(220, 212)
         self.app._poll_failed("Daemon offline", "TimeoutError", immediate=True)
         self.app._tick()
         self.assertFalse(self.app.lifecycle_open)
 
     def test_a_dock_tap_never_opens_a_card_detail(self):
         self.app._set_payload(self.payload("retry-exhausted"))
-        self.tap(220, 196)
+        self.tap(220, 212)
         self.assertFalse(self.app.detail_open)
 
 

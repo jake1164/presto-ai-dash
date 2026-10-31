@@ -18,7 +18,7 @@ from ui import (CARD_BOTTOM, LIFECYCLE_DOCK_H, LIFECYCLE_DOCK_Y, LIFECYCLE_ICON,
                 LIFECYCLE_ICON_Y, LIFECYCLE_RELEASE_RGB, LIFECYCLE_WARN_RGB,
                 MUTE_CHIP_Y, Palette, build_home_layout, dot_hit, draw_card,
                 draw_lifecycle_dock, draw_lifecycle_view, draw_sources,
-                lifecycle_dock, lifecycle_hit, lifecycle_icon_x, lifecycle_kind)
+                footer_extra, lifecycle_dock, lifecycle_hit, lifecycle_icon_x, lifecycle_kind)
 
 PREVIEW_DIR = os.path.join(presto_path.REPO_ROOT, "tools", "presto_preview")
 if PREVIEW_DIR not in sys.path:
@@ -67,6 +67,15 @@ def count_colour(pixels, box, colour):
 
 
 class GeometryTests(unittest.TestCase):
+    def test_clean_live_footer_reclaims_chip_space_and_keeps_matching_hit_area(self):
+        extra = footer_extra()
+        self.assertEqual(extra, 16)
+        self.assertTrue(lifecycle_hit(224, 212, extra=extra))
+        self.assertFalse(lifecycle_hit(224, 190, extra=extra))
+        self.assertFalse(lifecycle_hit(120, 228, extra=extra))
+        for flags in ({"stale": True}, {"demo": True}, {"muted": True}):
+            self.assertEqual(footer_extra(**flags), 0)
+
     def test_the_dock_ends_on_the_content_baseline(self):
         x, y, width, height = lifecycle_dock()
         self.assertEqual((x, y, width, height), (208, 184, 32, 24))
@@ -75,7 +84,7 @@ class GeometryTests(unittest.TestCase):
 
     def test_the_icon_keeps_the_usual_right_margin(self):
         self.assertEqual(lifecycle_icon_x(), 240 - 8 - LIFECYCLE_ICON)
-        self.assertEqual((lifecycle_icon_x(), LIFECYCLE_ICON_Y), (222, 188))
+        self.assertEqual((lifecycle_icon_x(), LIFECYCLE_ICON_Y), (222, 194))
         self.assertLess(LIFECYCLE_ICON_Y + LIFECYCLE_ICON, LIFECYCLE_DOCK_Y + LIFECYCLE_DOCK_H)
 
     def test_the_dock_is_above_the_mute_chip_and_the_dots(self):
@@ -115,6 +124,19 @@ class KindTests(unittest.TestCase):
 
 
 class HomeLayoutTests(unittest.TestCase):
+    def test_clean_footer_places_overflow_at_bottom_and_gives_rows_more_room(self):
+        display = Framebuffer()
+        rows = source_rows(fixture_payload())
+        reserved = build_home_layout(display, rows, 1, dock=True)
+        clean = build_home_layout(display, rows, 1, dock=True, extra=footer_extra())
+        self.assertGreater(clean.region, reserved.region)
+        self.assertEqual(clean.height, SOURCE_HEIGHT + 16)
+        band_bottom = SOURCE_TOP + clean.height
+        self.assertEqual(band_bottom, 224)
+        self.assertLessEqual(SOURCE_TOP + clean.region, clean.dock_top)
+        self.assertGreaterEqual(band_bottom - 18 * clean.lines,
+                                SOURCE_TOP + clean.region)
+
     def layout(self, dock, setting=1):
         display = Framebuffer()
         return build_home_layout(display, source_rows(fixture_payload()), setting,
@@ -212,7 +234,7 @@ class CardDrawingTests(unittest.TestCase):
         display = Framebuffer()
         draw_card(display, Palette(display), card, 0, 1, quota=None,
                   detail=lines, detail_open=True, notice=WARNING)
-        box = lifecycle_dock()
+        box = lifecycle_dock(extra=footer_extra())
         stray = ink(display.pixels, box, {_rgb565(*LIFECYCLE_WARN_RGB)},
                     _rgb565(16, 18, 22))
         self.assertEqual(stray, [], "card content drawn under the dock")

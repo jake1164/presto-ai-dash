@@ -235,6 +235,9 @@ Any other method than the ones below is answered `501`.
 | GET | `/` | The page itself. No token: it holds no data |
 | GET | `/admin.js` | The page's script |
 | GET | `/admin.css` | The page's styles |
+| GET | `/presto-ai-dash-icon.svg` | The public Watchful Meter product icon, served locally |
+| GET | `/favicon.ico` | The public product favicon, served locally |
+| GET | `/favicon.svg` | The tightly framed SVG favicon for browser tabs, served locally |
 | GET | `/api/admin/sources` | The connector list and the saved instances. Only `has_key` is returned |
 | POST | `/api/admin/sources` | Add an instance |
 | PUT | `/api/admin/sources/{id}` | Edit, replace or remove the key, enable or disable |

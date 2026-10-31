@@ -38,6 +38,9 @@ starts with a pointer to its public page.
 
 ## Status, plans and history
 
+The product name, approved messaging, artwork and integration rules are
+recorded in [Branding](branding.md).
+
 | File | What it is |
 | --- | --- |
 | [milestones.md](milestones.md) | What is built and what is open (a "Current status" at the top), then the dated checkpoints |

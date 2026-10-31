@@ -330,6 +330,9 @@ def make_handler(runner, names=None):
             query = parse_qs(parts.query)
             if parts.path == "/":
                 return self._send(200, PAGE.encode("utf-8"), "text/html; charset=utf-8")
+            if parts.path == "/favicon.svg":
+                with open(os.path.join(HERE, "favicon.svg"), "rb") as handle:
+                    return self._send(200, handle.read(), "image/svg+xml")
             if parts.path == "/frame.png":
                 scale = 2 if query.get("scale") == ["2"] else 1
                 with runner.cond:
@@ -405,7 +408,7 @@ def make_handler(runner, names=None):
 PAGE = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Presto Live</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:,">
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
 :root { --led: rgb(0,0,0); }
 body { margin: 0; padding: 16px; background: #0b0d10; color: #c9d1d9;

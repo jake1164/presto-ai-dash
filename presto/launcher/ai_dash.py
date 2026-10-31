@@ -1,6 +1,6 @@
 # ICON monitoring
-# NAME AI Dash
-# DESC Daemon status dashboard.
+# NAME Presto AI Dash
+# DESC Always in view. Never in your way.
 
 """Pimoroni carousel entry; app modules live outside the launcher directory."""
 

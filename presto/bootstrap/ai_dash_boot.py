@@ -1,6 +1,6 @@
 # ICON monitoring
-# NAME AI Dash
-# DESC Daemon status dashboard.
+# NAME Presto AI Dash
+# DESC Always in view. Never in your way.
 
 """Stable carousel entry that chooses which dashboard slot runs.
 

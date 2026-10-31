@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Presto AI Dash — Watchful Meter</title>
+  <desc id="desc">A friendly monitor face with orange bezel, cyan and orange usage meter eyes, and cyan check-shaped smile.</desc>
+  <!-- Reconstructed as clean vector geometry from the selected concept. -->
+  <rect x="58" y="79" width="396" height="358" rx="108" fill="#FF8B3E"/>
+  <rect x="85" y="108" width="342" height="301" rx="75" fill="#17283F"/>
+  <path d="M 167 194 A 58 58 0 1 0 224 223" fill="none" stroke="#31D4E8" stroke-width="24" stroke-linecap="round"/>
+  <circle cx="338" cy="252" r="58" fill="none" stroke="#30425D" stroke-width="22"/>
+  <path d="M 338 194 A 58 58 0 0 1 391 275" fill="none" stroke="#FF8B3E" stroke-width="22" stroke-linecap="round"/>
+  <path d="M 223 350 L 254 370 L 293 346" fill="none" stroke="#31D4E8" stroke-width="17" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

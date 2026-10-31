@@ -3,6 +3,14 @@
 Home is the list you see first. It shows your accounts in the order you saved
 them, and it never hides one of them behind a summary.
 
+Home and service cards keep the footer for page dots and status, without a
+product logo. The alert bell, mute chip and device-notice indicator keep their
+own meanings and controls.
+
+The live view uses the space above the dots for more rows when no stale,
+demo or mute chip is showing. Overflow names and the device-notice icon sit
+just above the dots; the layout makes room for those chips when needed.
+
 ![The Home list](../images/home.png)
 
 ## The rows

@@ -294,7 +294,7 @@ Any other method than the ones below is answered `501`.
 | GET | `/api/admin/presto-setup` | What **Set up a Presto** may offer: the bundled app revision, the release, and suggested daemon addresses |
 | POST | `/api/admin/presto-setup` | Prepare the two setup downloads and a fresh unlock code. The code is in the answer, once |
 | GET | `/api/admin/presto-setup/{id}/script` | Download `presto_setup.py` for one prepared handoff |
-| GET | `/api/admin/presto-setup/{id}/handoff` | Download `presto-setup.enc`, the encrypted configuration |
+| GET | `/api/admin/presto-setup/{id}/handoff` | Download `presto_setup.enc`, the encrypted configuration |
 | DELETE | `/api/admin/presto-setup/{id}` | Forget a prepared handoff. A copy already downloaded stays valid until it is used |
 
 Except for the page's own files, a request needs the admin bearer token or a
@@ -309,7 +309,7 @@ sign-in and sign-out. Polling and the Presto never call them.
 
 **Set up a Presto** serves two files for the build that is actually running:
 `presto_setup.py`, a standalone installer carrying the public Presto app
-files and their SHA-256 hashes, and `presto-setup.enc`, that build's daemon
+files and their SHA-256 hashes, and `presto_setup.enc`, that build's daemon
 address, expected app revision and persistent shared device token. The
 encrypted file uses a versioned envelope (HKDF-SHA256 into AES-256-GCM) with a
 fresh salt and nonce. The **setup unlock code** is generated from 160 random

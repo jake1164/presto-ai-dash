@@ -21,7 +21,7 @@ from .config import (ConfigError, admin_bind_error, configure_logging,
 from .device_install import app_snapshot
 from .device_app import DeviceApp
 from .device_lifecycle import DeviceLifecycle
-from .device_setup import SetupService
+from .device_setup import SetupService, probe_address
 from .management import SourceConfiguration, ManagedCollector
 from .models import now_utc
 from . import ota_tls
@@ -233,7 +233,8 @@ class Daemon:
                     release=release_version(),
                     token_temporary=bool(self.config["daemon"].get("shared_token_generated")),
                     container=in_container(),
-                    ota=self.ota)
+                    ota=self.ota,
+                    address_probe=probe_address)
                 self.admin = AdminServer(self.config["admin"]["port"],
                                          self.source_configuration, token,
                                          host=self.config["admin"]["host"],

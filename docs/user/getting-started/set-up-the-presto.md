@@ -85,7 +85,7 @@ files by itself, and the page shows:
 
 - a **setup unlock code** with a **Copy** button;
 - links to **`presto_setup.py`**, the standalone installer with this build's
-  app files, and **`presto-setup.enc`**, the encrypted configuration for this
+  app files, and **`presto_setup.enc`**, the encrypted configuration for this
   handoff, in case your browser blocked one. A browser may ask once whether to
   allow several downloads: allow it.
 
@@ -93,7 +93,7 @@ files by itself, and the page shows:
 something like "presto_setup.py could harm your device. Do you want to keep it
 anyway?", because it is a program file. That is expected: choose **Keep**. The
 file is plain Python text you can open and read before you run it. It holds no
-password or token, because those are in `presto-setup.enc`, which only the
+password or token, because those are in `presto_setup.enc`, which only the
 unlock code opens. Keep it only if you pressed **Prepare download** a moment
 ago; if you did not, delete it.
 
@@ -121,6 +121,9 @@ On macOS or Linux, use `python3` if that is how Python 3 is named. The script:
    is not shown as you type: each character, including each one of a paste,
    appears as a `*`, so you can tell the paste worked. Nothing is written to
    the device, and no temporary plaintext file is created on the computer;
+   then it checks that the daemon answers at the address in the file **from this
+   computer**, before opening the USB device. A typo, a daemon that is not
+   running or a wrong port stops it here with nothing touched;
 2. finds the USB serial device. If exactly one is connected it uses that one and
    says so; if there are several it lists them and asks you to choose by number,
    because it never guesses between boards;
@@ -131,14 +134,30 @@ On macOS or Linux, use `python3` if that is how Python 3 is named. The script:
    some, and tells you what will change. It only goes to the Presto's own
    `/secrets.py`, where an existing file keeps its other lines and only the two
    Wi-Fi lines change. The password is shown as `*` too. If you unticked the box,
-   it keeps the Wi-Fi already on the Presto and asks nothing;
+   it keeps the Wi-Fi already on the Presto and asks nothing. It then has the
+   **Presto** check that it can reach the daemon with those Wi-Fi settings,
+   which can take up to a minute. This catches a wrong Wi-Fi password, a Presto
+   that cannot look up the daemon's name, or a Presto on a network that cannot
+   reach the daemon, before anything is replaced. Nothing is written, and an
+   app that was running on the Presto is started again if this check fails;
 5. shows a summary of exactly what will change, and asks one question,
    **Continue? [Y/n]**. Press Enter to go ahead, or `n` to stop with nothing
-   written. It then installs the app, verifies every file by SHA-256, and puts
+   written and AI Dash started again. (A Presto that is already running AI Dash
+   goes dark just before this question, because setup has to stop the app to read
+   it; answering `n` brings it back.) It then installs the app, verifies every file by SHA-256, and puts
    the previous app back if a write fails;
 6. starts AI Dash and checks from the device that it can reach the daemon.
 
-On success it deletes `presto-setup.enc` and says so. On any failure it keeps
+Both early checks ask only the daemon's `/healthz` answer, which needs no
+token, so the device token is not sent to an address that has not proved to be
+the daemon. If this computer is on a different network from the Presto and you
+are sure the address is right, run `python presto_setup.py --skip-daemon-check`
+to skip both checks. The admin page also looks for the daemon at the address you
+prepare and warns under the download if it cannot find it; that warning never
+blocks the download, because the daemon may be in a container or behind an
+address it cannot use itself.
+
+On success it deletes `presto_setup.enc` and says so. On any failure it keeps
 the file, explains what to check, and lets you run the same command again.
 
 ### 4. What it keeps

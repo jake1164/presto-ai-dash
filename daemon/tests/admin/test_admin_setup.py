@@ -219,7 +219,7 @@ class SetupDownloadTests(SetupServerBase):
 
     def test_both_downloads_are_authenticated_uncached_attachments(self):
         body = self.prepare()
-        for kind, filename in (("script", "presto_setup.py"), ("handoff", "presto-setup.enc")):
+        for kind, filename in (("script", "presto_setup.py"), ("handoff", "presto_setup.enc")):
             url = "/api/admin/presto-setup/%s/%s" % (body["handoff_id"], kind)
             with self.subTest(kind=kind):
                 self.assertEqual(self.request(url, token=None)[0], 401)

@@ -248,19 +248,22 @@ class ClientRegistry(object):
                 del self._reported[key]
 
     def clients(self, now=None, poll_interval=None):
-        """The known clients, most recently seen first.
+        """The known clients: connected ones first, each group in the order the
+        clients were first seen.
 
         ``connected`` is false when the client has not been seen for three poll
-        intervals: it is then treated as not connected.
+        intervals: it is then treated as not connected. A fetch never moves a
+        client, so a row stays where it is while it is being watched.
         """
         moment = self._clock() if now is None else float(now)
         limit = 3 * (poll_interval if poll_interval else 15)
         with self._lock:
             self._expire(moment)
             records = [dict(entry) for entry in self._records.values()]
-        records.sort(key=lambda record: record["last_seen"], reverse=True)
         for record in records:
             record["connected"] = (moment - record["last_seen"]) <= limit
+        records.sort(key=lambda record: (not record["connected"], record["first_seen"]))
+        for record in records:
             record["diag"] = dict(record.get("diag") or {})
             record["events"] = [dict(event) for event in record.get("events") or []]
             record.pop("failures_seen", None)

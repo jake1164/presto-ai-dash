@@ -7,7 +7,7 @@ served it, so the device gets the app its daemon expects.
 
 What it does, in order:
 
-1. reads ``presto-setup.enc`` from this folder (or ``--handoff``);
+1. reads ``presto_setup.enc`` from this folder (or ``--handoff``);
 2. asks for the setup unlock code shown in the daemon's admin page, privately,
    and decrypts the handoff in memory only;
 3. lists the USB serial devices and asks which one is the Presto - it never
@@ -18,7 +18,7 @@ What it does, in order:
 6. shows what will change, installs the app, verifies every file by SHA-256,
    starts the dashboard and checks that the device reaches the daemon.
 
-On success it deletes ``presto-setup.enc``. On failure it keeps it, so the
+On success it deletes ``presto_setup.enc``. On failure it keeps it, so the
 same download can be retried; ``presto_setup.py`` never deletes anything else.
 The setup unlock code is never written to this computer or to the device, and
 the Wi-Fi password is only ever typed here and written to the device's
@@ -49,6 +49,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -60,7 +61,7 @@ REVISION_CHARS = 12
 APP_FOLDER = "/ai_dash_files"
 CONFIG_PATH = "/ai_dash_files/config.py"
 SECRETS_PATH = "/secrets.py"
-HANDOFF_NAME = "presto-setup.enc"
+HANDOFF_NAME = "presto_setup.enc"
 REVISION_TARGET = "/ai_dash_files/revision.txt"
 # Present only on a Presto that was moved to the bootstrap and A/B app slots.
 BOOT_ENTRY = "/ai_dash_boot.py"
@@ -196,7 +197,11 @@ except Exception:
 print('PRESTO_SETUP:' + json.dumps(state))
 '''
 
-REACH_CODE = r'''
+# One body for both on-device checks of the daemon: the one after the install,
+# which asks for the status with the installed settings, and the one before it,
+# which asks only the unauthenticated /healthz with the settings about to be
+# written. @SETTINGS@ defines HOST, PORT, SSID, PASSWORD, REQUEST and EXPECT.
+REACH_BODY = r'''
 import sys, json
 sys.path.insert(0, '/ai_dash_files')
 # This runs in the session that already imported the old settings to read the
@@ -205,8 +210,7 @@ for name in ('config', 'secrets'):
     sys.modules.pop(name, None)
 result = 'error'
 try:
-    import config
-    import secrets
+@SETTINGS@
     import network
     import time
     import socket
@@ -222,7 +226,7 @@ try:
             wlan.active(True)
         if wlan.isconnected():
             break
-        wlan.connect(secrets.WIFI_SSID, secrets.WIFI_PASSWORD)
+        wlan.connect(SSID, PASSWORD)
         for _ in range(48):
             if wlan.isconnected():
                 break
@@ -236,7 +240,7 @@ try:
         # A name lookup is tried on its own: the Presto adds no DNS search domain,
         # so a bare name that works on a computer can fail here.
         try:
-            address = socket.getaddrinfo(config.DAEMON_HOST, int(config.DAEMON_PORT))[0][-1]
+            address = socket.getaddrinfo(HOST, PORT)[0][-1]
         except Exception:
             result = 'dns'
     if address is not None:
@@ -244,17 +248,15 @@ try:
         try:
             link.settimeout(8)
             link.connect(address)
-            link.send(b'GET /api/v1/status?cards=lazy HTTP/1.0\r\nHost: presto\r\n'
-                      b'X-Presto-Client: setup\r\nX-Presto-Revision: @REVISION@\r\n'
-                      b'Authorization: Bearer ' + config.SHARED_TOKEN.encode() + b'\r\n\r\n')
+            link.send(REQUEST)
             head = b''
-            while b'\r\n' not in head and len(head) < 128:
+            while len(head) < 384:
                 chunk = link.recv(64)
                 if not chunk:
                     break
                 head += chunk
             code = int(head.split(b' ')[1]) if b'\r\n' in head else 0
-            if code == 200:
+            if code == 200 and EXPECT in head:
                 result = 'ok'
             elif code == 401:
                 result = 'unauthorised'
@@ -266,6 +268,24 @@ except Exception:
     result = 'error'
 print('PRESTO_SETUP:' + json.dumps({'reach': result}))
 '''
+
+# After the install: the app's own status read, with the settings just written.
+REACH_CODE = REACH_BODY.replace("@SETTINGS@", (
+    "    import config\n"
+    "    import secrets\n"
+    "    HOST = config.DAEMON_HOST\n"
+    "    PORT = int(config.DAEMON_PORT)\n"
+    "    SSID = secrets.WIFI_SSID\n"
+    "    PASSWORD = secrets.WIFI_PASSWORD\n"
+    "    EXPECT = b''\n"
+    "    REQUEST = (b'GET /api/v1/status?cards=lazy HTTP/1.0\\r\\nHost: presto\\r\\n'\n"
+    "               b'X-Presto-Client: setup\\r\\nX-Presto-Revision: @REVISION@\\r\\n'\n"
+    "               b'Authorization: Bearer ' + config.SHARED_TOKEN.encode() + b'\\r\\n\\r\\n')"))
+
+# Before anything is written: the daemon's health answer, which needs no token and
+# says nothing but that a daemon is there. Only the daemon sends this exact body.
+HEALTH_REQUEST = b"GET /healthz HTTP/1.0\r\nHost: presto\r\n\r\n"
+HEALTH_EXPECT = b'"ok": true'
 
 # ==== BEGIN embedded bundle (generated by presto_ai_dash.device_setup; do not edit) ====
 BUNDLE = {}
@@ -696,6 +716,64 @@ def check_reachability(device):
     return safe_text(state.get("reach"), 16)
 
 
+def probe_daemon(host, port, timeout=6):
+    """Where the daemon is, seen from this computer, as a fixed result code.
+
+    It asks only /healthz, which needs no token, so the device token is never
+    sent to an address that has not yet proved to be the daemon. The codes are
+    the ones the Presto's own check reports, plus "refused" and "timeout".
+    """
+    try:
+        address = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)[0][-1]
+    except (OSError, IndexError):
+        return "dns"
+    reply = b""
+    try:
+        with socket.create_connection(address, timeout=timeout) as link:
+            link.sendall(HEALTH_REQUEST)
+            while len(reply) < 384:
+                chunk = link.recv(128)
+                if not chunk:
+                    break
+                reply += chunk
+    except socket.timeout:
+        return "timeout"
+    except ConnectionRefusedError:
+        return "refused"
+    except OSError:
+        return "error"
+    words = reply.split(b"\r\n", 1)[0].split(b" ")
+    code = int(words[1]) if len(words) > 1 and words[1].isdigit() else 0
+    if code == 200 and HEALTH_EXPECT in reply:
+        return "ok"
+    return "http_%d" % code if code else "error"
+
+
+def precheck_code(host, port, ssid=None, password=None):
+    """The on-device check to run before anything is written.
+
+    It tries the Wi-Fi settings the install is about to write, or the ones the
+    Presto already has when none are being replaced, and asks only /healthz.
+    """
+    if ssid is None:
+        wifi = ("    import secrets\n"
+                "    SSID = secrets.WIFI_SSID\n"
+                "    PASSWORD = secrets.WIFI_PASSWORD\n")
+    else:
+        # ascii() keeps the code ASCII for the serial line and the value exact.
+        wifi = "    SSID = %s\n    PASSWORD = %s\n" % (ascii(ssid), ascii(password or ""))
+    settings = ("    HOST = %s\n    PORT = %d\n%s    EXPECT = %r\n    REQUEST = %r"
+                % (ascii(host), int(port), wifi, HEALTH_EXPECT, HEALTH_REQUEST))
+    return REACH_BODY.replace("@SETTINGS@", settings)
+
+
+def check_daemon_from_presto(device, host, port, ssid=None, password=None):
+    """Whether the Presto can reach the daemon with the settings about to be written."""
+    code = precheck_code(host, port, ssid, password)
+    state = marker_json(device.run(code.encode("ascii"), timeout=180), "connection")
+    return safe_text(state.get("reach"), 16)
+
+
 # -- settings files --------------------------------------------------------
 
 def config_text(payload, name, device_id):
@@ -811,6 +889,25 @@ def legacy_paths(device):
     return [path for path in dict.fromkeys(paths) if device.exists(path)]
 
 
+def previous_app_is_back(device, attempted):
+    """Whether every file the install tried to replace is as it was before.
+
+    A file that existed is back under its own name with no backup left beside
+    it; a file that did not exist is gone. A device that cannot answer is not
+    trusted.
+    """
+    try:
+        for path, had_old in attempted:
+            if had_old:
+                if not device.exists(path) or device.exists(path + ".presto-prev"):
+                    return False
+            elif device.exists(path):
+                return False
+    except Exception:
+        return False
+    return True
+
+
 def install_slots(device, plan, say):
     """Install the bootstrap and both app slots, then retire a single-folder app.
 
@@ -818,6 +915,9 @@ def install_slots(device, plan, say):
     moved into place; a failure puts back every file it moved. Both slots get
     the same verified app, so the device never starts on an unproven one.
     """
+    # Until the first file is replaced, the app on the device is the previous
+    # one, untouched. ``run`` starts it again if setup stops in that state.
+    plan["previous_app_intact"] = True
     free = plan.get("free")
     needed = install_size() + FREE_MARGIN
     if type(free) is int and free < needed:
@@ -844,12 +944,15 @@ def install_slots(device, plan, say):
     wanted = {path: hashlib.sha256(data).hexdigest() for path, data in slots + boot}
     wanted[JOURNAL_PATH] = hashlib.sha256(journal).hexdigest()
     changed = []
+    attempted = []
+    plan["previous_app_intact"] = False
     try:
         for path in order:
             backup = path + ".presto-prev"
             if device.exists(backup):
                 device.remove(backup)
             had_old = device.exists(path)
+            attempted.append((path, had_old))
             if had_old:
                 device.rename(path, backup)
             changed.append((path, had_old))
@@ -867,6 +970,10 @@ def install_slots(device, plan, say):
                     device.rename(path + ".presto-prev", path)
             except Exception:
                 pass
+        # The undo above is best effort; only a device that shows every moved
+        # file back under its own name counts as the previous app being intact.
+        plan["previous_app_intact"] = previous_app_is_back(device, attempted)
+        plan["rollback_unconfirmed"] = not plan["previous_app_intact"]
         raise
     for path in order:
         backup = path + ".presto-prev"
@@ -1245,13 +1352,24 @@ def run(arguments, device_factory, ask, say):
     say("Presto AI Dash %s - setting up a Presto." % (RELEASE or "unknown"))
     payload = read_handoff(handoff_path, ask, say)
     check_bundle(payload)
-    say("Opened the setup file for daemon %s:%d."
-        % (payload["daemon"]["host"], int(payload["daemon"]["port"])))
+    host, daemon_port = safe_text(payload["daemon"]["host"], 253), int(payload["daemon"]["port"])
+    say("Opened the setup file for daemon %s:%d." % (host, daemon_port))
+    check = not arguments.skip_daemon_check
+    if check:
+        # Before a USB device is opened: a wrong address or a daemon that is not
+        # running is found here, with nothing on the Presto touched.
+        say("Checking that the daemon answers at %s:%d from this computer..." % (host, daemon_port))
+        seen = probe_daemon(host, daemon_port)
+        if seen != "ok":
+            raise SetupStopped(computer_message(seen, host, daemon_port))
+        say("The daemon answered.")
     ports = list_ports()
     port = choose_port(ports, arguments.port, ask, say)
     device = device_factory(port)
     wrote = False
     completed = False
+    had_app = False
+    plan = {}
     try:
         board = probe_board(device)
         # Every Presto ends on the bootstrap and two app slots, which is what
@@ -1259,13 +1377,31 @@ def run(arguments, device_factory, ask, say):
         # reset the board under this script, so it goes back to the launcher
         # first.
         slot = device.exists(BOOT_ENTRY)
+        # Reading the Presto stops the app that is running on it. Until
+        # something is written, that app is still intact and is started again
+        # if setup ends without installing (a "no", Ctrl-C or an early stop).
+        had_app = slot or device.exists(LEGACY_ENTRY)
         if slot:
+            say("Stopping AI Dash on the Presto so setup can read it; its screen goes "
+                "dark. If you answer n below, AI Dash is started again.")
             device.reset_to_launcher()
         plan = ask_settings(device, payload, arguments.name, ask, say)
         plan["slot"] = slot
         plan["legacy"] = device.exists(LEGACY_ENTRY) or device.exists(REVISION_TARGET)
         plan["firmware"] = board["firmware"]
         plan["free"] = board["free"]
+        if check:
+            # The Presto reaches the daemon over Wi-Fi, which this computer cannot
+            # see. Ask it now, with the Wi-Fi settings it is about to be given, so
+            # a wrong address or password is found before anything is replaced.
+            say("Checking that the Presto can reach the daemon (this can take a minute)...")
+            reach = check_daemon_from_presto(
+                device, host, daemon_port,
+                plan["ssid"] if plan["secrets"] else None,
+                plan["password"] if plan["secrets"] else None)
+            if reach != "ok":
+                raise SetupStopped(precheck_message(reach, host))
+            say("The Presto reached the daemon.")
         preview(payload, plan, port, board["machine"], say)
         if not proceed(ask("Continue? [Y/n] ")):
             raise Cancelled()
@@ -1281,9 +1417,27 @@ def run(arguments, device_factory, ask, say):
         remove_handoff(handoff_path, say)
         completed = True
     finally:
+        # The previous app runs again when nothing was written, or when a failed
+        # install put every file back and the device confirms it.
+        if had_app and (not wrote or plan.get("previous_app_intact")):
+            restart_app(device, say)
+        elif had_app and plan.get("rollback_unconfirmed"):
+            say("The previous app could not be confirmed after the failed install, so it "
+                "was not started. Run this script again to repair the Presto.")
         device.close()
         if wrote and not completed:
             say("The encrypted setup file was kept, so you can run this script again.")
+
+
+def restart_app(device, say):
+    """Start the Presto's untouched app again after setup stopped it and wrote nothing."""
+    try:
+        device.launch()
+    except Exception:
+        say("AI Dash could not be started again. Press RESET on the Presto, or unplug "
+            "it and plug it back in.")
+        return
+    say("AI Dash was started again on the Presto.")
 
 
 NO_WIFI_MESSAGE = (
@@ -1315,6 +1469,41 @@ def reach_message(reach, host=""):
                 "daemon. Check that the port is the daemon's device port (8787 by default).")
     return ("The Presto could not reach the daemon. Check the address and port, that the "
             "daemon is running, and that the device joined the Wi-Fi network.")
+
+
+SKIP_HINT = (" If you are sure the address is right and this computer is on a different "
+             "network from the Presto, run this script again with --skip-daemon-check.")
+
+
+def computer_message(result, host, port):
+    """Why this computer could not find the daemon, before any USB device is touched."""
+    where = "%s:%d" % (host, port)
+    if result == "dns":
+        text = ("This computer could not look up the daemon's address (%s). Check it for a "
+                "typo, or prepare a new download in the admin page with the daemon's IP "
+                "address." % host)
+    elif result == "refused":
+        text = ("Nothing is listening at %s. Check that the daemon is running and that %d "
+                "is its device port (8787 by default), then prepare a new download if the "
+                "address or port was wrong." % (where, port))
+    elif result == "timeout":
+        text = ("%s did not answer. Check the address, that the daemon computer is on and "
+                "running the daemon, and that its firewall allows port %d." % (where, port))
+    else:
+        text = ("Something answered at %s, but it is not the daemon's device port. Check "
+                "the address and the port (8787 by default), then prepare a new download."
+                % where)
+    return text + " Nothing was written." + SKIP_HINT
+
+
+def precheck_message(reach, host):
+    """Why the Presto could not find the daemon with the settings about to be written."""
+    if reach == "wifi":
+        return ("The Presto could not join the Wi-Fi network just now, so it could not look "
+                "for the daemon. Nothing was written. Check the network name and password "
+                "(2.4 GHz only); a weak signal can also cause this. Run this script again "
+                "to retry." + SKIP_HINT)
+    return reach_message(reach, host) + " Nothing was written." + SKIP_HINT
 
 
 def remove_handoff(path, say):
@@ -1412,6 +1601,9 @@ def parse_arguments(argv):
                         % HANDOFF_NAME)
     parser.add_argument("--port", help="USB port, for example COM3 or /dev/ttyACM0")
     parser.add_argument("--name", help="name this Presto reports to the daemon")
+    parser.add_argument("--skip-daemon-check", action="store_true",
+                        help="do not check that the daemon answers before changing the "
+                             "Presto (for a computer on a different network from the Presto)")
     return parser.parse_args(argv)
 
 

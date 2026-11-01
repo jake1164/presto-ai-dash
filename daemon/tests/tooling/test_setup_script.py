@@ -75,10 +75,13 @@ def module_source(bundle=BUNDLE):
     return device_setup.render_setup_script(bundle, "0.50.0").decode("utf-8")
 
 
-def rendered_module(bundle=BUNDLE):
+def rendered_module(bundle=BUNDLE, real_probe=False):
     module = types.ModuleType("rendered_presto_setup")
     module.__dict__["__file__"] = "presto_setup.py"
     exec(compile(module_source(bundle), "presto_setup.py", "exec"), module.__dict__)
+    if not real_probe:
+        # What this computer can reach must not decide whether a test passes.
+        module.probe_daemon = lambda host, port, timeout=6: "ok"
     return module
 
 
@@ -87,7 +90,9 @@ class FakeDevice:
 
     def __init__(self, files=None, board="Pimoroni Presto with RP2350", reach="ok",
                  device_id=None, name=None, fail_write=None, corrupt=None, fail_rename=None,
-                 free=4 * 1024 * 1024):
+                 free=4 * 1024 * 1024, precheck_reach="ok"):
+        self.precheck_reach = precheck_reach
+        self.prechecks = []
         self.files = dict(files if files is not None else {})
         self.free = free
         self.board = board
@@ -111,6 +116,10 @@ class FakeDevice:
         if "os.uname().machine" in text:
             return self._marker({"micropython": True, "machine": self.board,
                                  "firmware": "v1.25.0-presto", "free": self.free})
+        if "'reach': result" in text and "/healthz" in text:
+            self.prechecks.append((text, len(self.writes)))
+            self.log.append("precheck")
+            return self._marker({"reach": self.precheck_reach})
         if "'reach': result" in text:
             return self._marker({"reach": self.reach})
         if "DEVICE_ID" in text:
@@ -210,8 +219,10 @@ class ScriptCase(unittest.TestCase):
         path.write_bytes(device_setup.build_handoff(payload, code))
         return path
 
-    def run_script(self, path, answers, device, arguments=()):
+    def run_script(self, path, answers, device, arguments=(), probe=None):
         module = rendered_module(self.bundle)
+        if probe is not None:
+            module.probe_daemon = probe
         # What is plugged into this computer must not decide whether a test passes.
         module.list_ports = lambda: [("COM3", "USB Serial Device")]
         said, asked = [], list(answers)
@@ -622,7 +633,7 @@ class ConfirmationTests(ScriptCase):
                 self.assertEqual(got, status, said)
                 if status == 2:
                     self.assertEqual(device.files, before, "declining writes nothing")
-                    self.assertFalse(device.launched)
+                    self.assertTrue(device.launched, "declining leaves the app running")
 
     def test_the_only_usb_device_is_used_without_a_question(self):
         status, said, prompts = self.asked_for(
@@ -835,7 +846,7 @@ class PreservationTests(ScriptCase):
         self.assertEqual(status, 1)
         self.assertEqual(device.files, before)
         self.assertEqual(device.writes, [])
-        self.assertFalse(device.launched)
+        self.assertTrue(device.launched, "nothing was written, so the app runs again")
         self.assertTrue(path.exists(), "the handoff is kept for the corrected download")
         blob = "\n".join(said)
         self.assertIn("has no Wi-Fi settings", blob)
@@ -890,7 +901,7 @@ class FailureAndRetryTests(ScriptCase):
         for target, data in before.items():
             self.assertEqual(device.files.get(target), data)
         self.assertTrue(path.exists())
-        self.assertFalse(device.launched)
+        self.assertTrue(device.launched, "nothing was replaced, so the old app runs again")
 
     def test_a_corrupt_arrival_never_replaces_the_installed_app(self):
         code = device_setup.new_unlock_code()
@@ -905,6 +916,7 @@ class FailureAndRetryTests(ScriptCase):
             self.assertEqual(device.files[target], data, "the running app is untouched")
         self.assertNotIn("/ai_dash_boot.py", device.files)
         self.assertTrue(path.exists())
+        self.assertTrue(device.launched)
 
     def test_a_corrupt_settings_file_is_caught_by_reading_it_back(self):
         # Settings files hold the token and the Wi-Fi password, so they are compared
@@ -936,6 +948,38 @@ class FailureAndRetryTests(ScriptCase):
             self.assertEqual(device.files[target], data, target)
         for target in list(slot_files()) + [JOURNAL]:
             self.assertNotIn(target, device.files, target)
+        self.assertTrue(path.exists())
+        self.assertTrue(device.launched, "the previous app is back, so it is started")
+        self.assertIn("AI Dash was started again", "\n".join(said))
+
+    def test_a_rollback_on_a_slot_presto_starts_the_previous_app(self):
+        code = device_setup.new_unlock_code()
+        path = self.handoff(code, wifi="keep")
+        device = FakeDevice(slot_install(), device_id="a" * 32, name="desk",
+                            fail_rename="/ai_dash_boot.py")
+        before = dict(device.files)
+        status, said = self.run_script(path, [code, "yes"], device)
+        self.assertEqual(status, 1, said)
+        for target, data in before.items():
+            self.assertEqual(device.files.get(target), data, target)
+        self.assertTrue(device.launched)
+        self.assertTrue(path.exists())
+
+    def test_a_rollback_that_cannot_be_confirmed_does_not_start_the_app(self):
+        class Stuck(FakeDevice):
+            def rename(self, before, after):
+                if before.endswith(".presto-prev"):
+                    raise RuntimeError("cannot put it back")
+                super().rename(before, after)
+
+        code = device_setup.new_unlock_code()
+        path = self.handoff(code, wifi="keep")
+        device = Stuck(slot_install(), device_id="a" * 32, name="desk",
+                       fail_rename="/ai_dash_boot.py")
+        status, said = self.run_script(path, [code, "yes"], device)
+        self.assertEqual(status, 1, said)
+        self.assertFalse(device.launched, "a half-restored app is never started")
+        self.assertIn("could not be confirmed", "\n".join(said))
         self.assertTrue(path.exists())
 
     def test_the_same_download_finishes_a_retry_and_leaves_no_staging_files(self):
@@ -986,6 +1030,186 @@ class FailureAndRetryTests(ScriptCase):
                 self.assertTrue(device.launched, "the app is started so the screen can say why")
                 self.assertTrue(path.exists(), "a failed setup keeps the handoff")
                 self.assertTrue(any(needle in text for text in said), said)
+
+
+class DaemonAddressTests(ScriptCase):
+    """A wrong or unreachable daemon address is found before the Presto is touched."""
+
+    def test_a_daemon_this_computer_cannot_find_stops_before_the_usb_device_is_used(self):
+        code = device_setup.new_unlock_code()
+        path = self.handoff(code)
+        for result, needle in (("dns", "look up"), ("refused", "Nothing is listening"),
+                               ("timeout", "did not answer"), ("http_404", "not the daemon"),
+                               ("error", "not the daemon")):
+            with self.subTest(result=result):
+                device = FakeDevice(slot_install(), device_id="a" * 32)
+                before = dict(device.files)
+                status, said = self.run_script(path, [code, "net", "pw"], device,
+                                               probe=lambda host, port, timeout=6, r=result: r)
+                self.assertEqual(status, 1)
+                blob = "\n".join(said)
+                self.assertIn(needle, blob)
+                self.assertIn("192.168.1.50:8787", blob)
+                self.assertIn("Nothing was written", blob)
+                self.assertIn("--skip-daemon-check", blob)
+                self.assertEqual(device.files, before)
+                self.assertEqual((device.log, device.resets, device.launched), ([], [], False),
+                                 "the Presto is not reset, read or started")
+                self.assertTrue(path.exists(), "the handoff is kept for another try")
+
+    def test_the_computer_is_asked_about_the_address_in_the_handoff(self):
+        code = device_setup.new_unlock_code()
+        asked = []
+
+        def probe(host, port, timeout=6):
+            asked.append((host, port))
+            return "ok"
+
+        status, said = self.run_script(self.handoff(code, host="dash.example.lan"),
+                                       [code, "net", "pw", "yes"], FakeDevice(), probe=probe)
+        self.assertEqual(status, 0, said)
+        self.assertEqual(asked, [("dash.example.lan", 8787)])
+
+    def test_a_presto_that_cannot_reach_the_daemon_is_found_before_anything_is_written(self):
+        code = device_setup.new_unlock_code()
+        path = self.handoff(code, wifi="keep")
+        for reach, needle in (("wifi", "join the Wi-Fi"), ("dns", "look up the daemon's name"),
+                              ("error", "could not reach"), ("http_404", "did not answer as the daemon")):
+            with self.subTest(reach=reach):
+                device = FakeDevice(slot_install(), device_id="a" * 32, name="desk",
+                                    precheck_reach=reach)
+                before = dict(device.files)
+                status, said = self.run_script(path, [code], device)
+                self.assertEqual(status, 1)
+                blob = "\n".join(said)
+                self.assertIn(needle, blob)
+                self.assertIn("Nothing was written", blob)
+                self.assertFalse(any("Continue?" in text for text in said),
+                                 "no question is asked about a setup that cannot work")
+                self.assertEqual(device.writes, [])
+                self.assertEqual(device.files, before)
+                self.assertTrue(device.launched, "the Presto's own app is started again")
+                self.assertTrue(path.exists())
+
+    def test_the_presto_is_asked_before_the_confirmation_and_before_any_write(self):
+        code = device_setup.new_unlock_code()
+        device = FakeDevice(existing_install(), device_id="a" * 32, name="x")
+        status, said = self.run_script(self.handoff(code, wifi="set"),
+                                       [code, "Home Net", "pw-secret-9", "yes"], device)
+        self.assertEqual(status, 0, said)
+        self.assertEqual(len(device.prechecks), 1)
+        text, writes_before = device.prechecks[0]
+        self.assertEqual(writes_before, 0)
+        text_at = next(i for i, line in enumerate(said) if "Checking that the Presto can reach" in line)
+        self.assertLess(text_at, next(i for i, line in enumerate(said) if "Continue?" in line))
+        # The new Wi-Fi settings are tried, and nothing secret is printed.
+        self.assertIn("'Home Net'", text)
+        self.assertIn("'pw-secret-9'", text)
+        self.assertIn("'192.168.1.50'", text)
+        self.assertNotIn(TOKEN, text)
+        self.assert_no_secret(said, "pw-secret-9", TOKEN)
+
+    def test_a_presto_that_keeps_its_wifi_is_checked_with_the_wifi_it_has(self):
+        code = device_setup.new_unlock_code()
+        device = FakeDevice(slot_install(), device_id="a" * 32, name="desk")
+        status, said = self.run_script(self.handoff(code, wifi="keep"), [code, "yes"], device)
+        self.assertEqual(status, 0, said)
+        text = device.prechecks[0][0]
+        self.assertIn("import secrets", text)
+        self.assertIn("SSID = secrets.WIFI_SSID", text)
+
+    def test_the_skip_flag_turns_both_checks_off(self):
+        code = device_setup.new_unlock_code()
+        device = FakeDevice(slot_install(), device_id="a" * 32, name="desk", precheck_reach="error")
+
+        def probe(host, port, timeout=6):
+            raise AssertionError("this computer must not be asked")
+
+        status, said = self.run_script(self.handoff(code, wifi="keep"), [code, "yes"], device,
+                                       arguments=("--skip-daemon-check",), probe=probe)
+        self.assertEqual(status, 0, said)
+        self.assertEqual(device.prechecks, [])
+
+    def test_both_on_device_checks_are_valid_ascii_programs_built_from_one_body(self):
+        module = rendered_module()
+        code = module.precheck_code("dash.lan", 8787, "café 'net'", 'p"w\\')
+        compile(code, "precheck", "exec")
+        code.encode("ascii")
+        compile(module.REACH_CODE.replace("@REVISION@", "abc"), "reach", "exec")
+        compile(module.precheck_code("dash.lan", 8787), "precheck", "exec")
+        for text in (code, module.REACH_CODE):
+            self.assertIn("address = socket.getaddrinfo(HOST, PORT)", text)
+            self.assertNotIn("@SETTINGS@", text)
+        self.assertIn("/healthz", code)
+        self.assertNotIn("Authorization", code)
+        self.assertIn("Authorization", module.REACH_CODE)
+
+
+class ProbeDaemonTests(unittest.TestCase):
+    """The real probe, against servers on this computer."""
+
+    def serve(self, handler_body):
+        import http.server
+        import threading
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.seen_path = self.path
+                status, body = handler_body(self.path)
+                data = body.encode()
+                self.send_response(status)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        return server.server_address[1]
+
+    def test_the_daemon_is_recognised_by_its_health_answer_alone(self):
+        module = rendered_module(real_probe=True)
+        seen = []
+
+        def daemon(path):
+            seen.append(path)
+            return 200, json.dumps({"ok": True})
+
+        port = self.serve(daemon)
+        self.assertEqual(module.probe_daemon("127.0.0.1", port), "ok")
+        self.assertEqual(seen, ["/healthz"], "no token and no other route is used")
+
+    def test_other_servers_are_not_taken_for_the_daemon(self):
+        module = rendered_module(real_probe=True)
+        self.assertEqual(module.probe_daemon("127.0.0.1", self.serve(
+            lambda path: (200, "<html>router</html>"))), "http_200")
+        self.assertEqual(module.probe_daemon("127.0.0.1", self.serve(
+            lambda path: (404, "{}"))), "http_404")
+
+    def test_a_closed_port_is_refused_and_a_silent_one_times_out(self):
+        import socket
+        module = rendered_module(real_probe=True)
+        closed = socket.socket()
+        closed.bind(("127.0.0.1", 0))
+        port = closed.getsockname()[1]
+        closed.close()
+        # Windows takes about two seconds to report a refused connection.
+        self.assertEqual(module.probe_daemon("127.0.0.1", port, timeout=6), "refused")
+        silent = socket.socket()
+        self.addCleanup(silent.close)
+        silent.bind(("127.0.0.1", 0))
+        silent.listen(1)
+        self.assertEqual(module.probe_daemon("127.0.0.1", silent.getsockname()[1],
+                                             timeout=0.4), "timeout")
+
+    def test_a_name_that_does_not_resolve_is_dns(self):
+        module = rendered_module(real_probe=True)
+        with unittest.mock.patch("socket.getaddrinfo", side_effect=OSError("no such host")):
+            self.assertEqual(module.probe_daemon("typo.example", 8787), "dns")
 
 
 class StandaloneExecutionTests(unittest.TestCase):
@@ -1058,7 +1282,8 @@ class StandaloneExecutionTests(unittest.TestCase):
                 top_level.add((node.module or "").split(".")[0])
         self.assertEqual(top_level, {"argparse", "ast", "base64", "binascii", "getpass",
                                      "hashlib", "importlib", "json", "os", "re", "shutil",
-                                     "subprocess", "sys", "tempfile", "time", "traceback"})
+                                     "socket", "subprocess", "sys", "tempfile", "time",
+                                     "traceback"})
 
 
 class PrivateEnvironmentTests(ScriptCase):
@@ -1072,7 +1297,7 @@ class PrivateEnvironmentTests(ScriptCase):
         # The setup file is checked before any package is offered, so these runs need one.
         handoff_folder = tempfile.mkdtemp(prefix="presto-test-handoff-")
         self.addCleanup(shutil.rmtree, handoff_folder, True)
-        self.handoff = os.path.join(handoff_folder, "presto-setup.enc")
+        self.handoff = os.path.join(handoff_folder, "presto_setup.enc")
         with open(self.handoff, "wb") as handle:
             handle.write(b"{}")
 
@@ -1221,7 +1446,7 @@ class DependencyTests(ScriptCase):
         module = rendered_module()
         with self.assertRaises(module.SetupStopped) as caught:
             module.find_handoff(None)
-        self.assertIn("presto-setup.enc", str(caught.exception))
+        self.assertIn("presto_setup.enc", str(caught.exception))
 
 
 class SlotDeviceTests(ScriptCase):
@@ -1255,6 +1480,36 @@ class SlotDeviceTests(ScriptCase):
         self.assertEqual(status, 0, said)
         self.assertEqual(device.resets, [0], "reset once, before the first write")
         self.assertLess(device.log.index("reset"), device.log.index("config_state"))
+
+    def test_answering_no_starts_the_app_again_after_the_reset(self):
+        code = device_setup.new_unlock_code()
+        path = self.handoff(code, wifi="keep")
+        device = FakeDevice(slot_install(), device_id="a" * 32, name="desk")
+        status, said = self.run_script(path, [code, "n"], device)
+        self.assertEqual(status, 2, said)
+        self.assertEqual(device.resets, [0])
+        self.assertEqual(device.writes, [])
+        self.assertTrue(device.launched, "the screen must not stay on the launcher")
+        self.assertTrue(path.exists())
+        blob = "\n".join(said)
+        self.assertIn("Stopping AI Dash on the Presto", blob)
+        self.assertIn("AI Dash was started again", blob)
+
+    def test_a_single_folder_presto_is_started_again_when_setup_stops_early(self):
+        code = device_setup.new_unlock_code()
+        device = FakeDevice(existing_install(), device_id="a" * 32, name="x")
+        status, said = self.run_script(self.handoff(code, wifi="keep"), [code, "n"], device)
+        self.assertEqual(status, 2, said)
+        self.assertEqual(device.resets, [])
+        self.assertTrue(device.launched)
+
+    def test_a_board_with_no_app_is_not_started_when_setup_is_declined(self):
+        code = device_setup.new_unlock_code()
+        device = FakeDevice({"/main.py": b"stock launcher"})
+        status, said = self.run_script(self.handoff(code, wifi="set"),
+                                       [code, "Home", "pass-word-1", "n"], device)
+        self.assertEqual(status, 2, said)
+        self.assertFalse(device.launched)
 
     def test_the_wifi_box_still_decides_on_a_slot_presto(self):
         code = device_setup.new_unlock_code()

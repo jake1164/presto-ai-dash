@@ -44,7 +44,7 @@ actually running:
 template in `presto_ai_dash/setup/` plus the verified public bundle, so it
 imports nothing from this package and runs on a computer with only Python,
 `cryptography` and `mpremote`;
-- `presto-setup.enc`, a versioned envelope (`HKDF-SHA256` from a 160-bit
+- `presto_setup.enc`, a versioned envelope (`HKDF-SHA256` from a 160-bit
 one-time code into `AES-256-GCM`, fresh salt and nonce) holding the reachable
 daemon address, the expected app revision and the persistent shared device
 token. The unlock code is displayed once in the page and is in neither

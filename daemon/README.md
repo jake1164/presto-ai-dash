@@ -27,7 +27,7 @@ presto-ai-dash --admin
 The admin page opens at <http://127.0.0.1:8788>. Add your first source there.
 
 To put the app on the Presto over USB, open the admin page's **Settings** tab and
-use **Set up a Presto**. It prepares `presto_setup.py` and `presto-setup.enc`
+use **Set up a Presto**. It prepares `presto_setup.py` and `presto_setup.enc`
 for the running build and shows a one-time unlock code; run the script on the
 computer the Presto is plugged into. No checkout is needed, and the same flow
 works when the daemon runs in Docker on another machine.

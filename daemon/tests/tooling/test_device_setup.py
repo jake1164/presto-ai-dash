@@ -185,6 +185,13 @@ class PayloadTests(unittest.TestCase):
 
 
 class StandaloneScriptTests(unittest.TestCase):
+    def test_both_downloads_share_a_prefix_so_one_glob_removes_them(self):
+        # `rm presto_setup*` must clear a wrong download: script and setup file.
+        module = rendered_module()
+        self.assertEqual(module.HANDOFF_NAME, device_setup.HANDOFF_NAME)
+        for name in (device_setup.SCRIPT_NAME, device_setup.HANDOFF_NAME):
+            self.assertTrue(name.startswith("presto_setup."), name)
+
     def test_the_script_compiles_and_carries_the_exact_bundle(self):
         source = device_setup.render_setup_script(BUNDLE, "0.50.0")
         compile(source, "presto_setup.py", "exec")
@@ -254,7 +261,73 @@ class SetupServiceTests(unittest.TestCase):
         self.assertEqual(state["daemon"]["host"], "dash.lan")
         self.assertEqual(state["daemon"]["port"], 8787)
         self.assertEqual(state["downloads"], {"script": "presto_setup.py",
-                                              "handoff": "presto-setup.enc"})
+                                              "handoff": "presto_setup.enc"})
+
+    def probing(self, probe):
+        service = self.service()
+        service._address_probe = probe
+        return service
+
+    def test_an_address_the_daemon_cannot_find_is_flagged_but_still_prepared(self):
+        asked = []
+
+        def probe(host, port):
+            asked.append((host, port))
+            return "refused"
+
+        result = self.probing(probe).create("192.168.1.50", 8788)
+        self.assertEqual(asked, [("192.168.1.50", 8788)])
+        self.assertEqual(len(result["warnings"]), 1)
+        self.assertIn("Nothing is listening at 192.168.1.50:8788", result["warnings"][0])
+        self.assertIn("false alarm", result["warnings"][0])
+        self.assertTrue(result["unlock_code"], "a warning never blocks the download")
+
+    def test_each_probe_result_has_fixed_text_that_never_echoes_a_reply(self):
+        for seen, needle in (("dns", "could not look up"), ("timeout", "did not answer in time"),
+                             ("http_200", "did not answer as the daemon"),
+                             ("error", "did not answer as the daemon")):
+            with self.subTest(seen=seen):
+                warning = self.probing(lambda host, port, s=seen: s).create(
+                    "dash.lan", 8787)["warnings"][0]
+                self.assertIn(needle, warning)
+
+    def test_a_reachable_daemon_or_no_probe_or_a_broken_probe_gives_no_warning(self):
+        self.assertEqual(self.probing(lambda host, port: "ok").create(
+            "192.168.1.50", 8787)["warnings"], [])
+        self.assertEqual(self.service().create("192.168.1.50", 8787)["warnings"], [])
+
+        def broken(host, port):
+            raise RuntimeError("boom")
+
+        self.assertEqual(self.probing(broken).create("192.168.1.50", 8787)["warnings"], [])
+
+    def test_the_probe_asks_only_the_health_route_of_a_daemon(self):
+        import http.server
+        import threading
+        paths = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                paths.append((self.path, self.headers.get("Authorization")))
+                body = b'{"ok": true}'
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        self.assertEqual(device_setup.probe_address("127.0.0.1", server.server_address[1]), "ok")
+        self.assertEqual(paths, [("/healthz", None)])
+        server.shutdown()
+        server.server_close()
+        self.assertEqual(device_setup.probe_address("127.0.0.1", server.server_address[1],
+                                                    timeout=6), "refused")
 
     def test_a_short_shared_token_is_refused_with_what_to_change(self):
         with self.assertRaises(device_setup.SetupUnavailable) as caught:

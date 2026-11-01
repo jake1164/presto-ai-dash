@@ -88,7 +88,7 @@ each client's last error, failure count, free memory, signal and uptime.
 [device lifecycle plan](../.ai_docs/presto-ai-dash-device-lifecycle-plan.md)).
 The authenticated admin page's Settings tab offers **Set up a Presto**: it
 prepares `presto_setup.py` (the public app of the running build, rendered from
-the one shared inventory) and `presto-setup.enc` (a versioned AES-256-GCM
+the one shared inventory) and `presto_setup.enc` (a versioned AES-256-GCM
 envelope with the daemon address, the expected revision and the persistent
 shared device token), and shows a one-time 160-bit unlock code that is in
 neither file. The standalone installer opens the file in memory, lists and

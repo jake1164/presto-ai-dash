@@ -590,6 +590,10 @@
         + ":" + result.daemon.port + "."
         + (result.wifi ? " The setup script will ask for the Wi-Fi network and password."
                        : " Wi-Fi is not being set: the Presto must already have Wi-Fi settings.");
+      // The daemon's own look at the address: a heads-up, never a block.
+      const warning = element("setup-address-warning");
+      warning.textContent = (result.warnings || []).join(" ");
+      warning.hidden = !warning.textContent;
       element("setup-downloads").hidden = false;
       // The result appears below the form: hide the button that made it, so it is
       // clear the click worked, and bring the result into view.

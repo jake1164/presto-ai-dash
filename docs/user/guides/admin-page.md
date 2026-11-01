@@ -160,7 +160,7 @@ than to the daemon says so in its badge.
 | Section | What is in it |
 | --- | --- |
 | Home display | The overflow strip setting |
-| Set up a Presto | The one-time USB setup download: the daemon address, the unlock code, `presto_setup.py` and `presto-setup.enc`. See [Set up the Presto](../getting-started/set-up-the-presto.md#the-guided-setup) |
+| Set up a Presto | The one-time USB setup download: the daemon address, the unlock code, `presto_setup.py` and `presto_setup.enc`. See [Set up the Presto](../getting-started/set-up-the-presto.md#the-guided-setup) |
 | Remote reports | The ingest switch, the collector download and its SHA-256, the remote tokens, the collector trail and version, the plain-HTTP warning |
 | Demo mode | The sample-data switch, and what it does and does not touch |
 | Alerts | The master switch, the thresholds, the sound switch (off until you turn it on), quiet hours, pop to top, the mute length |

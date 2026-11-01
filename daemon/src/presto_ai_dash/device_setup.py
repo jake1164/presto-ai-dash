@@ -6,7 +6,7 @@ two files for the exact build that is running:
 
 * ``presto_setup.py`` - a standalone installer carrying the public Presto app
   files and their hashes, generated from the same bundle the daemon ships.
-* ``presto-setup.enc`` - this module's output: a versioned envelope holding
+* ``presto_setup.enc`` - this module's output: a versioned envelope holding
   the daemon address, the persistent shared device token and the expected app
   revision, sealed with authenticated encryption.
 
@@ -64,7 +64,7 @@ CODE_CHARS = 32
 GROUP_CHARS = 4
 CODE_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
 
-HANDOFF_NAME = "presto-setup.enc"
+HANDOFF_NAME = "presto_setup.enc"
 SCRIPT_NAME = "presto_setup.py"
 REVISION_CHARS = 12
 # The shortest shared device token a handoff will carry to a device.
@@ -264,6 +264,57 @@ def valid_host(value):
     return bool(_HOSTNAME.match(value))
 
 
+def probe_address(host, port, timeout=4):
+    """Whether a daemon answers at host:port, seen from this computer.
+
+    It asks only ``/healthz``, which needs no token and says nothing but that a
+    daemon is alive. The result is "ok", "dns", "refused", "timeout", "error" or
+    ``http_<status>``. This is the daemon's view, not the Presto's: it can only
+    warn, and the setup script and the Presto check from where they are.
+    """
+    try:
+        address = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)[0][-1]
+    except (OSError, IndexError):
+        return "dns"
+    reply = b""
+    try:
+        with socket.create_connection(address, timeout=timeout) as link:
+            link.sendall(b"GET /healthz HTTP/1.0\r\nHost: presto\r\n\r\n")
+            while len(reply) < 384:
+                chunk = link.recv(128)
+                if not chunk:
+                    break
+                reply += chunk
+    except socket.timeout:
+        return "timeout"
+    except ConnectionRefusedError:
+        return "refused"
+    except OSError:
+        return "error"
+    words = reply.split(b"\r\n", 1)[0].split(b" ")
+    code = int(words[1]) if len(words) > 1 and words[1].isdigit() else 0
+    if code == 200 and b'"ok": true' in reply:
+        return "ok"
+    return "http_%d" % code if code else "error"
+
+
+def address_warning(result, host, port):
+    """The fixed warning for a probe result that is not "ok"."""
+    where = "%s:%d" % (host, port)
+    if result == "dns":
+        what = "This computer could not look up %s." % host
+    elif result == "refused":
+        what = "Nothing is listening at %s." % where
+    elif result == "timeout":
+        what = "%s did not answer in time." % where
+    else:
+        what = "Something answered at %s, but it did not answer as the daemon." % where
+    return (what + " Check the address and port for a typo. If the daemon is in a container "
+            "or behind another address this computer cannot use, this can be a false alarm: "
+            "the setup script checks again from the computer the Presto is plugged into, "
+            "and the Presto checks before anything is changed.")
+
+
 def validate_payload(payload):
     """Refuse anything that is not exactly the documented v1 shape."""
     base = {"v", "daemon", "device", "app", "release", "created_at"}
@@ -416,8 +467,11 @@ class SetupService:
 
     def __init__(self, bundle_provider, shared_token, host, port, release,
                  clock=None, token_temporary=False, template=None,
-                 container=False, ota=None):
+                 container=False, ota=None, address_probe=None):
         self._bundle_provider = bundle_provider
+        # Looks for the daemon at the address being prepared, so a typo is
+        # flagged at once. None (the default) looks nowhere.
+        self._address_probe = address_probe
         # The daemon's update identity, given to every device it sets up.
         self._ota = ota
         self._token = shared_token or ""
@@ -523,6 +577,14 @@ class SetupService:
             raise SetupError("The device name must be printable ASCII of at most 32 characters.")
         if type(wifi) is not bool:
             raise SetupError("Say whether the Presto's Wi-Fi should be set: true or false.")
+        warnings = []
+        if self._address_probe is not None:
+            try:
+                seen = self._address_probe(host, port)
+            except Exception:
+                seen = "ok"  # a probe that fails is no reason to doubt the address
+            if seen != "ok":
+                warnings.append(address_warning(seen, host, port))
         payload = build_payload(snapshot, host, port, self._token, device_name,
                                 self.release, settings=settings, now=self._clock(),
                                 wifi="set" if wifi else "keep", ota=self._ota)
@@ -546,6 +608,7 @@ class SetupService:
                 "daemon": {"host": host, "port": port},
                 "device_name": device_name,
                 "wifi": wifi,
+                "warnings": warnings,
                 "downloads": {
                     "script": "/api/admin/presto-setup/%s/script" % handoff_id,
                     "handoff": "/api/admin/presto-setup/%s/handoff" % handoff_id},

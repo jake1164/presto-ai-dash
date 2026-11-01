@@ -228,7 +228,7 @@
             <p id="copy-setup-note" class="note error" role="status" aria-live="polite" hidden></p>
             <ol class="note">
               <li>Your browser has downloaded <a id="download-setup-script" href="#" download="presto_setup.py">presto_setup.py</a>
-                and <a id="download-setup-handoff" href="#" download="presto-setup.enc">presto-setup.enc</a>.
+                and <a id="download-setup-handoff" href="#" download="presto_setup.enc">presto_setup.enc</a>.
                 If it asked to allow several downloads, allow them. If one did not arrive, use these links.</li>
               <li>Put both files in one folder on the computer the Presto is plugged into.</li>
               <li>Run <code>python presto_setup.py</code> there and type the code when asked.
@@ -236,6 +236,7 @@
                 keeps its app and gets only its settings), keeps or replaces the device's own
                 settings, and deletes the encrypted file when setup succeeds.</li>
             </ol>
+            <p class="note error" id="setup-address-warning" role="status" aria-live="polite" hidden></p>
             <p class="note" id="setup-summary"></p>
             <div class="actions">
               <button type="button" id="prepare-another-setup">Prepare another download</button>

@@ -40,6 +40,20 @@ flowchart TB
     D -->|"Wi-Fi"| P["Presto touchscreen<br/>Display and alerts"]
 ```
 
+## What is the Pimoroni Presto?
+
+The [Pimoroni Presto](https://shop.pimoroni.com/products/presto) is a small desktop touchscreen with Wi-Fi, built around a Raspberry Pi RP2350 microcontroller. It has a square 480x480 display, seven RGB LEDs and a buzzer, which Presto AI Dash uses for its meters, colours and alerts. It is sold by Pimoroni, a UK maker shop.
+
+To run Presto AI Dash you need:
+
+- **A Presto.** [Buy it from Pimoroni](https://shop.pimoroni.com/products/presto) and check the product page for current price and stock, and for shipping to your country.
+- **A computer or server on your network** to run the daemon (see above).
+- **A 2.4 GHz Wi-Fi network** that both can reach.
+
+Not sure yet? [Try the demo in your browser](https://jake1164.github.io/presto-ai-dash/demo/) first.
+
+Presto AI Dash is an independent project, not made or endorsed by Pimoroni.
+
 ## Supported services <img align="right" src="https://img.shields.io/badge/6-integrations-238636" alt="6 integrations">
 
 <table>
@@ -90,6 +104,6 @@ If Presto AI Dash is useful, a **GitHub star** helps others discover it. Sponsor
 
 **Self-hosted software:** [Family Librarian](https://github.com/jake1164/family-librarian) · [M3Undle](https://github.com/Sydney-Elvis/M3Undle)
 
-Developers: [contribution guide](CONTRIBUTING.md) · [running the tests](https://jake1164.github.io/presto-ai-dash/docs/developers/running-the-tests/) · [internal notes](docs/README.md).
+Developers: [contribution guide](CONTRIBUTING.md) · [running the tests](https://jake1164.github.io/presto-ai-dash/docs/developers/running-the-tests/) · [developer notes](docs/README.md) · [changelog](CHANGELOG.md).
 
 MIT licensed. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).

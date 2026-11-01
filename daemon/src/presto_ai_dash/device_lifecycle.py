@@ -6,12 +6,13 @@ one device. It is deliberately conservative:
 * A report is **self-reported telemetry**, not proof. Nothing here claims a USB
   hash check, and ``usb_observation`` is always null: this work adds no remote
   receipt API.
-* A known revision mismatch is ``manual_action`` with USB instructions, because
-  there is no operational updater yet. It is never left ``pending``.
-* Operational OTA is off. No command is issued, no confirmation is
+* With ``ota_enabled`` (how the daemon always runs it), a known revision
+  mismatch is handed to the updater, which offers the device this daemon's app
+  over the air. A device that cannot take it (no ``ota-v1`` capability) gets
+  ``manual_action`` with USB instructions; it is never left ``pending``.
+* Without ``ota_enabled`` (tests only), no command is issued, no confirmation is
   acknowledged, and the retry and recovery routes answer ``ota_not_enabled``.
-  An injected updater lets the tests exercise the same code paths without
-  turning anything on.
+  An injected updater lets the tests exercise the same code paths.
 * Connection and update state are separate. A device that stops polling keeps
   its last-known update state, labelled as last-known rather than live.
 
@@ -154,8 +155,8 @@ class DeviceLifecycle(object):
         if updater is not None:
             self.updater = updater
         elif self.ota_enabled:
-            # Operational OTA exists, but only a configuration that passed the
-            # deployment gate turns it on. The shipped default is off.
+            # The daemon always constructs this with OTA on (app.py and
+            # management.py); the constructor default is off for tests.
             self.updater = OtaUpdater(self._clock)
         else:
             self.updater = DisabledUpdater()
@@ -485,7 +486,7 @@ class DeviceLifecycle(object):
 
         The device's own reported phase wins where it says something a report
         can know; otherwise the comparison against the daemon's bundle decides.
-        There is no operational updater, so a known mismatch asks for USB.
+        Used only when OTA is off (tests), so a known mismatch asks for USB.
         """
         if update is not None and update.get("phase") not in (None, "idle"):
             phase = update["phase"]

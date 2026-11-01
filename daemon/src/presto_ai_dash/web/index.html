@@ -94,8 +94,10 @@
       <h3>Presto devices</h3>
       <p class="note">Every Presto the daemon keeps a durable record for, by the device ID its
         setup created. The installed revision is what the device says about itself; it is not a
-        USB hash check, and a mismatch here asks for a USB update. A device that only sends a
-        client name and a revision appears under Clients below instead.</p>
+        USB hash check. When it differs from the app this daemon serves, the Presto updates
+        itself over the air; only a Presto that cannot (older firmware, or one not yet set up for
+        updates) asks for USB. A device that only sends a client name and a revision appears
+        under Clients below instead.</p>
       <div id="status-devices"></div>
       <h3>Daemon release</h3>
       <p class="note">Whether a newer published daemon exists, from the one registry this

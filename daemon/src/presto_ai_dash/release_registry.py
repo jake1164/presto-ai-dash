@@ -16,7 +16,7 @@ overall deadline, and a page limit. A listing that could not be read to the end
 raises ``incomplete_listing`` rather than returning what was seen, because a
 partial list could miss the newest release and be reported as "up to date".
 
-Dependency decision (see docs/release-notifications.md): ``oras-py`` was tried
+Dependency decision: ``oras-py`` was tried
 first and works anonymously, but it sets no request timeout, follows the token
 ``realm`` from a registry challenge to any host, applies no response size limit
 and brings ``requests`` and ``jsonschema`` with it. The checks here need a

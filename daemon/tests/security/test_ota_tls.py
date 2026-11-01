@@ -67,6 +67,20 @@ class OtaTlsServerTests(ManagementBase):
                     data += chunk
         return data
 
+    def test_the_server_will_not_negotiate_anything_older_than_tls_1_2(self):
+        # The floor that counts is the server's: a client cannot talk the
+        # connection down to TLS 1.0 or 1.1, whatever the device's own library
+        # allows (MicroPython has no way to set one; its Mbed TLS 3.x has no
+        # TLS 1.0 or 1.1 to offer). CodeQL's py/insecure-protocol cannot see
+        # that for presto/ota_transport.py, so this is what backs dismissing it.
+        self.assertEqual(IDENTITY.context.minimum_version, ssl.TLSVersion.TLSv1_2)
+        client = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        client.minimum_version = ssl.TLSVersion.TLSv1_2
+        client.load_verify_locations(cadata=IDENTITY.ca_der)
+        with socket.create_connection(("127.0.0.1", self.port), timeout=5) as raw:
+            with client.wrap_socket(raw, server_hostname=ota_tls.HOSTNAME) as stream:
+                self.assertIn(stream.version(), ("TLSv1.2", "TLSv1.3"))
+
     def test_the_device_transport_fetches_the_manifest_over_tls(self):
         text = self.transport().manifest(MANIFEST)
         self.assertIn('"revision"', text)

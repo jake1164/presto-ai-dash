@@ -365,9 +365,11 @@
   }
   // -- the update and device banners --------------------------------------------
 
-  // Both sit above every tab but Status (which carries the full details). A
-  // dismissal is remembered for what it was about, so something new brings the
-  // banner back; the Status tab dot stays while either condition holds.
+  // The update banner sits above every tab, Status included, which carries the
+  // full details below. The device banner sits above every tab but Status, which
+  // lists the devices. A dismissal is remembered for what it was about, so
+  // something new brings the banner back. While an update is available and not
+  // dismissed, the browser tab says so too: its title and its icon.
   const DISMISS_KEY = "presto-ai-dash.update-dismissed";
   const DEVICE_DISMISS_KEY = "presto-ai-dash.device-dismissed";
   let updateRelease = null, deviceAttention = [];
@@ -380,11 +382,20 @@
   function deviceSignature() {
     return deviceAttention.map(device => device.device_id + ":" + (device.update.reason || "")).sort().join(",");
   }
+  const PAGE_TITLE = document.title;
+  const PAGE_ICON = document.querySelector('link[rel="icon"]');
+  function renderTabIndicator(show) {
+    // For a person who has this page open in a tab they are not looking at.
+    document.title = show ? "● Update available · " + PAGE_TITLE : PAGE_TITLE;
+    if (PAGE_ICON) PAGE_ICON.setAttribute("href", show ? "/favicon-update.svg" : "/favicon.svg");
+  }
   function renderUpdateBanner() {
     const release = updateRelease;
     const available = !!release && release.state === "available" && !!release.latest;
     const quiet = activeTab === "status";
-    element("update-banner").hidden = !available || quiet || dismissed(DISMISS_KEY) === release.latest;
+    const showUpdate = available && dismissed(DISMISS_KEY) !== release.latest;
+    element("update-banner").hidden = !showUpdate;
+    renderTabIndicator(showUpdate);
     if (available) {
       element("update-banner-text").textContent = "Presto AI Dash " + release.latest +
         " is available (running " + release.running + ").";
@@ -393,7 +404,6 @@
     element("device-banner").hidden = !count || quiet || dismissed(DEVICE_DISMISS_KEY) === deviceSignature();
     element("device-banner-text").textContent = count + (count === 1
       ? " Presto needs attention." : " Presto devices need attention.");
-    element("tab-status-dot").hidden = !available && !count;
   }
   function applyRelease(release) {
     updateRelease = release || null;
@@ -2633,7 +2643,11 @@
     refreshStatus();
   }, 10000);
   element("update-banner-open").addEventListener("click", () => {
-    showTab("status"); element("tab-status").focus();
+    // The steps are under Daemon release on the Status tab; on that tab, go there.
+    const onStatus = activeTab === "status";
+    showTab("status");
+    if (onStatus) element("status-release").scrollIntoView({ behavior: "smooth", block: "start" });
+    else element("tab-status").focus();
   });
   element("update-banner-dismiss").addEventListener("click", () => {
     remember(DISMISS_KEY, updateRelease.latest);

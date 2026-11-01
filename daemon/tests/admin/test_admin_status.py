@@ -238,14 +238,32 @@ class PageWiringTests(AdminServerBase):
         self.assertEqual(status, 200)
         # The banner sits before the tab list, so every tab shows it.
         self.assertLess(html.index(b'id="update-banner"'), html.index(b'id="tablist"'))
-        self.assertIn(b'id="tab-status-dot"', html)
+        self.assertNotIn(b"tab-status-dot", html, "the dot on the Status tab is gone")
         self.assertLess(html.index(b'id="device-banner"'), html.index(b'id="tablist"'))
         status, _, script = self.request("/admin.js")
         self.assertIn(b"/api/admin/releases", script)
+        # The update banner is shown on the Status tab too; only the device banner
+        # (whose devices the tab lists) is hidden there.
+        start = script.index(b"function renderUpdateBanner")
+        body = script[start:script.index(b"function applyRelease")]
+        self.assertIn(b'element("update-banner").hidden = !showUpdate;', body)
+        self.assertIn(b"device-banner", body)
         # Read-only: the banner reads the cached result and never asks the
         # daemon to contact a registry.
         start = script.index(b"async function loadRelease")
         self.assertNotIn(b"releases/check", script[start:script.index(b"function tabFromHash")])
+
+    def test_an_available_update_is_also_shown_on_the_browser_tab(self):
+        status, _, script = self.request("/admin.js")
+        self.assertIn(b"Update available", script)
+        self.assertIn(b'"/favicon-update.svg"', script)
+        self.assertIn(b"renderTabIndicator(showUpdate)", script)
+        status, headers, icon = self.request("/favicon-update.svg")
+        self.assertEqual(status, 200)
+        self.assertEqual(headers["Content-Type"], "image/svg+xml")
+        self.assertIn(b"#FBBF24", icon)
+        _, _, plain = self.request("/favicon.svg")
+        self.assertNotIn(b"#FBBF24", plain, "the ordinary icon carries no badge")
 
     def test_the_script_keeps_the_tab_in_the_hash_and_in_local_storage(self):
         status, _, script = self.request("/admin.js")

@@ -3,38 +3,241 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Monitor AI usage, subscription limits, reset times, and service health on a dedicated display.">
+  <meta name="theme-color" content="#17283F">
+  <meta name="description" content="Presto AI Dash puts AI usage, subscription limits, reset times, and service health on a dedicated desk display. Open source, self-hosted, and built for Pimoroni Presto.">
+  <link rel="canonical" href="https://presto-dash.com/">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Presto AI Dash">
+  <meta property="og:title" content="Presto AI Dash — Always in view. Never in your way.">
+  <meta property="og:description" content="Monitor your AI usage and reset times on a dedicated desk display. No windows. No screen clutter.">
+  <meta property="og:url" content="https://presto-dash.com/">
+  <meta property="og:image" content="https://presto-dash.com/docs/images/presto-ai-dash-hero.png">
+  <meta name="twitter:card" content="summary_large_image">
   <title>Presto AI Dash — Always in view. Never in your way.</title>
   <link rel="alternate icon" href="assets/brand/presto-ai-dash-favicon.ico">
   <link rel="icon" type="image/svg+xml" href="assets/brand/presto-ai-dash-favicon.svg">
-  <style>
-    :root { color-scheme: light dark; font-family: system-ui, sans-serif; line-height: 1.6; }
-    body { max-width: 48rem; margin: 0 auto; padding: 3rem 1.5rem; }
-    h1 { margin-bottom: 0; }
-    .brand-icon { display: block; width: 96px; height: 96px; }
-    h2 { margin-top: .5rem; line-height: 1.25; }
-    nav { display: flex; flex-wrap: wrap; gap: 1rem; margin: 2rem 0; }
-    a { color: #17283f; text-underline-offset: .2em; }
-    .notice { border-left: .25rem solid #ff8b3e; padding-left: 1rem; }
-    @media (prefers-color-scheme: dark) { a { color: #31d4e8; } }
-  </style>
+  <link rel="stylesheet" href="assets/landing.css">
 </head>
 <body>
-  <main>
-    <img class="brand-icon" src="assets/brand/presto-ai-dash-icon.svg" width="96" height="96" alt="Presto AI Dash Watchful Meter icon">
-    <h1>Presto AI Dash</h1>
-    <h2>Always in view. Never in your way.</h2>
-    <p>Monitor AI usage, subscription limits, reset times, and service health across your accounts—all at a glance on a dedicated display.</p>
-    <p><strong>No windows. No screen clutter. Just the information you need.</strong></p>
-    <p class="notice"><strong>Full product landing page coming soon.</strong><br>This is a small placeholder for the future product website. The documentation and interactive demo are available now.</p>
-    <nav aria-label="Explore Presto AI Dash">
-      <a href="demo/">Try the interactive demo</a>
-      <a href="docs/">Read the documentation</a>
-      <a href="docs/getting-started/what-it-does/">Get started</a>
-      <a href="https://github.com/jake1164/presto-ai-dash">View on GitHub</a>
-    </nav>
-    <p>Presto AI Dash currently targets the <strong>Pimoroni Presto</strong> touchscreen. It requires a separate computer or server running the Python daemon or Docker collector; the Presto connects over Wi-Fi. Additional display hardware is being explored but is not yet supported.</p>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="./" aria-label="Presto AI Dash home">
+        <img src="assets/brand/presto-ai-dash-icon.svg" width="44" height="44" alt="">
+        <span>Presto <strong>AI Dash</strong></span>
+      </a>
+      <nav class="main-nav" aria-label="Primary navigation">
+        <a href="#features">Features</a>
+        <a href="#demo">Demo</a>
+        <a href="#hardware">The Presto</a>
+        <a href="#how-it-works">How it works</a>
+        <a href="docs/">Docs</a>
+      </nav>
+      <a class="header-github" href="https://github.com/jake1164/presto-ai-dash">GitHub <span aria-hidden="true">↗</span></a>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="status-dot"></span> Open-source AI usage display</p>
+          <h1>Always in view.<br><em>Never in your way.</em></h1>
+          <p class="hero-lede">Monitor AI usage, subscription limits, reset times, and service health across your accounts—all at a glance on a dedicated display.</p>
+          <p class="hero-support">No windows. No screen clutter. Just the information you need.</p>
+          <div class="actions">
+            <a class="button button-primary" href="docs/demo/">Try the interactive demo <span aria-hidden="true">↗</span></a>
+            <a class="button button-secondary" href="docs/getting-started/what-it-does/">Get started <span aria-hidden="true">→</span></a>
+          </div>
+          <p class="hero-note">Free and open source <span aria-hidden="true">·</span> Self-hosted <span aria-hidden="true">·</span> For Pimoroni Presto</p>
+        </div>
+        <figure class="hero-figure">
+          <div class="hero-device hero-art">
+            <img src="docs/images/presto-ai-dash-hero.png" width="1920" height="960" alt="Physical Pimoroni Presto running AI Dash, showing usage bars, reset countdowns, and local service status">
+          </div>
+          <figcaption>Real device. Real dashboard. Your desk, not another window.</figcaption>
+        </figure>
+      </div>
+      <div class="container service-strip" aria-label="Supported AI services">
+        <span class="strip-label">Works with</span>
+        <ul>
+          <li>Claude</li><li>Codex</li><li>OpenCode Go</li><li>Ollama Cloud</li><li>Ollama</li><li>LiteLLM</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section features-section" id="features">
+      <div class="container">
+        <div class="section-intro">
+          <p class="kicker">SEE WHAT MATTERS</p>
+          <h2>Your AI usage, without the dashboard juggling.</h2>
+          <p>One glance tells you how much room you have left, when a limit resets, and whether your local AI services are healthy.</p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-card">
+            <div class="feature-icon" aria-hidden="true">%</div>
+            <h3>Know your limits</h3>
+            <p>See usage across multiple AI subscriptions, with the provider's actual quota periods and reset times.</p>
+          </article>
+          <article class="feature-card">
+            <div class="feature-icon" aria-hidden="true">↺</div>
+            <h3>Know when they reset</h3>
+            <p>No guessing which window you're looking at. Track countdowns and remaining allowance at a glance.</p>
+          </article>
+          <article class="feature-card">
+            <div class="feature-icon" aria-hidden="true">●</div>
+            <h3>Know what's healthy</h3>
+            <p>Check local models, gateway activity, alerts, and stale readings without opening another monitoring tab.</p>
+          </article>
+        </div>
+        <div class="screen-showcase">
+          <figure>
+            <img src="docs/images/device-claude.jpg" width="520" height="520" alt="Claude usage detail on the Presto touchscreen" loading="lazy">
+            <figcaption>Subscription quotas</figcaption>
+          </figure>
+          <figure>
+            <img src="docs/images/device-codex.jpg" width="520" height="520" alt="Codex usage and reset detail on Presto" loading="lazy">
+            <figcaption>Reset countdowns</figcaption>
+          </figure>
+          <figure>
+            <img src="docs/images/device-litellm.jpg" width="520" height="520" alt="LiteLLM gateway activity on Presto" loading="lazy">
+            <figcaption>Local service activity</figcaption>
+          </figure>
+        </div>
+        <p class="detail-link"><a href="docs/concepts/stale-readings/">Missing or old data is labeled honestly, never presented as a confident zero <span aria-hidden="true">→</span></a></p>
+      </div>
+    </section>
+
+    <section class="section workspace-section" id="desk">
+      <div class="container">
+        <div class="section-intro centered">
+          <p class="kicker">A BETTER PLACE FOR YOUR STATS</p>
+          <h2>Your screens are for working.<br>Not watching usage limits.</h2>
+          <p>Keep coding, creating, and working without giving up part of your desktop. Presto AI Dash stays in sight on its own little screen.</p>
+        </div>
+        <figure class="workspace-photo">
+          <img src="assets/desk-workspace.jpg" width="1600" height="1205" alt="Real dual-monitor development workspace with a small Pimoroni Presto displaying AI usage below the monitors" loading="lazy">
+          <figcaption>A working desk, not a staged render. Monitor contents softened for privacy.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="section demo-section" id="demo">
+      <div class="container split-section demo-split">
+        <div class="split-copy">
+          <p class="kicker">TRY BEFORE YOU INSTALL</p>
+          <h2>See it running in your browser.</h2>
+          <p>The interactive demo runs the actual Presto app interface with clearly marked sample data. Explore the screens and controls before buying hardware or configuring an account.</p>
+          <a class="button button-dark" href="docs/demo/">Launch the interactive demo <span aria-hidden="true">↗</span></a>
+          <p class="fine-print">No Presto, provider credentials, or installation needed for the demo.</p>
+        </div>
+        <div class="demo-visual">
+          <div class="demo-frame"><img src="docs/images/home.png" width="240" height="240" alt="Preview of the Presto AI Dash home screen" loading="lazy"></div>
+          <span class="demo-caption">The real interface · sample data</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="section hardware-section" id="hardware">
+      <div class="container split-section hardware-split">
+        <div class="hardware-photo">
+          <img src="assets/presto-on-desk.jpg" width="940" height="728" alt="Close-up of a Pimoroni Presto on a real desk running Presto AI Dash" loading="lazy">
+        </div>
+        <div class="split-copy hardware-copy">
+          <p class="kicker">MEET THE HARDWARE</p>
+          <h2>Meet the Pimoroni Presto.</h2>
+          <p class="hardware-tagline">A little screen with a big job.</p>
+          <p>Presto is a compact, programmable desktop touchscreen. With AI Dash, it becomes a dedicated home for your AI subscriptions, usage limits, and service health.</p>
+          <ul class="hardware-specs">
+            <li><span aria-hidden="true">▣</span> 4-inch, 480 × 480 touchscreen</li>
+            <li><span aria-hidden="true">⌁</span> Wi-Fi connectivity</li>
+            <li><span aria-hidden="true">✦</span> Seven RGB ambient LEDs</li>
+            <li><span aria-hidden="true">♪</span> Built-in alert speaker</li>
+          </ul>
+          <div class="actions">
+            <a class="button button-dark" href="https://shop.pimoroni.com/products/presto" rel="noopener noreferrer">Explore Presto at Pimoroni <span aria-hidden="true">↗</span></a>
+            <a class="text-button" href="docs/getting-started/set-up-the-presto/">Already have one? Set it up <span aria-hidden="true">→</span></a>
+          </div>
+          <p class="fine-print">The standard Presto device is sufficient; the Starter Kit's extra sensors are not required. Presto AI Dash is an independent project, not made or endorsed by Pimoroni.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section how-section" id="how-it-works">
+      <div class="container">
+        <div class="section-intro centered">
+          <p class="kicker">SIMPLE BY DESIGN</p>
+          <h2>Your services. Your computer. Your display.</h2>
+          <p>Presto is the eyes of the system. A lightweight collector running on a separate computer or server does the monitoring.</p>
+        </div>
+        <div class="architecture" aria-label="How Presto AI Dash works">
+          <div class="architecture-node">
+            <span class="node-number">01</span>
+            <h3>Your AI services</h3>
+            <p>Cloud subscriptions and local AI tools you choose to connect.</p>
+          </div>
+          <span class="architecture-arrow" aria-hidden="true">→</span>
+          <div class="architecture-node required">
+            <span class="node-number">02 · REQUIRED</span>
+            <h3>Python / Docker collector</h3>
+            <p>Runs on your computer or server, reads usage data, and keeps provider credentials there.</p>
+          </div>
+          <span class="architecture-arrow" aria-hidden="true">→</span>
+          <div class="architecture-node">
+            <span class="node-number">03 · WI-FI</span>
+            <h3>Pimoroni Presto</h3>
+            <p>Shows fresh readings, alerts, and status at a glance.</p>
+          </div>
+        </div>
+        <div class="privacy-note"><strong>Privacy by design.</strong> The application has no telemetry or call-home tracking. Your configured services and local daemon are the only systems involved. <a href="docs/privacy/">Read the privacy details <span aria-hidden="true">→</span></a></div>
+      </div>
+    </section>
+
+    <section class="section integrations-section" id="integrations">
+      <div class="container">
+        <div class="section-intro centered">
+          <p class="kicker">CONNECT WHAT YOU USE</p>
+          <h2>Cloud subscriptions and local tools, together.</h2>
+          <p>Choose just the sources you use. Each one has a guide explaining its metrics, collection method, and limitations.</p>
+        </div>
+        <div class="integrations-grid">
+          <a href="docs/guides/claude/"><strong>Claude</strong><span>Subscription limits and local activity</span></a>
+          <a href="docs/guides/codex/"><strong>OpenAI Codex</strong><span>Quotas, reset times, and credits</span></a>
+          <a href="docs/guides/opencode-go/"><strong>OpenCode Go</strong><span>Subscription usage windows</span></a>
+          <a href="docs/guides/ollama-cloud/"><strong>Ollama Cloud</strong><span>Cloud activity and spend</span></a>
+          <a href="docs/guides/ollama/"><strong>Ollama</strong><span>Local model and server health</span></a>
+          <a href="docs/guides/litellm/"><strong>LiteLLM</strong><span>Gateway activity and usage</span></a>
+        </div>
+        <p class="detail-link"><a href="https://github.com/jake1164/presto-ai-dash/issues/new/choose">Missing a service? Request a new source <span aria-hidden="true">→</span></a></p>
+      </div>
+    </section>
+
+    <section class="section final-section" id="get-started">
+      <div class="container final-inner">
+        <p class="kicker">READY WHEN YOU ARE</p>
+        <h2>Put your AI usage on your desk.</h2>
+        <p>Start with the browser demo, or set up the collector and connect your Presto. Every integration is optional.</p>
+        <div class="actions centered-actions">
+          <a class="button button-primary" href="docs/getting-started/install-the-daemon/">Read the setup guide <span aria-hidden="true">→</span></a>
+          <a class="button button-secondary" href="docs/getting-started/install-with-docker/">Install with Docker <span aria-hidden="true">→</span></a>
+        </div>
+        <p class="future-note">Built for Pimoroni Presto today. Exploring other dedicated displays for the future.</p>
+      </div>
+    </section>
   </main>
-  <footer><a href="docs/privacy/">Privacy</a></footer>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-brand"><img src="assets/brand/presto-ai-dash-icon.svg" width="32" height="32" alt=""><span>Presto AI Dash <small>· MIT licensed</small></span></div>
+      <nav aria-label="Footer navigation">
+        <a href="docs/">Documentation</a>
+        <a href="docs/privacy/">Privacy</a>
+        <a href="https://github.com/jake1164/presto-ai-dash">GitHub</a>
+        <a href="https://github.com/sponsors/jake1164">Sponsor</a>
+        <a href="https://buymeacoffee.com/jake1164s">Buy Me a Coffee</a>
+      </nav>
+    </div>
+  </footer>
 </body>
 </html>

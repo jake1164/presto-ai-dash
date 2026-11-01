@@ -756,7 +756,9 @@ def slot_targets():
     slots = []
     for name in SLOT_NAMES:
         for file_name, data in sorted(BUNDLE["slot"]["files"].items()):
-            slots.append((SLOT_ROOT + "/" + name + "/" + file_name, data))
+            # A wheel's bundle names its slot files with a leading slash, a
+            # checkout's without; the installed path must not carry a doubled one.
+            slots.append((SLOT_ROOT + "/" + name + "/" + file_name.lstrip("/"), data))
     boot = sorted(BUNDLE["boot"]["files"].items(), key=lambda item: item[0] == BOOT_ENTRY)
     return slots, boot
 

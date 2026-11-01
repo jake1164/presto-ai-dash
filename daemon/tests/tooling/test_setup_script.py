@@ -59,14 +59,26 @@ CONFIG = "/ai_dash_files/config.py"
 SECRETS = "/secrets.py"
 
 
-def module_source():
-    return device_setup.render_setup_script(BUNDLE, "0.50.0").decode("utf-8")
+def wheel_bundle():
+    """The bundle as an installed daemon has it: slot files named with a leading slash.
+
+    A checkout names them bare; the container image and the wheel do not, and
+    that is the shape every real setup download carries.
+    """
+    wheel = dict(BUNDLE)
+    wheel["slot"] = dict(BUNDLE["slot"])
+    wheel["slot"]["files"] = {"/" + name: data for name, data in BUNDLE["slot"]["files"].items()}
+    return wheel
 
 
-def rendered_module():
+def module_source(bundle=BUNDLE):
+    return device_setup.render_setup_script(bundle, "0.50.0").decode("utf-8")
+
+
+def rendered_module(bundle=BUNDLE):
     module = types.ModuleType("rendered_presto_setup")
     module.__dict__["__file__"] = "presto_setup.py"
-    exec(compile(module_source(), "presto_setup.py", "exec"), module.__dict__)
+    exec(compile(module_source(bundle), "presto_setup.py", "exec"), module.__dict__)
     return module
 
 
@@ -184,20 +196,22 @@ def slot_install():
 
 
 class ScriptCase(unittest.TestCase):
+    bundle = BUNDLE
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
         self.folder = Path(self.temp.name)
 
-    def handoff(self, code, bundle=BUNDLE, host="192.168.1.50", wifi="set", ota=IDENTITY):
-        payload = device_setup.build_payload(bundle, host, 8787, TOKEN, "presto", "0.50.0",
-                                             wifi=wifi, ota=ota)
+    def handoff(self, code, bundle=None, host="192.168.1.50", wifi="set", ota=IDENTITY):
+        payload = device_setup.build_payload(bundle or self.bundle, host, 8787, TOKEN, "presto",
+                                             "0.50.0", wifi=wifi, ota=ota)
         path = self.folder / device_setup.HANDOFF_NAME
         path.write_bytes(device_setup.build_handoff(payload, code))
         return path
 
     def run_script(self, path, answers, device, arguments=()):
-        module = rendered_module()
+        module = rendered_module(self.bundle)
         # What is plugged into this computer must not decide whether a test passes.
         module.list_ports = lambda: [("COM3", "USB Serial Device")]
         said, asked = [], list(answers)
@@ -332,6 +346,37 @@ class FirstTimeTests(ScriptCase):
         self.assertFalse(device.writes)
         self.assertTrue(any("different Presto app" in text for text in said))
         self.assertTrue(path.exists())
+
+
+class WheelShapedBundleTests(ScriptCase):
+    """A setup download from an installed daemon names slot files with a leading slash."""
+
+    bundle = wheel_bundle()
+
+    def installed_modules(self, device):
+        return {path: data for path, data in device.files.items()
+                if path.startswith("/ai_dash_slots/") and path.endswith(".py")}
+
+    def test_every_module_is_installed_once_at_a_clean_path_and_kept(self):
+        code = device_setup.new_unlock_code()
+        device = FakeDevice(slot_install(), device_id="a" * 32, name="desk")
+        status, said = self.run_script(self.handoff(code, wifi="keep"), [code, "yes"], device)
+        self.assertEqual(status, 0, said)
+        self.assert_slot_layout(device)
+        for path in device.files:
+            self.assertNotIn("//", path)
+        for name in ("a", "b"):
+            wanted = {"/ai_dash_slots/%s/%s" % (name, file_name)
+                      for file_name in BUNDLE["slot"]["files"] if file_name.endswith(".py")}
+            self.assertEqual(wanted - set(self.installed_modules(device)), set())
+
+    def test_a_fresh_presto_gets_the_same_install(self):
+        code = device_setup.new_unlock_code()
+        device = FakeDevice()
+        status, _said = self.run_script(self.handoff(code),
+                                        [code, "Home Wi-Fi", "s3cret-pass", "yes"], device)
+        self.assertEqual(status, 0)
+        self.assert_slot_layout(device)
 
 
 class PayloadValidationTests(unittest.TestCase):

@@ -46,7 +46,8 @@ ASSETS = {"/": ("index.html", "text/html; charset=utf-8"),
           "/admin.css": ("admin.css", "text/css; charset=utf-8"),
           "/presto-ai-dash-icon.svg": ("presto-ai-dash-icon.svg", "image/svg+xml"),
           "/favicon.ico": ("presto-ai-dash-favicon.ico", "image/x-icon"),
-          "/favicon.svg": ("presto-ai-dash-favicon.svg", "image/svg+xml")}
+          "/favicon.svg": ("presto-ai-dash-favicon.svg", "image/svg+xml"),
+          "/favicon-update.svg": ("presto-ai-dash-favicon-update.svg", "image/svg+xml")}
 # The names the admin page always answers to: this machine, over plain HTTP.
 LOOPBACK_NAMES = ("127.0.0.1", "localhost")
 

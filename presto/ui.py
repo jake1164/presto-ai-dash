@@ -175,6 +175,9 @@ LIFECYCLE_ARROW_SHAPE = (
 # The information view a tap on the dock opens. Read-only: it starts no
 # update, spends no retry and dismisses no warning.
 LIFECYCLE_VIEW_TITLE = "Device notice"
+
+# The font of a Home row's reset and update notes.
+NOTE_FONT = "bitmap8"
 LIFECYCLE_VIEW_RELEASE = "Daemon release"
 LIFECYCLE_VIEW_CLOSE = "TAP TO CLOSE"
 LIFECYCLE_VIEW_TOP = 114
@@ -581,8 +584,9 @@ def _draw_quota_row(display, palette, row, y, row_width, stale):
     _marker(display, palette, row, 14, y, MARKER, stale)
     note, note_rgb = _freshness(row, stale)
     update, update_rgb = _update_note(row, stale)
-    display.set_font("bitmap6")
-    # Small secondary notes leave the account name readable at 240px.
+    # The reset and update notes use the name's font: bitmap6 draws lowercase
+    # as blocky small capitals that are hard to read from across a desk.
+    display.set_font(NOTE_FONT)
     note_w = display.measure_text(note, 1) + 2 if note else 0
     update_w = display.measure_text(update, 1) + 8 if update else 0
     display.set_font("bitmap8")
@@ -616,10 +620,10 @@ def _draw_quota_row(display, palette, row, y, row_width, stale):
         _text(display, palette, badge_text, cursor, y,
               AMBER if badge.get("amber") else INK_DIM, scale=1)
     if note:
-        display.set_font("bitmap6")
+        display.set_font(NOTE_FONT)
         _text(display, palette, note, right - note_w, y, note_rgb, scale=1)
     if update:
-        display.set_font("bitmap6")
+        display.set_font(NOTE_FONT)
         _text(display, palette, update, right - note_w - update_w, y, update_rgb, scale=1)
 
     display.set_font("bitmap8")

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "presto-ai-dash"
-version = "0.50.0rc8"
+version = "0.50.0rc9"
 description = "Shows your AI usage and quota limits on a Pimoroni Presto display: a small daemon, an admin page and the device app."
 readme = "README.md"
 requires-python = ">=3.11"

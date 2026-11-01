@@ -75,7 +75,9 @@ p { margin-bottom: 1.2em; }
 .hero-note span { padding:0 .35em; color:var(--orange); }
 .hero-figure { position:relative; margin:0; }
 .hero-device { overflow:hidden; border-radius:26px; border:1px solid #58728c; padding:13px; background:linear-gradient(145deg,#273e57,#122137); box-shadow:0 26px 70px rgba(0,0,0,.44); }
-.hero-device img { aspect-ratio:1/1; width:100%; object-fit:cover; border-radius:16px; }
+/* Show the device from the README hero artwork without duplicating its built-in headline and source labels. */
+.hero-art { aspect-ratio:1.15; }
+.hero-art img { display:block; width:200%; max-width:none; height:auto; aspect-ratio:auto; object-fit:unset; transform:translateX(-50%); border-radius:0; }
 .hero-figure figcaption { color:#9ab0c7; text-align:center; font-size:.8rem; margin-top:17px; }
 .service-strip { padding:19px 0 24px; display:flex; align-items:center; gap:28px; border-top:1px solid #304259; }
 .strip-label { flex:none; text-transform:uppercase; letter-spacing:.16em; font-size:.7rem; font-weight:750; color:#94aabd; }

@@ -113,11 +113,33 @@ class ClientRegistryTests(unittest.TestCase):
         disconnected = self.registry.clients(now=moment + 46, poll_interval=15)
         self.assertFalse(disconnected[0]["connected"])
 
-    def test_the_clients_are_listed_newest_first(self):
-        self.record(name="older")
-        self.record(name="newer")
-        self.assertEqual([client["name"] for client in self.registry.clients()],
-                         ["newer", "older"])
+    def names(self, **kwargs):
+        return [client["name"] for client in self.registry.clients(**kwargs)]
+
+    def test_the_clients_are_listed_in_the_order_they_were_first_seen(self):
+        self.record(name="first")
+        self.record(name="second")
+        self.record(name="third")
+        self.assertEqual(self.names(), ["first", "second", "third"])
+
+    def test_a_fetch_never_moves_a_client(self):
+        self.record(name="first")
+        self.record(name="second")
+        for _ in range(3):
+            self.record(name="first")
+            self.assertEqual(self.names(), ["first", "second"])
+        self.record(name="second")
+        self.assertEqual(self.names(), ["first", "second"])
+
+    def test_connected_clients_come_before_ones_that_are_not(self):
+        self.record(name="gone")
+        self.now += 100
+        self.record(name="here")
+        self.now += 1
+        # "gone" was seen first, but has not fetched for three poll intervals.
+        self.assertEqual(self.names(now=self.now, poll_interval=15), ["here", "gone"])
+        # Everyone disconnected: still the order they were first seen.
+        self.assertEqual(self.names(now=self.now + 1000, poll_interval=15), ["gone", "here"])
 
     def test_nothing_is_kept_after_a_restart(self):
         self.record()

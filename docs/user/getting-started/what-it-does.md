@@ -93,7 +93,7 @@ anything.
 
 - **No analytics in the app.** There is no telemetry, no counter and no crash
   reporting. Only the documentation website you are reading counts page views,
-  with Google Analytics; see [Privacy](../privacy/index.md#the-documentation-site).
+  with Google Analytics; see [Privacy](../privacy/index.md#the-website-and-the-demo.
 - **No cloud service.** There is no account to create and no vendor to sign
   up with.
 - **No request history for services that do not keep one.** Ollama exposes

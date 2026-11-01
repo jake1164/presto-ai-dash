@@ -217,3 +217,24 @@ p { margin-bottom: 1.2em; }
   .button,.integrations-grid a,.main-nav a,.header-github { transition:none; }
   .button:hover,.integrations-grid a:hover { transform:none; }
 }
+
+/* The footer's analytics note, and the cookie banner it links to. The banner
+   starts hidden and javascripts/analytics.js reveals it only when no stored
+   choice exists, so a reader without JavaScript is never tracked and never
+   shown a question they could not answer. */
+.footer-note { flex-basis:100%; margin:0; font-size:.78rem; color:#8ca3b8; }
+.footer-note a { text-decoration:underline; }
+.consent { position:fixed; inset-inline:0; bottom:0; z-index:50; background:var(--midnight);
+  color:#dbe8f4; border-top:1px solid #354b61; box-shadow:0 -14px 34px rgb(6 16 28 / .38); }
+.consent[hidden] { display:none; }
+.consent-inner { display:flex; align-items:center; justify-content:space-between;
+  flex-wrap:wrap; gap:16px; padding-block:18px; }
+.consent-text { margin:0; max-width:64ch; font-size:.88rem; }
+.consent-text strong { color:#fff; }
+.consent-text a { color:var(--cyan); text-decoration:underline; }
+.consent-actions { display:flex; gap:10px; }
+.consent-actions .button { width:auto; }
+@media (max-width:560px) {
+  .consent-inner { flex-direction:column; align-items:stretch; }
+  .consent-actions { flex-direction:column; }
+}

@@ -82,7 +82,7 @@ readable in the database file, which is your own file on your own machine.
 **The app sends nothing to the project, its author or any third party.** There
 is no telemetry, no analytics, no crash reporting, no counter and no license
 check. (The documentation website is a separate matter; see
-[The documentation site](#the-documentation-site).) The daemon never contacts a server that is not one of the services you
+[The website and the demo](#the-website-and-the-demo).) The daemon never contacts a server that is not one of the services you
 configured. It does not follow a redirect to another host, and a saved key is
 never sent to a new address: changing a source's URL asks for the key again.
 
@@ -92,32 +92,47 @@ Go, Ollama Cloud and LiteLLM are the ones that use a key), and requests from
 the Presto, the admin page and any remote collector to your own daemon. The
 documentation site you are reading is covered below.
 
-## The documentation site
+## The website and the demo
 
-The site is static files on GitHub Pages, so GitHub, which hosts them, sees the
-visits as any web host does. On top of that, **the site uses Google Analytics 4**
-(Google's `googletagmanager.com` script) to count visits, **but only if you
-accept it**.
+The product page, this documentation and the interactive demo are static files
+on GitHub Pages, so GitHub, which hosts them, sees the visits as any web host
+does. On top of that, **the site uses Google Analytics 4** (Google's
+`googletagmanager.com` script) to see which pages are read and whether the demo
+is used, **but only if you accept it**.
 
 - **Your choice comes first:** the first time you visit, a banner asks whether
   Google Analytics may run. Until you accept, the script is not loaded, no
   request goes to Google and no analytics cookie is set. If you reject, none of
-  that ever happens. Your choice is remembered in your browser, and **Change
-  cookie settings** in the footer of every page lets you change it.
+  that ever happens. Your choice is remembered in your browser, **one choice
+  covers the product page, the documentation and the demo**, and **Change
+  cookie settings** in the footer of either lets you change it.
 
 - **What it collects:** the standard page-view and visit data Google Analytics
   gathers: which page was read, roughly when, the browser and device type, an
-  approximate location, and where the visitor came from. It sets cookies in
-  your browser to tell visits apart.
+  approximate location, and where the visitor came from. It also counts a few
+  deliberate actions: starting the demo, choosing one of its scenes, and
+  clicking through to an installation guide, the repository or the hardware
+  page. It sets cookies in your browser to tell visits apart.
+- **What it never collects:** nothing about the accounts the demo shows. The
+  demo's sample data is not sent, and neither is anything you type. The only
+  demo figures reported are the names of the scenes in its menu, which are
+  labels from the demo's own script.
 - **Why:** only to see which help pages are read and which are ignored, so
-  low-value pages can be trimmed or rewritten. There is no advertising and the
-  data is not sold.
+  low-value pages can be trimmed or rewritten, and to see whether the demo and
+  the installation guides help people decide. There is no advertising and the
+  data is not sold. The full list of what is counted is in the project's
+  developer notes; it is short and does not change without the page changing.
 - **What it does not do:** Google Signals is turned off, so the data is not
   joined to the Google accounts of signed-in visitors.
 - **Opting out:** reject the banner, or use **Change cookie settings** later.
   A content blocker also works. The application itself never loads this script,
   and nothing on this site is needed to run the daemon or the Presto.
 - **Google's policy:** [policies.google.com/privacy](https://policies.google.com/privacy).
+
+**This is the website only.** The application you install — the daemon, its
+admin page and the Presto itself — contains no analytics of any kind: no
+Google Analytics, no other service, no counter. Installing it adds nothing to
+what leaves your machine beyond the provider requests described above.
 
 Nothing else is requested from another host: no web fonts, no other scripts,
 and the repository link in the header is a plain link that fetches nothing.

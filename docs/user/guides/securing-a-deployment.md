@@ -164,11 +164,16 @@ there and does not sign its own rows. The control today is the one above: keep
 it in a folder only you can write to, and treat the Problems warning as a
 fault to fix, not a notice to ignore.
 
-**Back up the database and the key separately**, and keep both. Losing the key
-loses the stored provider keys; the rest of the database still opens. To keep
-the key off the disk entirely, set it as `DASH_ENCRYPTION_KEY`
-(`python -m presto_ai_dash.app --generate-key` prints one), and store it in
-your password manager or your service manager's secret store.
+**Back up the database and the key separately**, and keep both. The daemon
+will not start without the key it encrypted with. If the key is missing or
+wrong, or a stored credential no longer decrypts with it, startup stops with
+an error and the daemon neither makes a replacement key nor changes any
+stored record. Restore the original key (the key file, or `DASH_ENCRYPTION_KEY`)
+and start again. There is no automatic key rotation; to change a provider key,
+replace it on the admin page. To keep the key off the disk entirely, set it as
+`DASH_ENCRYPTION_KEY` (`python -m presto_ai_dash.app --generate-key` prints
+one), and store it in your password manager or your service manager's secret
+store.
 
 ## Docker
 

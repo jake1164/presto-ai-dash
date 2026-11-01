@@ -1,8 +1,7 @@
 # Presto AI Dash documentation site.
 #
-# The published site is built from docs/user/ only. Everything else under
-# docs/ (the plan, the readiness notes, the milestones) stays in the
-# repository and is never published.
+# The published site is built from docs/user/ only. The few developer notes
+# elsewhere under docs/ stay in the repository and are never published.
 #
 # Privacy: this site loads one third-party script in a current browser, Google
 # Analytics 4 (extra.analytics below), to see which help pages are read, and

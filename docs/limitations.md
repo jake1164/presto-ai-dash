@@ -1,156 +1,50 @@
-> Public, user-facing version: <https://jake1164.github.io/presto-ai-dash/developers/preview-and-device/#what-the-preview-does-not-show>, <https://jake1164.github.io/presto-ai-dash/troubleshooting/daemon-offline/>. This file is the internal reference and may go into more detail.
->
-> Corrections (2026-10-21):
->
-> - The LiteLLM source is implemented (M5); "the planned LiteLLM source" below fails soft as described.
+# What the tests cannot cover
 
-# Limitations
+Developer notes. The user-facing limits of each service are on its guide on the
+documentation site; this page is only the facts a contributor needs when a test
+passes and the device still misbehaves.
 
-The daemon supports subscription and local-service readings, Ollama health, and
-LiteLLM routed usage. Demo mode can replace them with sample data on request.
-The Presto app polls the daemon with the shared token. On-device Wi-Fi, authenticated polling, and recovery are verified in
-`milestones.md`. Trends are deferred. Live Home shows real subscription quota
-bars (Codex, Claude, OpenCode Go, Ollama Cloud) and separate cloud activity; only the static
-preview mode uses fixed values, labelled DEMO. Known gaps: Codex dashboard
-sign-in, Claude quota from the VS Code panel (it does not run the status line,
-so only terminal sessions report quota; the optional usage cache reader adds
-an unofficial route for panel users). Ollama Cloud's rolling activity range
-differs from its credit billing period; its balance now comes from `/api/balance`.
+## Hardware
 
-Things this project honestly cannot do, and why. If a number on the Presto
-looks wrong or missing, it is probably here.
-
-## Direct Ollama usage cannot be fully measured
-
-Ollama has no endpoint that reports past requests. There is no prompt log, no
-token history, no duration history. The API exposes:
-
-- what models exist (`/api/tags`)
-- what is loaded right now (`/api/ps`)
-- the version (`/api/version`)
-- timing fields **for a request you just made** (`/api/generate`)
-
-So "tokens used today against Ollama directly" is not reconstructable from
-Ollama alone. The project plan says this in §6.3 and it is correct.
-
-**What the daemon shows:** reachability, version, loaded model, available model count,
-and — only if a collector has written a samples file — the last measured
-request with a computed tokens/sec.
-
-**What v0 does not do:** invent a number. If there is no measured sample the
-card reads "last measured: unavailable".
-
-**A future fix:** a desktop collector, local Ollama shim, wrapper, or voluntary
-reporter that observes requests and supplies samples the daemon can read.
-Tokens/sec arithmetic is implemented in M4 and uses the sample's nanosecond
-duration. The collector is future work without a release assignment.
-
-## LiteLLM sees only routed traffic
-
-The target topology is `home-server -> LiteLLM -> desktop-pc -> Ollama`,
-with direct `desktop-pc -> Ollama` calls as well. LiteLLM usage totals cover
-only the first path. They must never be presented as complete desktop usage.
-
-## LiteLLM spend may be permanently unavailable
-
-LiteLLM spend tracking requires a database. If the proxy runs without
-`DATABASE_URL`, there is nothing to report. The source shows spend as
-unavailable when LiteLLM does not return it.
-
-The card shows **"unavailable"**, not `$0.00`. Zero spend and unknown spend are
-different facts and conflating them would be dishonest.
-
-## LiteLLM rate-limit warnings are not synthesised
-
-There is no verified LiteLLM endpoint that reports "you are approaching a rate
-limit". Rather than guess, v0 does not report it.
-
-The `rate_limited` and `near_limit` statuses still exist in the status model and
-in the demo scenario, so the UI, LED and sound paths are fully exercised. A
-future source can emit them properly.
-
-## LiteLLM "recent errors" is a count, not a list
-
-`GET /user/daily/activity` returns `failed_requests` — a number for the day.
-It does not return the individual failures. `GET /spend/logs` would, but that
-is out of scope for a glanceable desk display.
-The count remains visible as `Errors today`; it does not by itself trigger a
-warning because it cannot distinguish earlier failures from current ones.
-Detecting an ongoing request-failure incident needs a future rule based on
-recent failures rather than the whole day's total.
-
-## LiteLLM endpoints are a moving target
-
-LiteLLM's API stability policy is explicit: only endpoints present in the
-OpenAPI spec are a public contract. Everything else is private and may change
-or disappear in any release without notice.
-
-The planned LiteLLM source must fail soft. An unexpected status code, a
-missing field, or a 404 degrades that one metric to "unavailable". It never
-raises, and it never takes the card down with it.
-
-If LiteLLM upgrades and a metric goes blank, this is the first place to look.
-
-## Claude's usage cache is an unofficial file
-
-The VS Code panel does not run Claude Code's status line, so a panel user
-gets no quota from it. The optional usage cache reader reads the JSON file
-Claude Code writes for its own `/usage` dialog (`~/.claude.json` in the
-default layout) and turns it into quota numbers. Three limits follow from
-that:
-
-- **The format is not an official interface.** It can change without notice.
-  The reader then reports the usage cache as unavailable and says which
-  field changed; the terminal export and every other source are unaffected.
-- **The cache refreshes at irregular moments**, not on every response, and
-  the file can be hours old. Opening `/usage` in Claude Code forces a
-  refresh. The numbers are always labelled with their age and their source.
-- **The file is sensitive.** It also holds the account id, the email, the
-  organisation, the project history and the MCP server list. The reader
-  opens it read-only, extracts only the quota fields and never writes,
-  renames, locks or forwards anything else.
-
-The banked "Full reset" of Claude's usage page is not in this file, and the
-reader never guesses at a window it does not have.
-
-## Trends need history
-
-Up/down indicators compare the newest snapshot to the oldest within a 24 hour
-lookback. With fewer than two snapshots in that window there is nothing to
-compare, and the indicator reads "–" rather than guessing a direction.
-
-## What cannot be automated in tests
-
-The daemon is testable on a development machine without external services;
-HTTP tests use localhost networking. The
-Presto is not. These require physical hardware and are covered by the
-Milestone 13 release manual checklist (formerly M7):
+The daemon is testable on a development machine with no external services; the
+HTTP tests use localhost. The Presto is not. These need the physical board:
 
 | Area | Why it cannot be automated |
 | --- | --- |
-| Pixels on the 480×480 IPS panel | Needs the ST7701 driver and PicoGraphics |
+| Pixels on the 480x480 IPS panel | Needs the ST7701 driver and PicoGraphics |
 | Capacitive touch gestures | Needs the FT6236 controller |
-| Seven SK6812 LED colours and brightness | Needs the LED strip on GPIO 33 |
+| The seven SK6812 LEDs, colour and brightness | Needs the LED strip on GPIO 33 |
 | Piezo sound | Needs the buzzer on GPIO 43 |
 | Wi-Fi association | Needs the RM2/CYW43439 radio and a real access point |
-| Backlight and battery behaviour | Needs the power hardware |
-| Physical boot-button press | Needs the button on GPIO 46 |
+| Backlight and battery | Needs the power hardware |
+| The boot button | Needs the button on GPIO 46 |
+| Memory and CPU limits | PSL runs the real app on the host, not on the RP2350 |
 
-The mitigation is structural rather than procedural. Everything decidable
-without hardware lives in pure modules (`cards.py`, `gestures.py`, `alerts.py`,
-`net.py`) that are unit-tested on the host. Only `main.py` imports `presto` or
-`machine`, and it is a thin adapter. A test also enforces that layering, so the
-pure modules cannot silently grow a hardware dependency.
+PSL (`tools/presto_preview/`) runs the real `main.py` and `ui.py` against an
+emulated 240x240 display with the firmware's own bitmap fonts, so layout, text
+fit and gestures are checked. It does not show sound, LEDs, memory use or
+non-ASCII text. See [The preview and the device sync](https://jake1164.github.io/presto-ai-dash/docs/developers/preview-and-device/).
 
-### A known touch caveat
+The mitigation is structural. Everything decidable without hardware lives in
+modules that are unit-tested on the host (`cards.py`, `gestures.py`, `alerts.py`,
+`net.py`, `home.py`). Only `main.py` and `ui.py` may import `presto`, `machine`,
+`picographics` or `picovector`, and `daemon/tests/device/test_presto_structure.py`
+enforces it. The one other exception is the production `bootstrap/boot.py`, which
+imports `machine` to arm the watchdog.
 
-Pimoroni documents that two touches aligned horizontally — for example a
-two-finger vertical scroll — are not correctly registered. This is a property
-of the touch controller, not a bug in this project. The gesture recogniser
-therefore only acts on single-touch input and explicitly ignores multi-touch.
+A change under `presto/` changes the app revision, which is what makes a deployed
+Presto fetch an update over the air. That includes a comment or a docstring.
+
+## Touch
+
+Pimoroni documents that two touches aligned horizontally, for example a
+two-finger vertical scroll, are not registered correctly. That is the touch
+controller, not this project. The gesture recogniser therefore acts only on a
+single touch and ignores multi-touch (`presto/gestures.py`).
 
 ## Not a security boundary
 
-The shared token provides bearer authentication for trusted LAN use. It has no
-per-user identity or expiry, and travels in a header over plain HTTP. Do not expose the
-daemon to the internet.
+The shared device token is bearer authentication for a trusted LAN. It has no
+per-user identity or expiry and travels in a header over plain HTTP. Do not
+expose the device port to the internet. Updates over the air are the exception:
+that route is TLS, verified against the daemon's own certificate authority.

@@ -9,7 +9,8 @@
 
 [daemon]
 # Bind address. Defaults to all interfaces so the Presto can reach it on the
-# LAN. Do NOT port-forward this. See docs/setup.md.
+# LAN. Do NOT port-forward this. See
+# https://jake1164.github.io/presto-ai-dash/docs/guides/securing-a-deployment/
 host = "0.0.0.0"
 port = 8787
 
@@ -51,7 +52,7 @@ key_file = ""
 
 # --- Alerts ----------------------------------------------------------------
 # These apply to every service. The admin page's Alerts section overrides
-# them; see docs/configuration.md.
+# them; see https://jake1164.github.io/presto-ai-dash/docs/reference/configuration/
 
 [alerts]
 # A quota window at this percentage makes the service "near limit" (yellow).

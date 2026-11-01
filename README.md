@@ -90,6 +90,6 @@ If Presto AI Dash is useful, a **GitHub star** helps others discover it. Sponsor
 
 **Self-hosted software:** [Family Librarian](https://github.com/jake1164/family-librarian) · [M3Undle](https://github.com/Sydney-Elvis/M3Undle)
 
-Developers: [contribution guide](CONTRIBUTING.md) · [running the tests](https://jake1164.github.io/presto-ai-dash/docs/developers/running-the-tests/) · [internal notes](docs/README.md).
+Developers: [contribution guide](CONTRIBUTING.md) · [running the tests](https://jake1164.github.io/presto-ai-dash/docs/developers/running-the-tests/) · [developer notes](docs/README.md) · [changelog](CHANGELOG.md).
 
 MIT licensed. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).

@@ -2,7 +2,7 @@
 
 Presto AI Dash: a Python daemon (`daemon/`) that gathers AI usage and quotas,
 and a MicroPython app (`presto/`) that shows them on a Pimoroni Presto's 240x240
-touchscreen. Start with `README.md`; `docs/milestones.md` says what is built.
+touchscreen. Start with `README.md`; `CHANGELOG.md` says what each release holds.
 
 ## Rules that apply to every task
 
@@ -15,6 +15,11 @@ touchscreen. Start with `README.md`; `docs/milestones.md` says what is built.
   import `machine` to arm the watchdog before importing candidate code and cache
   that module for rollback/reset. It must not import other hardware modules.
   Bitmap fonts only. Keep on-screen text ASCII.
+- Documentation: users' pages live on the site (`docs/user/`); `docs/` itself holds
+  only developer reference (see `docs/README.md`). Do not add status logs,
+  milestone or readiness notes, plans, verification records or to-do lists to
+  the repository. Working notes and outstanding work go in `.ai_docs/`, which
+  is not in git. Release notes go in `CHANGELOG.md`.
 - Never read, print, commit or paste the contents of `dash.toml`, `dash.db`,
   `dash.db.key`, `presto/config.py` or `presto/secrets.py`. They hold tokens and keys.
 - The app only observes provider accounts. It must never take an action on a provider account:

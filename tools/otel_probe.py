@@ -2,9 +2,10 @@
 
     python tools/otel_probe.py                 # listens on 127.0.0.1:4318
 
-It answers one question for Phase 8 of docs/remote-ingest-plan.md: does the
-Claude Code surface you use (the VS Code panel, the terminal) emit OpenTelemetry
-at all, and what does it carry? It is a diagnostic, not part of the daemon.
+It answers one question: does the Claude Code surface you use (the VS Code
+panel, the terminal) emit OpenTelemetry at all, and what does it carry? An
+OpenTelemetry receiver in the daemon is only worth building if it does. It is a
+diagnostic, not part of the daemon.
 
 Privacy first. Claude Code puts the account's email, its ids and, when opted in,
 prompts and tool inputs on its telemetry. This probe therefore prints only:

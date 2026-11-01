@@ -53,8 +53,13 @@ EVENTS = {
 # exactly what the real library would forward to Google.
 STUB = """
 window.__hits = [];
+window.__invalidCommands = [];
 (function () {
   function record(entry) {
+    if (Object.prototype.toString.call(entry) !== "[object Arguments]") {
+      window.__invalidCommands.push(String(entry));
+      return;
+    }
     try {
       var parts = Array.prototype.slice.call(entry).map(function (value) {
         return (value && typeof value === 'object')
@@ -84,6 +89,8 @@ def check(condition, message):
 
 
 def hits(page):
+    check(page.evaluate("() => (window.__invalidCommands || []).length") == 0,
+          "dataLayer received a command outside the documented gtag wrapper")
     return page.evaluate("() => window.__hits || []")
 
 
@@ -199,27 +206,51 @@ def reject(browser, base):
 
 
 def revoke(browser, base):
-    print("changing an earlier answer")
-    context, page = new_page(browser)
-    page.goto(base + "/", wait_until="networkidle")
-    page.click("[data-consent-accept]")
-    page.wait_for_load_state("networkidle")
-    page.wait_for_timeout(1000)
-    check(views(page) == 1, "accepting did not start analytics")
-    page.click("[data-consent-open]")
-    page.wait_for_timeout(200)
-    check(shown(page, "[data-landing-consent]") is True,
-          "the footer link did not reopen the choice")
-    page.click("[data-consent-reject]")
-    page.wait_for_load_state("networkidle")
-    page.wait_for_timeout(1000)
-    check(stored(page) == "{}", "revoking stored %r" % (stored(page),))
-    page.google.clear()
-    page.reload(wait_until="networkidle")
-    page.wait_for_timeout(1000)
-    check(page.google == [], "revoking did not stop analytics: %r" % (page.google,))
-    check(hits(page) == [], "revoking still queued %r" % (hits(page),))
-    context.close()
+    local_base = base
+    base = "http://visit.presto.test"
+    for surface in ("/", "/docs/getting-started/what-it-does/"):
+        print("withdrawing accepted consent on " + surface)
+        context, page = new_page(browser)
+        # Serve the local build at a synthetic subdomain so Chromium enforces
+        # real host-only versus parent-domain cookie deletion rules.
+        context.route(base + "/**", lambda route: route.fulfill(
+            response=route.fetch(url=local_base + route.request.url[len(base):])))
+        page.goto(base + surface, wait_until="networkidle")
+        landing = surface == "/"
+        page.click("[data-consent-accept]" if landing else ".md-consent button:not([type])")
+        page.wait_for_load_state("networkidle")
+        check(views(page) == 1, "accepting did not start analytics on " + surface)
+        # Realistic existing first-party cookies, including a cookie scoped to
+        # docs which is invisible to document.cookie on the landing page.
+        cookies = [
+            {"name": name, "value": "existing", "domain": "visit.presto.test", "path": path}
+            for name, path in (("_ga", "/"), ("_ga_82FD55P3RH", "/"),
+                               ("_ga_82FD55P3RH", "/docs/"), ("_gid", "/"),
+                               ("_gat_custom", "/"), ("site_preference", "/"))
+        ]
+        cookies.extend({"name": name, "value": "parent", "domain": ".presto.test", "path": "/"}
+                       for name in ("_ga", "_ga_82FD55P3RH"))
+        context.add_cookies(cookies)
+        check(len(context.cookies()) == len(cookies), "cookie fixtures were not installed")
+        page.evaluate("() => localStorage.setItem('/docs/.__palette', 'keep-theme')")
+        page.click("[data-consent-open]" if landing else 'a[href="#__consent"]')
+        page.click("[data-consent-reject]" if landing else '.md-consent button[type=reset]')
+        page.wait_for_load_state("networkidle")
+        check(stored(page) == "{}", "withdrawing stored %r" % stored(page))
+        check([c["name"] for c in context.cookies()] == ["site_preference"],
+              "withdrawal left GA cookies or removed unrelated cookies: %r" % context.cookies())
+        check(page.evaluate("() => localStorage.getItem('/docs/.__palette')") == "keep-theme",
+              "withdrawal changed the shared theme preference")
+        check(hits(page) == [], "withdrawal still queued commands")
+        page.google.clear()
+        # Check both surfaces after withdrawal, including the one not used to
+        # withdraw. Clicks and the public demo API must queue nothing.
+        for target in ("/", "/docs/"):
+            page.goto(base + target, wait_until="networkidle")
+            page.evaluate('() => window.prestoAnalytics.track("demo_start", {})')
+            check(page.google == [], "withdrawal did not stop Google requests: %r" % page.google)
+            check(hits(page) == [], "withdrawal still queued commands on " + target)
+        context.close()
 
 
 def clicks(browser, base):
@@ -230,6 +261,7 @@ def clicks(browser, base):
 
     for label, selector, expected in (
         ("the setup guide", 'a[href="docs/getting-started/install-the-daemon/"]', "install_click"),
+        ("the introduction", 'a[href="docs/getting-started/what-it-does/"]', "docs_link_click"),
         ("the demo", 'a[href="docs/demo/"]', "docs_link_click"),
         ("the Pimoroni shop", 'a[href*="shop.pimoroni.com"]', "outbound_click"),
         ("the repository", 'header a[href="https://github.com/jake1164/presto-ai-dash"]',
@@ -255,7 +287,37 @@ def clicks(browser, base):
             extra = set(found[0]["params"]) - EVENTS[expected]
             check(not extra, "%s carried %r, which is not documented"
                   % (expected, sorted(extra)))
+    page.goto(base + "/docs/", wait_until="networkidle")
+    for guide, expected in (("what-it-does", []), ("install-the-daemon", ["install_click"]),
+                            ("install-with-docker", ["install_click"]),
+                            ("set-up-the-presto", ["install_click"]),
+                            ("add-the-first-source", ["install_click"])):
+        reset(page)
+        page.evaluate("""(guide) => {
+            var a = document.querySelector('a[href="getting-started/' + guide + '/"]');
+            a.addEventListener('click', e => e.preventDefault(), {once: true});
+            a.click();
+        }""", guide)
+        check([hit["name"] for hit in events(page)] == expected,
+              "documentation classified %s as %r" % (guide, events(page)))
     context.close()
+
+
+def canonicals():
+    import re
+    pages = list((SITE / "docs").rglob("*.html"))
+    checked = 0
+    for page in pages:
+        if page.name == "404.html":
+            continue  # no canonical for unknown URLs
+        relative = page.relative_to(SITE / "docs").as_posix()
+        expected = "https://presto-dash.com/docs/" + relative.removesuffix("index.html")
+        found = re.findall(r'<link[^>]+rel="canonical"[^>]+href="([^"]+)"',
+                           page.read_text(encoding="utf-8"))
+        check(found == [expected], "%s canonical: %r, expected %s" % (relative, found, expected))
+        checked += 1
+    check(checked > 0, "no documentation canonical URLs checked")
+    print("verified %d documentation canonical URLs" % checked)
 
 
 def demo(browser, base):
@@ -318,6 +380,57 @@ def demo_without_consent(browser, base):
     context.close()
 
 
+def real_gtag(browser, base):
+    """Load Google's library, but intercept every collection request locally.
+
+    Opt in with --real-gtag: this needs internet access to download gtag.js.
+    No page view or event is delivered to the analytics property.
+    """
+    from urllib.parse import parse_qs, urlsplit
+
+    print("real gtag.js compatibility (all collection requests intercepted)")
+    context = browser.new_context()
+    captured = []
+
+    def route_request(route):
+        request = route.request
+        url = urlsplit(request.url)
+        if request.url.startswith(base + "/"):
+            route.continue_()
+        elif url.hostname == "www.googletagmanager.com" and url.path == "/gtag/js":
+            route.continue_()
+        else:
+            if url.path.endswith("/collect"):
+                payload = url.query + "&" + (request.post_data or "")
+                for line in payload.splitlines():
+                    captured.extend(parse_qs(line).get("en", []))
+            route.fulfill(status=204, body="")
+
+    context.route("**/*", route_request)
+    context.add_init_script(
+        "localStorage.setItem('/docs/.__consent', JSON.stringify({analytics:true}))")
+    page = context.new_page()
+    try:
+        for surface in ("/", "/docs/"):
+            captured.clear()
+            page.goto(base + surface, wait_until="networkidle")
+            page.evaluate("""() => {
+                var a = document.querySelector('a[href$="getting-started/install-the-daemon/"]');
+                a.addEventListener('click', e => e.preventDefault(), {once:true});
+                a.click();
+            }""")
+            for _ in range(30):
+                if "install_click" in captured:
+                    break
+                page.wait_for_timeout(500)
+            check(captured.count("install_click") == 1,
+                  "real gtag.js on %s produced %r, expected one install_click" % (surface, captured))
+            check(captured.count("page_view") == 1,
+                  "real gtag.js on %s produced %r, expected one page_view" % (surface, captured))
+    finally:
+        context.close()
+
+
 def main():
     if not SITE.is_dir():
         print("%s is missing: run python tools/build_pages_site.py first" % SITE)
@@ -329,6 +442,7 @@ def main():
         print("This needs the browser environment: .venv-browser/bin/python.")
         return 2
 
+    canonicals()
     handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(SITE))
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -340,6 +454,8 @@ def main():
                 for scenario in (first_visit, accept, reject, revoke, clicks, demo,
                                  demo_without_consent):
                     scenario(browser, base)
+                if "--real-gtag" in sys.argv[1:]:
+                    real_gtag(browser, base)
             finally:
                 browser.close()
     finally:

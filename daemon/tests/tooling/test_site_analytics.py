@@ -133,10 +133,12 @@ class CatalogueTests(unittest.TestCase):
                 self.assertIn(param, row.group(0),
                               "%s's row does not mention %s" % (name, param))
 
-    def test_every_getting_started_page_has_an_install_method(self):
+    def test_only_setup_pages_have_an_install_method(self):
         guides = set(re.findall(r"getting-started/([a-z-]+)\.md", read(CONFIG)))
         self.assertTrue(guides, "the navigation has no getting-started pages")
         script = read(ANALYTICS_PAGE)
+        guides.remove("what-it-does")
+        self.assertNotIn('["what-it-does", "overview"]', script)
         for guide in guides:
             self.assertIn('"%s"' % guide, script,
                           "getting-started/%s.md is not classified in analytics.js" % guide)

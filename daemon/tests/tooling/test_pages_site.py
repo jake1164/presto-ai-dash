@@ -8,7 +8,7 @@ from urllib.parse import urljoin
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "tools"))
-from build_pages_site import build
+from build_pages_site import build, check_local_links
 
 
 class PagesSiteTests(unittest.TestCase):
@@ -71,12 +71,22 @@ class PagesSiteTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "legacy docs URL"):
             build(self.docs, self.website, self.output)
 
-    def test_missing_cross_site_links_and_domain_root_paths_fail_the_build(self):
-        for target in ("docs/missing/", "/docs/"):
+    def test_missing_cross_site_links_fail_the_build(self):
+        for target in ("docs/missing/", "/docs/missing/"):
             with self.subTest(target=target):
                 (self.website / "index.html").write_text('<a href="%s">Docs</a>' % target)
                 with self.assertRaisesRegex(ValueError, "broken Pages links"):
                     build(self.docs, self.website, self.output)
+
+    def test_custom_domain_supports_root_paths_and_checks_absolute_local_links(self):
+        (self.website / "index.html").write_text('<a href="/docs/">Docs</a>')
+        build(self.docs, self.website, self.output)
+        with self.assertRaisesRegex(ValueError, "escapes the project prefix"):
+            check_local_links(self.output, "https://pages.invalid/presto-ai-dash/")
+        (self.output / "index.html").write_text(
+            '<a href="https://presto-dash.com/docs/missing/">Missing</a>')
+        with self.assertRaisesRegex(ValueError, "missing local target"):
+            check_local_links(self.output)
 
     def test_removing_an_existing_page_or_heading_fails_the_build(self):
         legacy = {"guides/claude/index.html": {

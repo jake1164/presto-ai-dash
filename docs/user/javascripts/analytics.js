@@ -61,6 +61,37 @@
     } catch (error) { /* the reload simply asks again */ }
   }
 
+  function clearAnalyticsCookies() {
+    // GA's default cookies, including the property-specific GA4 session cookie.
+    // Try host-only and parent-domain cookies at the site and docs paths.
+    var names = ["_ga", "_ga_82FD55P3RH", "_gid", "_gat"];
+    document.cookie.split(";").forEach(function (cookie) {
+      var name = cookie.split("=")[0].trim();
+      if (/^(_ga(?:_|$)|_gid$|_gat(?:_|$))/.test(name)) names.push(name);
+    });
+    var paths = ["/"];
+    [docsPath(), location.pathname].forEach(function (path) {
+      var parts = path.split("/");
+      for (var i = 1; i <= parts.length; i++) {
+        var parent = parts.slice(0, i).join("/") || "/";
+        paths.push(parent, parent.replace(/\/$/, "") + "/");
+      }
+    });
+    var domains = [""];
+    var labels = location.hostname.split(".");
+    for (var i = 0; i < labels.length; i++) {
+      var domain = labels.slice(i).join(".");
+      domains.push("; Domain=" + domain, "; Domain=." + domain);
+    }
+    names.forEach(function (name) {
+      paths.forEach(function (path) {
+        domains.forEach(function (domain) {
+          document.cookie = name + "=; Max-Age=0; Path=" + path + domain;
+        });
+      });
+    });
+  }
+
   // -- GA4 -------------------------------------------------------------------
 
   // The product page declares the property on its own script tag, so the
@@ -69,7 +100,12 @@
   var property = (script && script.dataset && script.dataset.ga4) || "";
 
   function startGa4() {
-    if (material) return;      // the theme's loader, already gated on consent
+    if (material) {
+      // Material's loader uses a private gtag function. Expose the documented
+      // command wrapper for our events without starting a second loader.
+      window.gtag = window.gtag || function () { window.dataLayer.push(arguments); };
+      return;
+    }
     if (!property || window.gtag) return;
     window.dataLayer = window.dataLayer || [];
     window.gtag = function () { window.dataLayer.push(arguments); };
@@ -83,8 +119,8 @@
 
   function track(name, params) {
     // No consent, or GA4 has not started: send nothing and queue nothing.
-    if (!allowed() || !window.dataLayer) return;
-    window.dataLayer.push(["event", name, params || {}]);
+    if (!allowed() || typeof window.gtag !== "function") return;
+    window.gtag("event", name, params || {});
   }
 
   // -- what a click means ----------------------------------------------------
@@ -106,8 +142,7 @@
     ["add-the-first-source", "source"],
     ["install-the-daemon", "daemon"],
     ["install-with-docker", "docker"],
-    ["set-up-the-presto", "presto"],
-    ["what-it-does", "overview"]
+    ["set-up-the-presto", "presto"]
   ];
 
   function guideFor(path) {
@@ -197,6 +232,7 @@
 
   function choose(accept) {
     setConsent(accept);
+    if (!accept) clearAnalyticsCookies();
     location.reload();  // start, or stop, GA4 exactly as Material does
   }
 
@@ -225,8 +261,19 @@
 
   function boot() {
     if (allowed()) startGa4();
+    else if (readConsent() !== null) clearAnalyticsCookies();
     wireBanner();
   }
+
+  // Capture before Material persists and reloads its consent form. A reset
+  // means Reject; submitting with analytics unchecked also withdraws consent.
+  ["reset", "submit"].forEach(function (action) {
+    document.addEventListener(action, function (event) {
+      if (!event.target.matches("form[name=consent]")) return;
+      var analytics = event.target.querySelector("input[name=analytics]");
+      if (action === "reset" || !analytics || !analytics.checked) clearAnalyticsCookies();
+    }, true);
+  });
 
   // The demo page drives its own events through this.
   window.prestoAnalytics = { track: track, allowed: allowed };

@@ -50,7 +50,16 @@ documentation resolve the same path.
 
 Nothing is queued before consent either: the script checks the stored choice
 first and only then starts GA4, so a rejected visitor has no analytics code
-running at all.
+running at all. Withdrawing consent expires first-party GA cookies (`_ga`,
+`_ga_*`, `_gid`, `_gat` and `_gat_*`) at the site and documentation paths,
+including parent-domain cookies. Other cookies and Material preferences are
+preserved. The introduction (`getting-started/what-it-does/`) is ordinary
+documentation interest: it reports `docs_link_click` from the product page
+and no custom event within the documentation.
+
+Custom events use Google's documented `gtag("event", name, params)` command.
+Material keeps its own wrapper private, so the shared script exposes the same
+arguments-based wrapper without starting a second loader.
 
 ## Events
 
@@ -59,7 +68,7 @@ There are no timer, scroll, animation or frame events.
 
 | Event | Fires when | Parameters |
 | --- | --- | --- |
-| `install_click` | A link to a getting-started guide is clicked, from any surface. | `install_method`, `link_path`, `link_location` |
+| `install_click` | A link to a daemon install, Docker install, Presto setup or first-source setup guide is clicked, from any surface. | `install_method`, `link_path`, `link_location` |
 | `docs_link_click` | The product page links into the documentation. | `link_path`, `link_location` |
 | `outbound_click` | One of the counted links to another site is clicked. | `destination`, `link_domain`, `link_path`, `link_location` |
 | `demo_start` | Start is pressed on the demo. | — |
@@ -78,7 +87,7 @@ twice.
 
 | Parameter | Values |
 | --- | --- |
-| `install_method` | `overview`, `daemon`, `docker`, `presto`, `source` |
+| `install_method` | `daemon`, `docker`, `presto`, `source` |
 | `link_location` | `header`, `footer`, `page`, or the id of the section the link sits in; on documentation pages, `content`, `navigation` or `footer` |
 | `link_path` | The path of the link's target, without host or query |
 | `destination` | `github_repo`, `github_issues`, `github_sponsors`, `pimoroni_store`, `support` |
@@ -132,6 +141,12 @@ automatic one does not, so prefer it in reports.
   `.venv-browser`) drives a real browser against the assembled site and checks
   consent, the shared choice, one event per click, and the demo events. It
   serves `build/pages`, so build first; it reports nothing to the property.
+  Add `--real-gtag` to load Google's actual library and verify that it produces
+  one page view and one installation event on each surface. This requires
+  internet access; all collection requests are intercepted locally and never
+  reach the property. The default stub rejects direct array commands, and
+  withdrawal tests seed host-only, parent-domain and documentation-path cookies.
+  The check also verifies every generated documentation canonical URL.
 - `python tools/check_docs_site.py build/pages` fails the build if a page loads
   Google Analytics as a tag (before consent), or without a consent banner and a
   footer notice linking the privacy page.

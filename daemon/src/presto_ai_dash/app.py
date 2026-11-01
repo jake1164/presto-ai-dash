@@ -163,8 +163,8 @@ class Daemon:
                 self.clients = ClientRegistry()
                 self.problems = ProblemBuffer()
             # Device identity and update state are durable, so they work the
-            # same whether or not the admin page is running. Operational OTA
-            # stays off: this stage reports a mismatch and asks for USB.
+            # same whether or not the admin page is running. Updates over the
+            # air are on: a Presto set up for them is offered this daemon's app.
             self.lifecycle = (self.source_configuration.lifecycle
                               if self.source_configuration is not None
                               else DeviceLifecycle(self.storage, ota_enabled=True))

@@ -173,10 +173,12 @@ class InstallationTests(unittest.TestCase):
         # The absence of DASH_RELEASE_VERSION must not make a wheel development.
         self.assertEqual(self.kind(distribution=FakeDistribution("0.51.0")).channel, "pypi")
 
-    def test_a_historical_wheel_version_is_marked_ambiguous(self):
+    def test_the_final_wheel_is_not_mistaken_for_an_early_candidate(self):
+        # rc1-rc3 also said 0.50.0, but none of them contains this check, so
+        # code running it as 0.50.0 is the final release.
         found = self.kind(distribution=FakeDistribution("0.50.0"))
         self.assertEqual((found.channel, found.running, found.ambiguous),
-                         ("pypi", "0.50.0", True))
+                         ("pypi", "0.50.0", False))
 
     def test_the_running_code_must_be_the_installed_files(self):
         self.assertEqual(self.kind(distribution=FakeDistribution(own=False)).channel,

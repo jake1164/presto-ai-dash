@@ -65,6 +65,12 @@ Up to `v0.50.0-rc3` every candidate wheel said `0.50.0`. A wheel reporting exact
   the copy is the final release, and it is not a permanent error, which would nag every
   genuine 0.50.0 user.
 
+**Update, 2026-11-01 (v0.50.0):** this case cannot arise. The check arrived in rc4,
+so no rc1-rc3 wheel runs it, and code that does run it while reporting `0.50.0` is
+the final release. `AMBIGUOUS_WHEEL_VERSIONS` is now empty, and a 0.50.0 wheel is
+compared as the final release with no note. (An rc1-rc3 wheel has no release check
+at all, so it shows nothing either way.)
+
 Docker images are unambiguous: they embed the exact tag.
 
 ## Registry client: dependency decision

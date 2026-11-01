@@ -45,12 +45,14 @@ def release_version(environ=None):
     return __version__
 
 
-# The distribution name on PyPI, and the one version that several different
+# The distribution name on PyPI, and the versions that several different
 # builds shared. Up to v0.50.0-rc3 every release candidate was built with the
-# package version 0.50.0, so a wheel reporting exactly that cannot say whether
-# it is the final release or an early candidate.
+# package version 0.50.0, but none of those builds contains this check (it
+# arrived in rc4). Code that runs it while reporting 0.50.0 is therefore the
+# final release, so no version is ambiguous to it. The set stays, empty, for
+# the policy that handles one.
 DISTRIBUTION = "presto-ai-dash"
-AMBIGUOUS_WHEEL_VERSIONS = frozenset(("0.50.0",))
+AMBIGUOUS_WHEEL_VERSIONS = frozenset()
 
 
 class Installation(object):

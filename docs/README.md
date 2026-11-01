@@ -8,6 +8,7 @@ What is in this folder is for people working on the code:
 
 | File | What it is |
 | --- | --- |
+| [analytics.md](analytics.md) | What the public site reports to Google Analytics: the event list and its parameters, the consent key it shares with the documentation, and what has to be configured in GA4 |
 | [limitations.md](limitations.md) | What the tests cannot cover: the hardware, the touch controller's caveat, and the device token's limits |
 | [branding.md](branding.md) | The name, tagline, artwork rules, how the generated copies are made, and what the device draws |
 | [requirements.txt](requirements.txt) | The pinned versions for building the site |

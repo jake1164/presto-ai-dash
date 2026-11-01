@@ -20,8 +20,11 @@ It fails (exit 1) when it finds:
 * a host other than Google Analytics' own named in a page's inline script (the
   theme loads the analytics script from there, so a link in the page is not
   where to look);
+* Google Analytics fetched by a tag in the page, which would reach Google as
+  the page is parsed instead of after the reader accepts;
 * a page that loads Google Analytics without the footer notice that says so
-  and links the privacy page, or without the cookie banner that asks first.
+  and links the privacy page, or without the cookie banner that asks first
+  (Material's on a documentation page, the product page's own otherwise).
 
 It needs only the standard library.
 """
@@ -57,6 +60,14 @@ ANALYTICS_HOSTS = {"www.googletagmanager.com", "www.google-analytics.com",
 CONSENT_BANNER = 'data-md-component="consent"'
 DISCLOSURE = re.compile(r"""md-copyright__highlight">[^<]*Google Analytics[^<]*"""
                         r"""<a href="[^"]*">Privacy</a>""")
+
+# The product page (website/) is not a Material page: it has its own banner and
+# its own footer notice, and it starts analytics itself from a script tag that
+# names the measurement ID.
+LANDING_CONSENT = "data-landing-consent"
+LANDING_DISCLOSURE = re.compile(r"""footer-note">[^<]*Google Analytics[^<]*"""
+                                r"""<a href="[^"]*">Privacy</a>""")
+LANDING_PROPERTY = re.compile(r"""data-ga4\s*=\s*"([A-Za-z0-9-]+)\"""")
 
 KNOWN_SCRIPT_HOSTS = {
     "unpkg.com": "the polyfill a browser without ResizeObserver (before about 2020) "
@@ -138,24 +149,42 @@ def check(site):
                             "for the repository's facts on every page view" % (name, WIDGET))
         parser = Loads()
         parser.feed(text)
-        uses_analytics = False
         for tag, target, host in parser.found:
             if host in ANALYTICS_HOSTS:
-                uses_analytics = True
+                # A tag in the page is fetched as the page is parsed, so it
+                # would reach Google before the reader had been asked. Both
+                # surfaces must start analytics from script, after consent.
+                problems.append("%s: <%s> loads %s before the reader is asked; Google "
+                                "Analytics must be started from script, after consent"
+                                % (name, tag, target))
             else:
                 problems.append("%s: <%s> loads %s from %s" % (name, tag, target, host))
-        for host in sorted(set(re.findall(r"https?://([A-Za-z0-9.-]+)", " ".join(parser.inline_scripts)))):
+        inline_hosts = set()
+        for host in re.findall(r"https?://([A-Za-z0-9.-]+)", " ".join(parser.inline_scripts)):
             if host.lower() in ANALYTICS_HOSTS:
-                uses_analytics = True
+                inline_hosts.add(host.lower())
             elif host.strip("."):
                 problems.append("%s: an inline script names %s, a host that is not Google "
                                 "Analytics" % (name, host))
-        if uses_analytics and CONSENT_BANNER not in text:
-            problems.append("%s: loads Google Analytics without the cookie banner that asks "
-                            "first (extra.consent in mkdocs.yml)" % name)
-        if uses_analytics and not DISCLOSURE.search(text):
-            problems.append("%s: loads Google Analytics without the footer notice that links "
-                            "the privacy page (docs/overrides/partials/copyright.html)" % name)
+        # How the page starts analytics says which banner and notice it owes.
+        if inline_hosts:
+            # Material's loader, configured by extra.analytics in mkdocs.yml.
+            if CONSENT_BANNER not in text:
+                problems.append("%s: loads Google Analytics without the cookie banner that "
+                                "asks first (extra.consent in mkdocs.yml)" % name)
+            if not DISCLOSURE.search(text):
+                problems.append("%s: loads Google Analytics without the footer notice that "
+                                "links the privacy page "
+                                "(docs/overrides/partials/copyright.html)" % name)
+        if LANDING_PROPERTY.search(text):
+            # The product page's loader, declared on its own script tag.
+            if LANDING_CONSENT not in text:
+                problems.append("%s: loads Google Analytics without the cookie banner that "
+                                "asks first (data-landing-consent in website/index.html)" % name)
+            if not LANDING_DISCLOSURE.search(text):
+                problems.append("%s: loads Google Analytics without the footer notice that "
+                                "links the privacy page (p.footer-note in "
+                                "website/index.html)" % name)
     for sheet in sorted(root.rglob("*.css")):
         text = sheet.read_text(encoding="utf-8", errors="replace")
         name = sheet.relative_to(root).as_posix()

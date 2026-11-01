@@ -4,10 +4,13 @@
 # elsewhere under docs/ stay in the repository and are never published.
 #
 # Privacy: this site loads one third-party script in a current browser, Google
-# Analytics 4 (extra.analytics below), to see which help pages are read, and
-# only after the reader accepts the cookie banner (extra.consent): the theme
-# does not run the analytics code until then. It is disclosed on the privacy
-# page, linked from the footer. Nothing else is loaded: no external font, no
+# Analytics 4 (extra.analytics below), to see which help pages are read and how
+# the demo is used, and only after the reader accepts the cookie banner
+# (extra.consent): the theme does not run the analytics code until then. It is
+# disclosed on the privacy page, linked from the footer, and the event names
+# are listed in docs/analytics.md. The same choice covers the product page
+# (website/), which reads and writes the theme's own consent key rather than
+# keeping a second one. Nothing else is loaded: no external font, no
 # CDN asset. Three things in the Material theme
 # would add to it, and each is switched off:
 #   - Google Fonts, with `font: false`, so the page uses the reader's own fonts;
@@ -25,7 +28,7 @@ site_description: >-
   Always in view. Never in your way. Monitor AI usage, subscription limits,
   reset times, and service health across your accounts, all at a glance
   on a dedicated display.
-site_url: https://jake1164.github.io/presto-ai-dash/docs/
+site_url: https://presto-dash.com/docs/
 repo_url: https://github.com/jake1164/presto-ai-dash
 repo_name: jake1164/presto-ai-dash
 edit_uri: edit/main/docs/user/
@@ -90,8 +93,10 @@ extra:
     description: >-
       This site would like to use Google Analytics to count which help pages
       are read, so that pages nobody uses can be trimmed or rewritten. Nothing
-      is sent to Google and no cookie is set unless you accept. The app itself
-      sends nothing anywhere. See the Privacy page for details.
+      is sent to Google and no cookie is set unless you accept. One choice
+      covers the product page and the demo as well, and the footer's "cookie
+      settings" link changes it later. The app itself sends nothing anywhere.
+      See the Privacy page for details.
     actions:
       - accept
       - reject
@@ -107,6 +112,7 @@ extra_css:
   - demo/demo.css
 
 extra_javascript:
+  - javascripts/analytics.js
   - demo/demo.js
   - javascripts/consent.js
 

@@ -348,7 +348,7 @@ The [documentation site](../index.md) you are reading is published on GitHub
 Pages. It is static files built from
 Markdown. It uses Google Analytics to count page views, asks no other host for
 anything in a current browser, and knows nothing about your installation.
-[Privacy](../privacy/index.md#the-documentation-site) has the details and the
+[Privacy](../privacy/index.md#the-website-and-the-demo has the details and the
 one old-browser exception.
 
 ## See also

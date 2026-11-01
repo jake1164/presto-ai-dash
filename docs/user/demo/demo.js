@@ -34,6 +34,21 @@
   var running = false, paused = false, timer = null, last = 0, stopped = false;
   var visible = true;  // the screen is on screen; the loop idles when it is not
   var touches = [];
+  var interacted = false;
+
+  // The page's analytics (javascripts/analytics.js), which sends nothing unless
+  // the reader accepted cookies. Only the events below are reported: never a
+  // frame, a simulated touch or anything the app is showing.
+  function report(name, params) {
+    if (window.prestoAnalytics) window.prestoAnalytics.track(name, params);
+  }
+
+  // "Did they use it at all", asked once per page load, not once per touch.
+  function firstInteraction(kind) {
+    if (interacted) return;
+    interacted = true;
+    report("demo_interaction", { interaction: kind });
+  }
 
   if (!window.WebAssembly) {
     show("This browser cannot run the demo. The picture above is the Home screen.");
@@ -80,6 +95,7 @@
     startButton.disabled = true;
     startButton.textContent = "Loading...";
     show("");
+    report("demo_start");
     Promise.all([
       import(base + "vendor/micropython.js"),
       get("app/demo.json", "json"),
@@ -107,9 +123,13 @@
       py("import sys\nsys.path.insert(0, '/lib')\nimport driver");
       fillScenes();
       begin();
+      report("demo_ready");
     }).catch(function (error) {
       startButton.disabled = false;
       startButton.textContent = "Start demo";
+      // A coarse category only: the message can name a file or a host, and
+      // nothing about this page needs to travel with it.
+      report("demo_error", { error_kind: "start_failed" });
       show("The demo could not start: " + (error && error.message ? error.message : error) +
         ". Reload the page to try again.");
     });
@@ -163,6 +183,7 @@
       py("driver.tick(" + Math.round(elapsed) + ")");
     } catch (error) {
       stopped = true;
+      report("demo_error", { error_kind: "runtime_stopped" });
       show("The demo stopped: " + (error && error.message ? error.message : error) +
         ". Press Restart.");
       return;
@@ -196,11 +217,19 @@
   });
 
   pauseButton.addEventListener("click", function () { setPaused(!paused); });
-  restartButton.addEventListener("click", function () { show(""); begin(); });
+  restartButton.addEventListener("click", function () {
+    report("demo_restart");
+    show("");
+    begin();
+  });
   sceneSelect.addEventListener("change", function () {
     if (sceneSelect.value === "" || !running) return;
+    // The scene's own name, from the demo's script — a scenario label such as
+    // "near limit", never anything read from the simulated accounts.
+    var chosen = sceneSelect.options[sceneSelect.selectedIndex].textContent;
     py("driver.jump(" + Number(sceneSelect.value) + ")");
     sceneSelect.value = "";
+    report("demo_scene", { scene: chosen.trim().replace(/[^A-Za-z0-9]+/g, "_") });
   });
   staleBox.addEventListener("change", function () {
     if (!running) return;
@@ -224,6 +253,7 @@
   var down = false;
   canvas.addEventListener("pointerdown", function (event) {
     if (!running || paused) return;
+    firstInteraction("pointer");
     canvas.setPointerCapture(event.pointerId);
     down = true;
     var p = point(event);
@@ -268,7 +298,7 @@
         break;
       default: handled = false;
     }
-    if (handled) event.preventDefault();
+    if (handled) { firstInteraction("keyboard"); event.preventDefault(); }
   });
 
   // For tests: read-only state and the same gestures the keys make.

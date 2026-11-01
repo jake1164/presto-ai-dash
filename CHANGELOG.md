@@ -6,6 +6,13 @@ All notable changes to Presto AI Dash are documented here. Newest release at the
 
 ## [Unreleased]
 
+### Website analytics
+
+- The product page, the documentation and the interactive demo now report a small, fixed set of events to Google Analytics 4: which pages are read, whether the demo is started and which of its scenes are tried, and clicks through to the installation guides, the repository and the Pimoroni shop.
+- Nothing is sent, and no cookie is set, until the reader accepts the cookie banner. One choice now covers all three surfaces, so nobody is asked twice, and the cookie settings link in either footer changes it later. Rejecting it, or revoking an earlier acceptance, leaves no analytics code running at all.
+- Withdrawing consent on either the product page or documentation removes first-party Google Analytics cookies. Custom events use the documented gtag command, and the introductory overview counts as documentation interest rather than installation intent. Documentation canonical URLs now use `https://presto-dash.com/docs/`.
+- The installed application is unchanged and still sends nothing: the daemon, its admin page and the Presto contain no analytics of any kind.
+
 ## [v0.50.0] — 2026-11-01
 
 The first release. A Pimoroni Presto becomes a dedicated, always-on monitor for your AI subscription quotas, reset countdowns and local AI services, fed by a small daemon on a computer or server on your network.

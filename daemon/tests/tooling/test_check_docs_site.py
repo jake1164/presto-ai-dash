@@ -103,6 +103,14 @@ class AnalyticsTests(CheckerCase):
               'This site uses Google Analytics to count page views. '
               '<a href="privacy/">Privacy</a></div></div>')
 
+    # The product page's own pair, which is a different page and a different
+    # banner from Material's.
+    LANDING_BANNER = '<div class="consent" data-landing-consent hidden></div>'
+    LANDING_NOTICE = ('<p class="footer-note">This site uses Google Analytics to count '
+                      'page views. <a href="docs/privacy/">Privacy</a>.</p>')
+    LANDING_TAG = ('<script src="docs/javascripts/analytics.js" '
+                   'data-ga4="G-82FD55P3RH"></script>')
+
     def test_analytics_with_the_banner_and_the_notice_is_clean(self):
         self.assertEqual(self.problems(index_html=page(self.BANNER + self.NOTICE, self.SCRIPT)), [])
 
@@ -120,11 +128,35 @@ class AnalyticsTests(CheckerCase):
         notice = self.NOTICE.replace('<a href="privacy/">Privacy</a>', "")
         self.assertEqual(len(self.problems(index_html=page(self.BANNER + notice, self.SCRIPT))), 1)
 
-    def test_the_script_may_also_be_a_tag_in_the_page(self):
+    def test_analytics_never_loads_from_a_tag_in_the_page(self):
+        # A tag in the page is fetched while the page is parsed, so it would
+        # reach Google before the reader had been asked. Both surfaces must
+        # start analytics from script, after consent.
         tag = '<script async src="https://www.googletagmanager.com/gtag/js?id=G-TEST"></script>'
-        self.assertEqual(self.problems(index_html=page(self.BANNER + self.NOTICE, tag)), [])
-        found = self.problems(index_html=page("", tag))
-        self.assertEqual(len(found), 2, found)
+        found = self.problems(index_html=page(self.BANNER + self.NOTICE, tag))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("before the reader is asked", found[0])
+        self.assertIn("www.googletagmanager.com", found[0])
+
+    def test_the_product_page_is_clean_with_its_own_banner_and_notice(self):
+        html = page(self.LANDING_BANNER + self.LANDING_NOTICE, self.LANDING_TAG)
+        self.assertEqual(self.problems(index_html=html), [])
+
+    def test_the_product_page_without_its_banner_is_refused(self):
+        found = self.problems(index_html=page(self.LANDING_NOTICE, self.LANDING_TAG))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("data-landing-consent", found[0])
+
+    def test_the_product_page_without_its_notice_is_refused(self):
+        found = self.problems(index_html=page(self.LANDING_BANNER, self.LANDING_TAG))
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("p.footer-note", found[0])
+
+    def test_materials_banner_does_not_stand_in_for_the_product_pages(self):
+        html = page(self.BANNER + self.LANDING_NOTICE, self.LANDING_TAG)
+        found = self.problems(index_html=html)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("data-landing-consent", found[0])
 
     def test_no_other_host_hides_in_an_inline_script(self):
         script = self.SCRIPT.replace("</script>", 'fetch("https://t.example/hit");</script>')

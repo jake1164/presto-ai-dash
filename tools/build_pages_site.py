@@ -30,9 +30,10 @@ class LocalLinks(HTMLParser):
                             if name in ("href", "src", "poster") and value)
 
 
-def check_local_links(output):
-    """Check the assembled artifact under a project prefix, as Pages serves it."""
-    base = "https://pages.invalid/presto-ai-dash/"
+def check_local_links(output, base="https://presto-dash.com/"):
+    """Check local targets at the deployed domain (or a supplied project URL)."""
+    origin = urlsplit(base)
+    prefix = origin.path
     problems = []
     for page in sorted(output.rglob("*.html")):
         parser = LocalLinks()
@@ -40,13 +41,13 @@ def check_local_links(output):
         source = page.relative_to(output).as_posix()
         for target in parser.targets:
             resolved = urlsplit(urljoin(base + source, target))
-            if resolved.scheme != "https" or resolved.netloc != "pages.invalid":
+            if resolved.scheme != origin.scheme or resolved.netloc != origin.netloc:
                 continue
             path = unquote(resolved.path)
-            if not path.startswith("/presto-ai-dash/"):
+            if not path.startswith(prefix):
                 problems.append("%s: link escapes the project prefix: %s" % (source, target))
                 continue
-            destination = output / path[len("/presto-ai-dash/"):]
+            destination = output / path[len(prefix):]
             if destination.is_dir():
                 destination = destination / "index.html"
             if not destination.is_file():

@@ -12,6 +12,8 @@ from pathlib import Path
 import shutil
 from urllib.parse import unquote, urljoin, urlsplit
 
+from pages_seo import write_crawl_files
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -155,6 +157,7 @@ def build(docs, website, output, legacy=None):
     (output / "landing" / "index.html").write_text(redirect_page("../"), encoding="utf-8")
     (output / ".nojekyll").touch()
     check_local_links(output)
+    write_crawl_files(website, output)
     if legacy:
         print("Verified %d existing docs pages and %d anchor targets."
               % (len(legacy), sum(len(entry["anchors"]) for entry in legacy.values())))

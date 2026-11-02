@@ -21,6 +21,15 @@ the product page at the root, the documentation under `docs/`, and redirects for
 the old documentation URLs (including `/demo/`). Both publish as one GitHub Pages
 artifact. The product page is maintained separately in `website/`.
 
+The assembler generates root `sitemap.xml` and `robots.txt` files from the
+indexable HTML in `website/`, using `https://presto-dash.com/`. Each marketing
+page must have one self-canonical URL; redirects, 404 pages and pages marked
+`noindex` are excluded. Marketing `lastmod` values are omitted because content
+modification dates are not maintained. MkDocs' sitemap stays at
+`/docs/sitemap.xml`, and `robots.txt` references both maps. Run
+`python tools/pages_seo.py build/pages` after assembly to validate the exact
+artifact; the Pages workflow requires this check before uploading it.
+
 `tools/pages_legacy_urls.json` keeps the published page paths and heading anchors.
 The Pages build fails if a target disappears, so when you move a page, update its
 replacement path and keep the old heading IDs as aliases. Old homepage heading

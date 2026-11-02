@@ -10,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "tools"))
 from build_pages_site import build, check_local_links
 
+CANONICAL = '<link rel="canonical" href="https://presto-dash.com/">'
+
 
 class PagesSiteTests(unittest.TestCase):
     def setUp(self):
@@ -21,7 +23,7 @@ class PagesSiteTests(unittest.TestCase):
         self.output = self.root / "pages"
         for folder in (self.docs, self.website):
             folder.mkdir()
-        (self.website / "index.html").write_text("Product placeholder", encoding="utf-8")
+        (self.website / "index.html").write_text(CANONICAL + "Product placeholder", encoding="utf-8")
         for name, content in {
             "index.html": "Docs home",
             "404.html": "Page not found",
@@ -37,7 +39,7 @@ class PagesSiteTests(unittest.TestCase):
 
     def test_product_docs_and_demo_have_separate_routes(self):
         build(self.docs, self.website, self.output)
-        self.assertEqual((self.output / "index.html").read_text(), "Product placeholder")
+        self.assertEqual((self.output / "index.html").read_text(), CANONICAL + "Product placeholder")
         self.assertEqual((self.output / "docs/index.html").read_text(), "Docs home")
         for name in ("demo/demo.js", "demo/vendor/micropython.wasm", "assets/theme.css"):
             self.assertEqual((self.output / "docs" / name).read_bytes(), (self.docs / name).read_bytes())
@@ -79,7 +81,7 @@ class PagesSiteTests(unittest.TestCase):
                     build(self.docs, self.website, self.output)
 
     def test_custom_domain_supports_root_paths_and_checks_absolute_local_links(self):
-        (self.website / "index.html").write_text('<a href="/docs/">Docs</a>')
+        (self.website / "index.html").write_text(CANONICAL + '<a href="/docs/">Docs</a>')
         build(self.docs, self.website, self.output)
         with self.assertRaisesRegex(ValueError, "escapes the project prefix"):
             check_local_links(self.output, "https://pages.invalid/presto-ai-dash/")
@@ -108,7 +110,8 @@ class PagesSiteTests(unittest.TestCase):
         self.assertIn("+ location.search + location.hash", text)
 
     def test_old_homepage_headings_forward_without_redirecting_the_product_home(self):
-        (self.website / "index.html").write_text("<html><head></head><body>Product</body></html>")
+        (self.website / "index.html").write_text(
+            "<html><head>" + CANONICAL + "</head><body>Product</body></html>")
         (self.docs / "index.html").write_text('<h2 id="start-here">Start</h2>')
         legacy = {"index.html": {"page": "index.html", "anchors": ["start-here"]}}
         build(self.docs, self.website, self.output, legacy)

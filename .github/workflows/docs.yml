@@ -15,6 +15,8 @@ on:
       - 'tools/build_brand_assets.py'
       - 'website/**'
       - 'tools/build_pages_site.py'
+      - 'tools/pages_seo.py'
+      - 'daemon/tests/tooling/test_pages_seo.py'
       - 'tools/pages_legacy_urls.json'
       - 'tools/check_pages_redirects.mjs'
       - 'tools/check_doc_anchors.py'
@@ -37,6 +39,8 @@ on:
       - 'tools/build_brand_assets.py'
       - 'website/**'
       - 'tools/build_pages_site.py'
+      - 'tools/pages_seo.py'
+      - 'daemon/tests/tooling/test_pages_seo.py'
       - 'tools/pages_legacy_urls.json'
       - 'tools/check_pages_redirects.mjs'
       - 'tools/check_doc_anchors.py'
@@ -104,6 +108,12 @@ jobs:
 
       - name: Check Pages routing
         run: python -m unittest discover -s daemon/tests/tooling -p test_pages_site.py -q
+
+      - name: Check sitemap and robots validation
+        run: python -m unittest discover -s daemon/tests/tooling -p test_pages_seo.py -q
+
+      - name: Verify published sitemaps and robots.txt
+        run: python tools/pages_seo.py build/pages
 
       - name: Verify existing documentation redirects
         run: node tools/check_pages_redirects.mjs

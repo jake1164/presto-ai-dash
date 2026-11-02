@@ -6,6 +6,13 @@ All notable changes to Presto AI Dash are documented here. Newest release at the
 
 ## [Unreleased]
 
+### Website search discovery
+
+- The marketing website now publishes a root sitemap containing its canonical
+  public pages and a `robots.txt` referencing both the marketing and documentation
+  sitemaps. The Pages build validates these files before publishing; the existing
+  MkDocs documentation sitemap remains unchanged.
+
 ### Website analytics
 
 - The product page, the documentation and the interactive demo now report a small, fixed set of events to Google Analytics 4: which pages are read, whether the demo is started and which of its scenes are tried, and clicks through to the installation guides, the repository and the Pimoroni shop.

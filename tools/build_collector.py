@@ -1,8 +1,8 @@
 """Refresh the readers embedded in the one-file collector.
 
 The collector is one file that people copy to other machines. Its readers (the
-Claude activity reader, the Claude usage-cache reader, the Codex report rules
-and the small Codex app-server client) are the daemon's own modules, so the
+Claude activity reader, the Claude usage-cache reader, the experimental Claude
+OAuth usage reader, the Codex report rules and the small Codex app-server client) are the daemon's own modules, so the
 daemon and the collector cannot read a file two different ways. The file holds
 their source, word for word, between two marker lines; this tool rewrites that
 block from the modules. A test fails when the block is out of date.
@@ -24,6 +24,7 @@ SECTIONS = (
     ("child_env", PACKAGE / "child_env.py"),
     ("claude_activity", PACKAGE / "collectors" / "claude_activity.py"),
     ("claude_usage_cache", PACKAGE / "collectors" / "claude_usage_cache.py"),
+    ("claude_oauth_usage", PACKAGE / "collectors" / "claude_oauth_usage.py"),
     ("codex_report", PACKAGE / "collectors" / "codex_report.py"),
     ("codex_rpc", PACKAGE / "sources" / "_codex_rpc.py"),
 )

@@ -13,7 +13,8 @@ import math
 import re
 
 from .collectors import served_version, update_state
-from .ingest_extras import clean_activity, clean_credits, clean_reset_credits, clean_usage_cache
+from .ingest_extras import (clean_activity, clean_credits, clean_oauth_usage, clean_reset_credits,
+                            clean_usage_cache)
 from .models import now_utc
 from .quotas import quota_report
 from .sources import source_type
@@ -150,6 +151,7 @@ def validate(envelope, source_class):
 # are kept apart from the daemon's own readers' output, so the source can tell
 # a reading pushed from another machine from one it read itself.
 _EXTRA_KEYS = {"activity": "pushed_activity", "usage_cache": "pushed_usage_cache",
+               "oauth_usage": "pushed_oauth_usage",
                "reset_credits": "reset_credits", "credits": "credits"}
 
 
@@ -162,7 +164,7 @@ def report_extras(envelope, source_class, now=None):
     now = now or datetime.now(timezone.utc)
     allowed = set(getattr(source_class, "push_extras", ()))
     result = {}
-    for name in ("activity", "usage_cache", "reset_credits", "credits"):
+    for name in ("activity", "usage_cache", "oauth_usage", "reset_credits", "credits"):
         if name not in envelope:
             continue
         if name not in allowed:
@@ -172,11 +174,13 @@ def report_extras(envelope, source_class, now=None):
             cleaned = clean_activity(value, now)
         elif name == "usage_cache":
             cleaned = clean_usage_cache(value, now, _check_window)
+        elif name == "oauth_usage":
+            cleaned = clean_oauth_usage(value, now, _check_window)
         elif name == "reset_credits":
             cleaned = clean_reset_credits(value, now)
         else:
             cleaned = clean_credits(value)
-        if name in ("activity", "usage_cache"):
+        if name in ("activity", "usage_cache", "oauth_usage"):
             cleaned["received_at"] = now.isoformat()
         result[_EXTRA_KEYS[name]] = cleaned
     return result
@@ -231,6 +235,29 @@ def ingest(storage, instance_id, envelope, now=None):
                              base_report=base_report)
     _note_outdated(instance_id, collector)
     return True
+
+
+def export_age(storage, instance_id, now=None):
+    """What a collector's OAuth reader needs to know, for the ingest answer, or None.
+
+    The seconds since the older of the account's status-line windows was
+    observed, or "none" when a window has no reading. A status line reaches the
+    database by two routes, and only here are both visible. The stored windows
+    are the status line's alone, and evidence hashes keep a redraw from
+    freshening them. None means this source takes no OAuth reading.
+    """
+    record = next((row for row in storage.source_instances() if row["id"] == instance_id), None)
+    if record is None or "oauth_usage" not in getattr(source_type(record["type"]),
+                                                      "push_extras", ()):
+        return None
+    observation = storage.observation(instance_id)
+    report = observation["report"] if observation else None
+    windows = report.get("windows") if report else None
+    if not windows or any(window.get("used_percent") is None for window in windows):
+        return "none"
+    now = now if now is not None else now_utc()
+    oldest = min(datetime.fromisoformat(window["observed_at"]) for window in windows)
+    return str(max(0, int((now - oldest).total_seconds())))
 
 
 # Which (account, version) pairs have already been mentioned in this run, so a

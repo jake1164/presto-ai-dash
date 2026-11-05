@@ -19,6 +19,7 @@ WEEKLY_WINDOW_ID = "seven_day"
 # so a number is never presented as if another source had produced it.
 SOURCE_EXPORT = "terminal export"
 SOURCE_CACHE = "usage cache"
+SOURCE_OAUTH = "oauth usage"
 
 # How long a reading from Claude Code's usage cache stays fresh. The cache is
 # only refreshed when /usage is opened, so the terminal export's threshold
@@ -307,7 +308,7 @@ def _quota_source_line(report, now, config):
 
 def _source_label(source):
     """The short label of where a reading came from."""
-    return SOURCE_CACHE if source == SOURCE_CACHE else SOURCE_EXPORT
+    return source if source in (SOURCE_CACHE, SOURCE_OAUTH) else SOURCE_EXPORT
 
 
 def _activity_source_line(report, config, now):

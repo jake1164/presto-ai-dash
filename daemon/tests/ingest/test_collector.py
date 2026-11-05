@@ -107,7 +107,7 @@ class EnvelopeTests(unittest.TestCase):
         envelope = collector.build_envelope(payload(), "laptop", client_time=NOW)
         self.assertEqual(envelope["schema"], "presto-ai-dash.observation/1")
         self.assertEqual(envelope["collector"], {"name": "claude-statusline",
-                                                 "version": "1", "host": "laptop"})
+                                                 "version": collector.COLLECTOR_VERSION, "host": "laptop"})
         self.assertEqual(envelope["client_time"], NOW.isoformat())
         self.assertEqual(envelope["provider_version"], "2.1.296")
         self.assertEqual([w["id"] for w in envelope["windows"]], ["five_hour", "seven_day"])
@@ -125,7 +125,7 @@ class EnvelopeTests(unittest.TestCase):
         heartbeat = collector.heartbeat_envelope("laptop", client_time=NOW)
         self.assertEqual(heartbeat, {"schema": "presto-ai-dash.observation/1",
                                      "collector": {"name": "claude-statusline",
-                                                   "version": "1", "host": "laptop"},
+                                                   "version": collector.COLLECTOR_VERSION, "host": "laptop"},
                                      "client_time": NOW.isoformat()})
         self.assertNotIn("windows", heartbeat)
 

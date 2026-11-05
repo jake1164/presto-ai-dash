@@ -21,7 +21,7 @@ from .dashboard import build_status_payload, lazy_cards
 from .device_app import FILE_PATH as DEVICE_FILE_PATTERN
 from .device_app import MANIFEST_PATH as DEVICE_APP_MANIFEST_PATH
 from .device_protocol import MAX_STATUS_BYTES
-from .ingest import ingest as store_observation
+from .ingest import export_age, ingest as store_observation
 
 log = logging.getLogger(__name__)
 STATUS_PATH = "/api/v1/status"
@@ -679,6 +679,12 @@ def make_handler(storage, shared_token, source_ids=None, status_provider=None,
                 return
             log.debug("ingest accepted for instance %s", instance_id)
             self.send_response(204)
+            try:
+                age = export_age(storage, instance_id)
+            except (ValueError, KeyError, TypeError):
+                age = None  # the report is stored; this answer is only advice
+            if age is not None:
+                self.send_header("X-Presto-Export-Age", age)
             self.end_headers()
 
         def _set_alert(self, instance_id):

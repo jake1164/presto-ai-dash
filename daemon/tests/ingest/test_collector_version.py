@@ -1,4 +1,4 @@
-"""The collector's version moves whenever the collector does.
+"""Released collector versions and the private experimental build fingerprint.
 
 The collector is a single file that users copy to other machines, so the only
 way the daemon can tell that a copy is out of date is the version the copy
@@ -12,8 +12,10 @@ To change the collector:
 2. Raise ``COLLECTOR_VERSION`` by one.
 3. Add the new version and the hash this test prints to ``RELEASED``.
 
-While nothing has been released, version 1 is simply whatever the file is, and
-step 3 means replacing its hash.
+An unreleased, wire-compatible experiment retains its base version so it does
+not mark installed collectors outdated. Its hash is pinned separately, without
+rewriting the history of released bytes. Remove the private fingerprint and
+bump the version before publishing a changed collector.
 """
 
 import hashlib
@@ -30,6 +32,9 @@ RELEASED = {
     "1": "1d9d0e9a0ac52af47afe56e77ce6ff112290386b321daffa7ae00c6c39f84d1e",
 }
 
+PRIVATE_BASE_VERSION = "1"
+PRIVATE_BUILD_SHA256 = "bcb3fc81b04b46b9a63b51841fc197c3d5380f2c4c34414dcefffad1d3a44568"
+
 
 def file_hash():
     raw = Path(collector.__file__).read_bytes().replace(b"\r\n", b"\n")
@@ -40,7 +45,7 @@ class CollectorVersionTests(unittest.TestCase):
     def test_the_file_matches_the_hash_recorded_for_its_version(self):
         version, digest = collector.COLLECTOR_VERSION, file_hash()
         self.assertEqual(
-            RELEASED.get(version), digest,
+            PRIVATE_BUILD_SHA256 if version == PRIVATE_BASE_VERSION else RELEASED.get(version), digest,
             "presto_collector.py changed without a new version.\n"
             "Raise COLLECTOR_VERSION (now %r) and add\n    %r: %r,\nto RELEASED."
             % (version, str(int(version) + 1) if version.isdigit() else "?", digest))

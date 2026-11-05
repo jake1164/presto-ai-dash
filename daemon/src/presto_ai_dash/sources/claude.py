@@ -1,4 +1,5 @@
-"""Claude Code subscription windows: the status-line export and the usage cache."""
+"""Claude Code subscription windows: the status-line export, the usage cache and,
+when a collector has been set up for the experiment, the OAuth usage reader."""
 
 from copy import deepcopy
 from datetime import datetime, timedelta
@@ -7,7 +8,8 @@ from pathlib import Path
 from ..collectors.claude_activity import ActivityReader
 from ..collectors.claude_usage_cache import UsageCacheReader, candidate_paths
 from ..models import SourceSnapshot, now_utc
-from ..quotas import (USAGE_CACHE_STALE_SECONDS, quota_report, quota_window, timestamp)
+from ..quotas import (SOURCE_OAUTH, USAGE_CACHE_STALE_SECONDS, quota_report, quota_window,
+                      timestamp)
 from . import Source, register
 
 WINDOWS = (("five_hour", "5h", 300), ("seven_day", "Weekly", 10080))
@@ -24,6 +26,9 @@ NOTE_CACHE = ("Claude Code terminal export and its local usage cache; idle readi
               "become stale. The VS Code panel does not run the status line, so quota "
               "arrives from terminal sessions and from the usage cache Claude Code "
               "writes for its /usage dialog (opening /usage refreshes it).")
+NOTE_OAUTH = ("Claude Code terminal export, its local usage cache and an experimental "
+              "OAuth usage reader that a collector runs while Claude is in use; idle "
+              "readings become stale.")
 # A pushed activity summary older than this is no longer a reading: the
 # collector that sent it has stopped, and its token totals would stand still.
 PUSHED_ACTIVITY_SECONDS = 600
@@ -45,7 +50,7 @@ class ClaudeSource(Source):
     push_window_ids = ("five_hour", "seven_day")
     # A collector may also push what the local readers would find on its own
     # machine, and may do so before any quota has been reported.
-    push_extras = frozenset(("activity", "usage_cache"))
+    push_extras = frozenset(("activity", "usage_cache", "oauth_usage"))
     push_default_windows = WINDOWS
     config_fields = (
         {"key": "settings_path", "label": "Claude Code settings file (one profile per account)",
@@ -135,10 +140,19 @@ class ClaudeSource(Source):
         """
         if not cache.get("available") or not cache.get("fetched_at"):
             return
-        observed = timestamp(cache["fetched_at"])
+        self._merge_windows(report, cache, SOURCE_CACHE)
+
+    @staticmethod
+    def _merge_windows(report, reading, source):
+        """Put a reading's windows into the report at the moment they were fetched.
+
+        A reading only replaces an older one, so what was merged first wins a
+        tie: the terminal export, then OAuth, then the cache.
+        """
+        observed = timestamp(reading["fetched_at"])
         windows = list(report.get("windows", []))
         positions = {window.get("id"): index for index, window in enumerate(windows)}
-        for entry in cache.get("windows", []):
+        for entry in reading.get("windows", []):
             percent = entry.get("used_percent")
             if percent is None:
                 continue  # a window that is not reported stays as it was
@@ -150,7 +164,7 @@ class ClaudeSource(Source):
                     continue  # the terminal export is newer, or it is a tie
             window = quota_window(entry["id"], entry["label"], percent,
                                   entry.get("resets_at"), observed,
-                                  entry.get("period_minutes"), source=SOURCE_CACHE)
+                                  entry.get("period_minutes"), source=source)
             if position is None:
                 positions[entry["id"]] = len(windows)
                 windows.append(window)
@@ -159,8 +173,10 @@ class ClaudeSource(Source):
         report["windows"] = windows
 
     @staticmethod
-    def _note(observation, cache):
+    def _note(observation, cache, oauth=None):
         """Why the quota looks the way it does, in the current wording."""
+        if oauth is not None:
+            return NOTE_OAUTH
         if cache is not None and cache.get("available"):
             return NOTE_CACHE
         if observation is None:
@@ -211,18 +227,22 @@ class ClaudeSource(Source):
         else:
             report = deepcopy(stored)
         # What a collector pushed is the source's input, not part of its report.
-        for key in ("pushed_activity", "pushed_usage_cache"):
+        for key in ("pushed_activity", "pushed_usage_cache", "pushed_oauth_usage"):
             report.pop(key, None)
         # Every window says where it came from.
         for window in report["windows"]:
             window.setdefault("source", SOURCE_EXPORT)
+        oauth = stored.get("pushed_oauth_usage") if stored else None
+        if oauth is not None:
+            report["oauth_usage"] = {"fetched_at": oauth["fetched_at"], "reported_by": host}
+            self._merge_windows(report, oauth, SOURCE_OAUTH)
         if cache is not None:
             report["usage_cache"] = {key: value for key, value in cache.items()
                                      if key != "windows"}
             self._merge_cache(report, cache)
         # The note is the wording of today, not a copy frozen into the stored
         # reading when it was received (ingest writes one into every report).
-        report["note"] = self._note(observation, cache)
+        report["note"] = self._note(observation, cache, oauth)
         # Every report carries the collector trail (None before the first
         # push), so payload building can produce freshness hints (Phase 4).
         report["stale_after_seconds"] = self.config.get("stale_after_seconds", 900)

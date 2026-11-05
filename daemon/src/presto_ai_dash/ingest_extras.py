@@ -36,6 +36,7 @@ ACTIVITY_KEYS = frozenset(("available", "complete", "reason", "last_request_at",
                            "last_entrypoint", "requests_5h", "tokens_5h", "tokens_7d"))
 USAGE_CACHE_KEYS = frozenset(("available", "reason", "fetched_at", "windows", "credit",
                               "account_changed", "refreshes", "since"))
+OAUTH_USAGE_KEYS = frozenset(("fetched_at", "windows"))
 CREDIT_KEYS = frozenset(("limit", "used", "currency", "resets_at"))
 RESET_CREDIT_KEYS = frozenset(("available", "expires_at"))
 CREDITS_KEYS = frozenset(("balance", "unlimited"))
@@ -116,6 +117,35 @@ def _money(value, what):
     return value
 
 
+def _fetch_moment(value, now, what):
+    """The moment a reading was fetched: kept, capped at now, refused when absurd."""
+    moment = _moment(value, what)
+    if moment > now + FUTURE_TOLERANCE:
+        raise ValueError("%s is in the future" % what)
+    moment = min(moment, now)
+    if now - moment > MAX_FETCH_AGE:
+        raise ValueError("%s is more than 7 days old" % what)
+    return moment.isoformat()
+
+
+def clean_oauth_usage(value, now, check_window):
+    """An OAuth usage reading: windows and when they were fetched, and nothing else.
+
+    A failed request is never pushed, so a reading here always has a number.
+    """
+    _exact(value, OAUTH_USAGE_KEYS, "oauth_usage")
+    fetched = _fetch_moment(value.get("fetched_at"), now, "oauth_usage.fetched_at")
+    windows = value.get("windows")
+    if not isinstance(windows, list) or not 0 < len(windows) <= MAX_CACHE_WINDOWS:
+        raise ValueError("oauth_usage.windows must be a short list")
+    seen = set()
+    for window in windows:
+        check_window(window, seen, ("five_hour", "seven_day"), now)
+    if not any(window["used_percent"] is not None for window in windows):
+        raise ValueError("oauth_usage has no reading")
+    return {"fetched_at": fetched, "windows": [dict(window) for window in windows]}
+
+
 def clean_usage_cache(value, now, check_window):
     """The usage-cache reading: windows, credit and when Claude Code fetched them.
 
@@ -129,13 +159,7 @@ def clean_usage_cache(value, now, check_window):
                               allow_none=True)}
     fetched = value.get("fetched_at")
     if available:
-        moment = _moment(fetched, "usage_cache.fetched_at")
-        if moment > now + FUTURE_TOLERANCE:
-            raise ValueError("usage_cache.fetched_at is in the future")
-        moment = min(moment, now)
-        if now - moment > MAX_FETCH_AGE:
-            raise ValueError("usage_cache.fetched_at is more than 7 days old")
-        fetched = moment.isoformat()
+        fetched = _fetch_moment(fetched, now, "usage_cache.fetched_at")
     elif fetched is not None:
         raise ValueError("an unavailable usage cache has no fetched_at")
     result["fetched_at"] = fetched

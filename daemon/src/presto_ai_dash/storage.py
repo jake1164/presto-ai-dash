@@ -55,6 +55,14 @@ def _read_time(value):
         raise ValueError("invalid stored timestamp: %r" % (value,)) from exc
 
 
+def _keep_newer_oauth(target, previous):
+    """A delayed collector report must not roll an OAuth reading backwards."""
+    key = "pushed_oauth_usage"
+    old, new = previous.get(key), target.get(key)
+    if old and new and _read_time(old["fetched_at"]) >= _read_time(new["fetched_at"]):
+        target[key] = old
+
+
 def _validated_alerts(value):
     if not isinstance(value, list):
         raise ValueError("alerts must be a list")
@@ -357,7 +365,7 @@ class Storage:
 
     # Readings a collector pushes beside the quota windows. A later push of the
     # windows alone (a status line after a response) must not erase them.
-    PUSHED_KEYS = ("pushed_activity", "pushed_usage_cache")
+    PUSHED_KEYS = ("pushed_activity", "pushed_usage_cache", "pushed_oauth_usage")
 
     def save_observation(self, instance_id, report, evidence, collector_host=None,
                          collector_version=None, progress=None, now=None, extras=None,
@@ -394,7 +402,9 @@ class Storage:
                         merged = deepcopy(base_report)
                         for window in merged["windows"]:
                             window["observed_at"] = observed
-                    merged.update(extras)
+                    incoming = dict(extras)
+                    _keep_newer_oauth(incoming, merged)
+                    merged.update(incoming)
                     if previous is None:
                         self._conn.execute(
                             "INSERT INTO observations (instance_id, report, evidence,"
@@ -436,6 +446,7 @@ class Storage:
                         window["observed_at"] = observed
                 if previous and previous["report"]:
                     kept = json.loads(previous["report"])
+                    _keep_newer_oauth(result, kept)
                     for key in self.PUSHED_KEYS:
                         if key in kept and key not in result:
                             result[key] = kept[key]

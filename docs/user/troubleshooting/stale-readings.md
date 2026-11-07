@@ -24,7 +24,7 @@ The threshold depends on the route:
 | --- | --- |
 | A normal quota source | Three times the refresh interval, or three minutes, whichever is longer |
 | The Claude terminal export | `Mark idle readings stale after (seconds)`, 900 by default |
-| The Claude usage cache | `Mark usage cache readings stale after (seconds)`, 7200 by default |
+| The Claude usage cache | `Mark usage cache readings stale after (seconds)`, 1800 by default |
 
 Each window of a merged report is judged by the route it came from, so a
 fresh cache reading next to an old export reading is not dragged down by the

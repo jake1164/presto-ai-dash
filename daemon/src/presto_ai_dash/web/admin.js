@@ -1012,6 +1012,7 @@
       type?.id === "ollama_cloud" ? "Reads monthly included credits, purchased balance and reset dates (or legacy limits), plus separate rolling 7-day activity. Warning: Ollama keys have no read-only scope, so this key can also run models. Create a dedicated key named presto-ai-dash-monitor so you can revoke it alone. Local Ollama is a separate source." :
       type?.id === "codex" ? "Reads Codex subscription quotas using your ChatGPT login in Codex. Leave both paths blank for automatic discovery and the default profile. Separate accounts need separate Codex profile directories. OAuth stays with Codex; no pay-per-use API key is needed. Browser and device-code sign-in are buttons below; cancellation and sign-out are in this account's Setup section (open the account's row)." :
       type?.id === "litellm" ? "Reads the usage LiteLLM routed today: requests, tokens, spend, failures and the busiest model. Use a read-only Management key owned by an Admin (View Only) user, never the master key; the setup guide below shows how." :
+      type?.id === "claude" && type.collector_only ? "Reads Claude Code's 5h/weekly subscription quotas as reported by a remote collector running beside Claude Code. No API key is needed. A reading goes stale when the collector has not reported for the time set above, and the Presto then shows how old it is." :
       type?.id === "claude" ? "Claude Code exports 5h/weekly subscription quotas after normal terminal responses. Save this source, then set up its exporter below. Readings go straight to the database; existing status-line output is preserved. No API key is needed. Idle readings become stale; the VS Code panel does not run the status line, but the optional usage cache reader reads the numbers Claude Code caches on disk for its /usage dialog." : "";
     // The setup guide stays inside the editor, below the source description.
     const guide = element("source-type-help");
@@ -1041,14 +1042,20 @@
       if (field.type === "int") {
         input.min = field.minimum; input.max = field.maximum; input.step = "1"; input.required = true;
       } else if (field.type === "url") input.required = true;
+      // A hidden field keeps its input, so saving does not reset its value.
+      if (field.hidden) { label.hidden = true; input.hidden = true; }
       element("source-fields").append(label, input);
-      if (field.note) {
+      if (field.note && !field.hidden) {
         const note = document.createElement("p"); note.className = "note"; note.textContent = field.note;
         element("source-fields").append(note);
       }
     }
     element("key-section").hidden = !type.has_secret;
-    if (type.id === "claude") element("source-fields").append(...vscodePreset());
+    if (type.id === "claude" && type.collector_only) {
+      // No Claude Code files on this machine: the local readers are hidden and
+      // the readings come from a collector, so say so at the top of the form.
+      element("source-fields").prepend(noClaudeNote());
+    } else if (type.id === "claude") element("source-fields").append(...vscodePreset());
     if (type.id === "codex") element("source-fields").append(codexSignIn());
   }
   function codexSignIn() {

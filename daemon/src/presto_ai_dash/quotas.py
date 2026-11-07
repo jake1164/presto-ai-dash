@@ -21,10 +21,13 @@ SOURCE_EXPORT = "terminal export"
 SOURCE_CACHE = "usage cache"
 
 # How long a reading from Claude Code's usage cache stays fresh. The cache is
-# only refreshed when /usage is opened, so the terminal export's threshold
-# would call a good reading stale. A Claude account can set its own value;
-# this is the default when it does not.
-USAGE_CACHE_STALE_SECONDS = 7200
+# refreshed only when Claude Code decides to (opening /usage does it), so the
+# terminal export's 15 minutes would call many good readings stale. Two hours
+# was too long: during active use the 5h figure drifted about 7 points in 53
+# minutes while the cache still counted as fresh. Thirty minutes keeps that
+# drift to a few points. A Claude account can set its own value; this is the
+# default when it does not.
+USAGE_CACHE_STALE_SECONDS = 1800
 
 
 def window_stale_after(report, window):

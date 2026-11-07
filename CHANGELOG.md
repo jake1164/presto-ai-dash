@@ -6,6 +6,11 @@ All notable changes to Presto AI Dash are documented here. Newest release at the
 
 ## [Unreleased]
 
+### Claude readings and containers
+
+- A Claude usage-cache reading now counts as stale after 30 minutes by default, down from two hours. Two hours let a reading that was several points behind real use still look current. Accounts that already saved the old value keep it; change **Mark usage cache readings stale after** to use the new one.
+- In a container with no Claude Code files visible, the Claude form hides the settings that read files on that machine (settings file, activity, usage cache and state file) and points to the remote collector. The stale thresholds stay, and the usage-cache one is labelled as applying to a collector's readings. If you do mount a Claude profile, the full form is shown.
+
 ### Remote token status-line commands
 
 - The status-line commands shown with a new remote token now carry the real daemon address, taken from the host the admin page was opened with, instead of a `REPLACE-WITH-DASH-ADDRESS` placeholder. They match the address already filled in for the setup file.

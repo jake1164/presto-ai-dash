@@ -1,5 +1,6 @@
 """Claude Code subscription windows: the status-line export and the usage cache."""
 
+import os
 from copy import deepcopy
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -47,6 +48,13 @@ class ClaudeSource(Source):
     # machine, and may do so before any quota has been reported.
     push_extras = frozenset(("activity", "usage_cache"))
     push_default_windows = WINDOWS
+    # The fields that read Claude Code's files on this machine. A daemon in a
+    # container normally has none of them (the docs say not to mount them), so
+    # the form hides these there; see sources.source_catalog.
+    local_fields = ("settings_path", "activity_logs", "active_seconds",
+                    "usage_cache", "usage_cache_path")
+    container_labels = {
+        "usage_cache_stale_seconds": "Mark Claude usage readings from a collector stale after (seconds)"}
     config_fields = (
         {"key": "settings_path", "label": "Claude Code settings file (one profile per account)",
          "type": "string", "default": str(Path.home() / ".claude" / "settings.json")},
@@ -76,6 +84,20 @@ class ClaudeSource(Source):
         # The usage cache reader lives as long as the configuration: it holds
         # the account fingerprint in memory, and a re-save starts a new one.
         self._usage_reader = None
+
+    @staticmethod
+    def local_files_present(environ=None, home=None):
+        """Whether Claude Code's profile can be seen from this process.
+
+        Looks only for the existence of the default profile directory, the
+        state file beside it, or a custom ``CLAUDE_CONFIG_DIR``. It reads
+        nothing from them.
+        """
+        environ = os.environ if environ is None else environ
+        home = Path.home() if home is None else Path(home)
+        custom = (environ.get("CLAUDE_CONFIG_DIR") or "").strip()
+        return ((home / ".claude").is_dir() or (home / ".claude.json").is_file()
+                or bool(custom and Path(custom).is_dir()))
 
     def attach_storage(self, storage):
         self.storage = storage

@@ -146,7 +146,7 @@ file:
 | Setting | Range | Default |
 | --- | --- | --- |
 | Mark idle readings stale after (seconds) | any | 900 |
-| Mark usage cache readings stale after (seconds) | 300 to 604800 | 7200 |
+| Mark usage cache readings stale after (seconds) | 300 to 604800 | 1800 |
 | Treat Claude as in use for (seconds) after a request | any | 300 |
 | Request timeout (seconds) | 1 to 60 | 10 |
 | Refresh interval (seconds) | 30 to 3600 | 60 |

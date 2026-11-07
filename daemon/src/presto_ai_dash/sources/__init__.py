@@ -153,12 +153,35 @@ def _container_field(field):
     return field
 
 
+def _container_fields(cls):
+    """A source's fields as a daemon in a container should show them.
+
+    A source that reads files on the user's machine names those fields in
+    ``local_fields``. In a container with none of those files visible they have
+    nothing to act on, so they are marked ``hidden`` (the form keeps their
+    values) and the stale threshold is relabelled for a collector's readings.
+    Files that are visible, mounted by the user, keep the fields shown.
+    """
+    fields = [_container_field(f) for f in cls.config_fields]
+    local = getattr(cls, "local_fields", ())
+    if not local or cls.local_files_present():
+        return fields, False
+    relabel = getattr(cls, "container_labels", {})
+    return [dict(f, hidden=True) if f["key"] in local else
+            dict(f, label=relabel[f["key"]]) if f["key"] in relabel else f
+            for f in fields], True
+
+
 def source_catalog(container=None):
     container = in_container() if container is None else container
-    return [{"id": cls.id, "name": cls.name,
-             "fields": [_container_field(f) if container else f for f in cls.config_fields],
-             "has_secret": bool(cls.secret_field)}
-            for cls in _REGISTRY.values()]
+    catalog = []
+    for cls in _REGISTRY.values():
+        fields, collector_only = (_container_fields(cls) if container
+                                  else (list(cls.config_fields), False))
+        catalog.append({"id": cls.id, "name": cls.name, "fields": fields,
+                        "has_secret": bool(cls.secret_field),
+                        "collector_only": collector_only})
+    return catalog
 
 
 def build_sources(config):

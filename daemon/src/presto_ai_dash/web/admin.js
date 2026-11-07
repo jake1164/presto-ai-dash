@@ -1305,19 +1305,10 @@
     if (open) loadServiceAlerts(id);
   }
   function ingestAddress(reveal) {
-    // The host is what this page was opened with. The device port is the
-    // daemon's, moved by the same offset as the admin port when the page was
-    // reached through a different one (a container publishing 18788 for 8788
-    // publishes 18787 for 8787). Behind a proxy there is no port to compare:
-    // the box is the person's to correct.
-    const path = /^https?:\/\/[^/]*(\/.*)$/.exec(reveal.ingest_url || "");
-    let port = reveal.device_port || 8787;
-    if (location.port && reveal.admin_port) {
-      const moved = port + Number(location.port) - reveal.admin_port;
-      if (moved >= 1 && moved <= 65535) port = moved;
-    }
-    return location.protocol + "//" + location.hostname + ":" + port
-      + (path ? path[1] : "/api/v1/ingest");
+    // The daemon builds it from the host this page was opened with, so the
+    // status-line commands and this box carry the same address. Behind a proxy
+    // there is no port to compare: the box is the person's to correct.
+    return reveal.ingest_url;
   }
   function downloadSetupFile(reveal, url) {
     // The token is shown once and the daemon keeps only its hash, so the setup
@@ -1367,27 +1358,18 @@
     title.textContent = "Remote token — shown only once, copy it now:";
     box.append(title);
     box.append(copyCell(tokenReveal.token));
-    if (tokenReveal.posix_snippet) {
-      // Claude Code in a terminal runs the status line after every response.
-      for (const [name, snippet] of [["POSIX (sh/bash) settings.json status line:",
-                                      tokenReveal.posix_snippet],
-                                     ["Windows PowerShell settings.json status line:",
-                                      tokenReveal.powershell_snippet]]) {
-        const label = document.createElement("p"); label.className = "note";
-        label.textContent = name + " edit the URL after pasting:";
-        box.append(label, copyCell(snippet));
-      }
-    }
     if (tokenReveal.collector_config) {
-      // Everything without a status line is read on a timer by the collector's
-      // watch command. Its setup command installs the file downloaded here.
+      // The simple route, and the first one shown: the collector's watch command
+      // reads on a timer, and its setup command installs the file downloaded here.
       const label = document.createElement("p"); label.className = "note";
       label.textContent = (tokenReveal.service === "codex"
-        ? "Codex has no status line, so the collector reads it on a timer. "
-        : "The VS Code panel does not run the status line. To report its activity and usage cache, ")
-        + "On the computer where " + (tokenReveal.service === "codex" ? "Codex is signed in" : "Claude Code runs")
+        ? "Codex has no status line, so the collector reads it on a timer. On the computer where Codex is signed in"
+        : "Simplest setup, works for Claude Code in a terminal and in VS Code; its quota comes from Claude "
+          + "Code's usage cache, which refreshes at irregular moments (open /usage to refresh it). "
+          + "On the computer where Claude Code runs")
         + ": download presto_collector.py (Settings tab) and this setup file into the same "
-        + "Downloads folder, then run: python presto_collector.py setup";
+        + "Downloads folder, run: python presto_collector.py setup, then keep it going with: "
+        + "python presto_collector.py watch";
       const address = document.createElement("input"); address.type = "text";
       address.className = "setup-address"; address.setAttribute("aria-label", "Daemon address for the collector");
       address.value = ingestAddress(tokenReveal);
@@ -1402,6 +1384,27 @@
       caution.textContent = "This way of reporting has been tested against a throwaway daemon, "
         + "not yet on a second real computer. Run it once with --once and read what it says.";
       box.append(caution);
+    }
+    if (tokenReveal.posix_snippet) {
+      // Optional, Claude Code in a terminal only: the status line runs the collector
+      // after every response, so the readings are live and nothing has to be kept
+      // running. It is not a command to type: Claude Code feeds it its status JSON.
+      const windows = /windows/i.test(navigator.userAgent || "");
+      const options = [["Windows PowerShell", tokenReveal.powershell_snippet],
+                       ["macOS, Linux or Git Bash (sh)", tokenReveal.posix_snippet]];
+      if (!windows) options.reverse();
+      const extra = document.createElement("div"); extra.className = "note";
+      extra.append(el("p", "note",
+        "Optional, for Claude Code in a terminal: accurate quota after every response from its status "
+        + "line, with nothing to keep running. Save presto_collector.py somewhere permanent, put this in Claude Code's "
+        + "settings.json as the status line command, and change only the path to presto_collector.py. "
+        + "It is not for typing into a terminal: Claude Code runs it and feeds it its status."));
+      extra.append(el("p", "note", options[0][0] + ":"), copyCell(options[0][1]));
+      const others = document.createElement("details");
+      others.append(el("summary", "", "Another kind of computer"),
+                    el("p", "note", options[1][0] + ":"), copyCell(options[1][1]));
+      extra.append(others);
+      box.append(extra);
     }
     const dismiss = document.createElement("button"); dismiss.type = "button";
     dismiss.textContent = "Hide";

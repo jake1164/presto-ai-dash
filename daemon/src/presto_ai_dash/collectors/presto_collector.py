@@ -69,7 +69,7 @@ COLLECTOR_NAME = "claude-statusline"
 # Every mode this file can run, by the name used on the command line and as the
 # envelope's collector name. A new service is a new entry here.
 MODES = (COLLECTOR_NAME, "watch")
-COLLECTOR_VERSION = "1"
+COLLECTOR_VERSION = "2"
 SCHEMA_NAME = "presto-ai-dash.observation/1"
 WINDOW_FIELDS = ("id", "label", "period_minutes", "used_percent", "resets_at", "state")
 POST_TIMEOUT_SECONDS = 1.5
@@ -1030,6 +1030,13 @@ def main(argv=None, state_path=None):
     previous = list(args.previous)
     if previous and previous[0] == "--":  # argparse keeps the separator in REMAINDER.
         previous.pop(0)
+    if sys.stdin.isatty():
+        # Claude Code pipes its status JSON in. A person at a terminal would
+        # wait here for input that never comes.
+        sys.stderr.write("presto_collector: claude-statusline is run by Claude Code, which pipes "
+                         "its status into it; it has nothing to read here. To set this computer "
+                         "up, run: python presto_collector.py setup\n")
+        return 2
     raw = sys.stdin.buffer.read(MAX_INPUT + 1)
     envelope = None
     if len(raw) <= MAX_INPUT:

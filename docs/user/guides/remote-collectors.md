@@ -163,23 +163,30 @@ page. The account's card says whether remote reports are on, and links there.
    is one the other computer can reach) and, for Claude, the status-line
    snippets.
 4. On the remote computer:
-    - **For the status line (Claude in a terminal):** set the `statusLine`
-      command in that profile's Claude settings file to the snippet, with its
-      URL edited to the daemon's real address.
-    - **For `watch` (the VS Code panel, Codex):** put the downloaded setup
-      file in your Downloads folder (or beside `presto_collector.py`) and run
+    - **The simple way, for `watch` (Claude in a terminal or in VS Code, and
+      Codex):** put the downloaded setup file in your Downloads folder (or
+      beside `presto_collector.py`) and run
       `python presto_collector.py setup`. It saves `collector.json` and the
       token in `~/.presto-ai-dash/` (the token file readable by you only),
       deletes the setup file, which holds the token, and checks once. Run it
       again for each further account: they are added to the same
       `collector.json`. Then `python presto_collector.py watch` keeps it going.
+      For Claude, the quota comes from the usage cache, which refreshes at
+      irregular moments.
+    - **Optionally, for the status line (Claude in a terminal):** for accurate
+      quota after every response, set the `statusLine` command in that
+      profile's Claude settings file to the snippet. It already holds the
+      daemon's address, as the page was opened with it, and the token file that
+      `setup` saves in `~/.presto-ai-dash/`. Change only the path to
+      `presto_collector.py`. Claude Code runs this command and feeds it its
+      status; typed into a terminal by hand it prints a hint and stops.
 
 ## Running it by hand
 
 ```bash
 python3 presto_collector.py claude-statusline \
     --url http://192.168.1.50:8787/api/v1/ingest \
-    --token-file ~/.config/presto-ai-dash/claude.token \
+    --token-file ~/.presto-ai-dash/claude.token \
     --host laptop -- <previous status line command, optional>
 ```
 

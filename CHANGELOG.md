@@ -6,6 +6,13 @@ All notable changes to Presto AI Dash are documented here. Newest release at the
 
 ## [Unreleased]
 
+### Remote token status-line commands
+
+- The status-line commands shown with a new remote token now carry the real daemon address, taken from the host the admin page was opened with, instead of a `REPLACE-WITH-DASH-ADDRESS` placeholder. They match the address already filled in for the setup file.
+- Their token file is now `~/.presto-ai-dash/<name>.token`, the folder where `presto_collector.py setup` saves it, instead of a different folder the person had to create. Only the path to `presto_collector.py` itself is still the person's to change.
+- A new remote token now shows the simple route first (download the setup file, run `setup`, then `watch`). The terminal status line is an optional extra below it, showing the command for the computer the page is open on and the other kind in a fold-out.
+- `presto_collector.py` is now version 2: typed into a terminal by hand, `claude-statusline` prints a one-line hint and exits with status 2 instead of waiting silently for input. Claude Code's own use is unchanged. Existing installs show "collector update available".
+
 ### Website search discovery
 
 - The marketing website now publishes a root sitemap containing its canonical

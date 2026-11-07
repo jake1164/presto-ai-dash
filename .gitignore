@@ -22,6 +22,8 @@ daemon/src/presto_ai_dash/presto_app_boot/
 *.db-wal
 *.db-shm
 *.key
+# The daemon's private update certificate authority (see ota_tls.py)
+*.ota.pem
 dash.toml
 # A copy of a private file made by hand or by an editor
 dash.toml.*

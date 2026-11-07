@@ -82,10 +82,15 @@ class ClaudeLocalFieldsTests(unittest.TestCase):
         self.assertFalse(entry["collector_only"])
         self.assertEqual(self.hidden(entry), set())
 
-    def test_outside_a_container_nothing_is_hidden(self):
-        entry = self.claude(container=False, present=False)
-        self.assertFalse(entry["collector_only"])
-        self.assertEqual(self.hidden(entry), set())
+    def test_the_files_decide_not_the_container(self):
+        # A server that is not a container and has no Claude profile is treated
+        # the same way; a machine with one keeps the fields.
+        gone = self.claude(container=False, present=False)
+        self.assertTrue(gone["collector_only"])
+        self.assertEqual(self.hidden(gone), self.LOCAL)
+        here = self.claude(container=False, present=True)
+        self.assertFalse(here["collector_only"])
+        self.assertEqual(self.hidden(here), set())
 
     def test_every_source_declares_collector_only(self):
         for entry in source_catalog(container=True):

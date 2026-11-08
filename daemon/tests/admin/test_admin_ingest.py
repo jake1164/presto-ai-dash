@@ -126,6 +126,28 @@ class AdminIngestTests(AdminServerBase):
         self.assertIsNone(entry["ingest"]["last_progress_at"])
         self.assertNotIn(data["token"], json.dumps(listing))
 
+    def test_snippets_carry_the_address_the_page_was_opened_with(self):
+        data = self.create_token()
+        # The test config's ports are 0, so the offset from the configured admin
+        # port to the one this page was reached on is the admin server's own port.
+        port = self.config["daemon"]["port"] + self.admin.actual_port - self.config["admin"]["port"]
+        expected = "http://127.0.0.1:%d/api/v1/ingest" % port
+        decoded = base64.b64decode(data["powershell_snippet"].rsplit(" ", 1)[1]).decode("utf-16-le")
+        self.assertEqual(data["ingest_url"], expected)
+        for text in (data["posix_snippet"], decoded, data["collector_config"]):
+            self.assertIn(expected, text)
+            self.assertNotIn("REPLACE-WITH-DASH-ADDRESS", text)
+        # The token file is where `presto_collector.py setup` saves it.
+        for text in (data["posix_snippet"], decoded):
+            self.assertIn("~/.presto-ai-dash/" + data["token_file"], text)
+
+    def test_the_device_port_follows_a_moved_admin_port(self):
+        url = self.manager.ingest_url_for("dash.lan", self.config["admin"]["port"] + 10000)
+        self.assertEqual(url, "http://dash.lan:%d/api/v1/ingest" % (self.config["daemon"]["port"] + 10000))
+        self.assertEqual(self.manager.ingest_url_for("::1", None),
+                         "http://[::1]:%d/api/v1/ingest" % self.config["daemon"]["port"])
+        self.assertIn("REPLACE-WITH-DASH-ADDRESS", self.manager.ingest_url_for("", None))
+
     def test_rotate_invalidates_the_old_token_end_to_end(self):
         first = self.create_token()["token"]
         second = self.create_token()["token"]

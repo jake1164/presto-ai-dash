@@ -23,7 +23,7 @@ Claude it is different for each route:
 | Route | Threshold | Default | Why |
 | --- | --- | --- | --- |
 | Terminal export | `Mark idle readings stale after (seconds)` | 900 | The status line only runs after a Claude reply |
-| Usage cache | `Mark usage cache readings stale after (seconds)` | 7200 | The cache is only refreshed when `/usage` is opened |
+| Usage cache | `Mark usage cache readings stale after (seconds)` | 1800 | Claude Code refreshes the cache on its own schedule (opening `/usage` does it), so a reading can lag behind real use |
 
 Each window of a merged report is judged by the route it came from, so a
 fresh cache reading next to an old export reading is not dragged down by the

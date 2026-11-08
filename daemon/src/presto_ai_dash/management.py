@@ -506,31 +506,52 @@ class SourceConfiguration:
         log.info("the alert thresholds of %s are ignored: they would not be usable, "
                  "so the global values are used", instance_id)
 
-    def create_ingest_token(self, instance_id):
+    def ingest_url_for(self, page_host, page_port=None):
+        """The ingest address a collector on another computer can use.
+
+        The host is the one the admin page was opened with. The device port is
+        the daemon's, moved by the same offset as the admin port when the page
+        was reached through a different one (a container publishing 18788 for
+        8788 publishes 18787 for 8787). With no host, the placeholder stays.
+        """
+        if not page_host:
+            return INGEST_URL_PLACEHOLDER
+        port = self.config["daemon"]["port"]
+        if page_port:
+            moved = port + page_port - self.config["admin"]["port"]
+            if 1 <= moved <= 65535:
+                port = moved
+        host = "[%s]" % page_host if ":" in page_host else page_host
+        return "http://%s:%d/api/v1/ingest" % (host, port)
+
+    def create_ingest_token(self, instance_id, page_host=None, page_port=None):
         """Mint or rotate one write-only push token, shown exactly once."""
         token = self.storage.create_ingest_token(instance_id)
         record = next((row for row in self.storage.source_instances()
                        if row["id"] == instance_id), None)
         service = "codex" if record and record["type"] == "codex" else "claude"
         token_file = "%s-%s.token" % (service, instance_id)
+        ingest_url = self.ingest_url_for(page_host, page_port)
         result = {"token": token, "service": service, "token_file": token_file,
                   "name": (record or {}).get("name") or service,
-                  "ingest_url": INGEST_URL_PLACEHOLDER,
+                  "ingest_url": ingest_url,
                   "device_port": self.config["daemon"]["port"],
                   "admin_port": self.config["admin"]["port"],
                   "collector_folder": "~/.presto-ai-dash",
                   "collector_config": collector_config_text(
                       service, (record or {}).get("name") or service, token_file,
-                      INGEST_URL_PLACEHOLDER)}
+                      ingest_url)}
         if service == "claude":
             # The terminal's status line, for Claude Code in a terminal. Codex has
-            # no status line: it is read on a timer by `watch`.
+            # no status line: it is read on a timer by `watch`. The token file is
+            # where `presto_collector.py setup` saves it, so the command and the
+            # setup agree. Only the collector's own location is the person's to say.
             result["posix_snippet"] = presto_collector.posix_snippet(
-                "/path/to/presto_collector.py", INGEST_URL_PLACEHOLDER,
-                "~/.config/presto-ai-dash/" + token_file, "laptop")
+                "/path/to/presto_collector.py", ingest_url,
+                "~/.presto-ai-dash/" + token_file, "laptop")
             result["powershell_snippet"] = presto_collector.powershell_snippet(
-                "C:/path/to/presto_collector.py", INGEST_URL_PLACEHOLDER,
-                "C:/Users/USERNAME/presto-ai-dash/" + token_file, "laptop")
+                "C:/path/to/presto_collector.py", ingest_url,
+                "~/.presto-ai-dash/" + token_file, "laptop")
         return result
 
     def revoke_ingest_token(self, instance_id):

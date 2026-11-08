@@ -20,8 +20,8 @@
     return note;
   }
   function noClaudeNote() {
-    const note = el("p", "note", "The daemon runs in a container, which has no Claude Code on it to set up. "
-      + "Run Claude Code on your own computer and send its quota with the remote collector. ");
+    const note = el("p", "note", "The daemon runs where there is no Claude Code to set up (a container "
+      + "has none). Run Claude Code on your own computer and send its quota with the remote collector. ");
     const link = remoteSettingsLink();
     link.addEventListener("click", () => { if (!element("editor-modal").hidden && !busy) closeEditor(); });
     note.append(link);
@@ -1005,6 +1005,10 @@
 
   function renderFields(settings = {}) {
     const type = selectedType();
+    // Claude's local readers are hidden where no Claude Code files are found,
+    // unless this account already turned one on: that account must see them.
+    const collectorOnly = Boolean(type?.collector_only)
+      && !(settings.usage_cache || settings.activity_logs);
     element("source-fields").replaceChildren();
     element("source-help").textContent = type?.id === "ollama" ?
       "Monitors local Ollama health and loaded models. The local API needs no key; this does not monitor Ollama Cloud subscription quotas." :
@@ -1012,6 +1016,7 @@
       type?.id === "ollama_cloud" ? "Reads monthly included credits, purchased balance and reset dates (or legacy limits), plus separate rolling 7-day activity. Warning: Ollama keys have no read-only scope, so this key can also run models. Create a dedicated key named presto-ai-dash-monitor so you can revoke it alone. Local Ollama is a separate source." :
       type?.id === "codex" ? "Reads Codex subscription quotas using your ChatGPT login in Codex. Leave both paths blank for automatic discovery and the default profile. Separate accounts need separate Codex profile directories. OAuth stays with Codex; no pay-per-use API key is needed. Browser and device-code sign-in are buttons below; cancellation and sign-out are in this account's Setup section (open the account's row)." :
       type?.id === "litellm" ? "Reads the usage LiteLLM routed today: requests, tokens, spend, failures and the busiest model. Use a read-only Management key owned by an Admin (View Only) user, never the master key; the setup guide below shows how." :
+      type?.id === "claude" && collectorOnly ? "Reads Claude Code's 5h/weekly subscription quotas as reported by a remote collector running beside Claude Code. No API key is needed. A reading goes stale when the collector has not reported for the time set above, and the Presto then shows how old it is." :
       type?.id === "claude" ? "Claude Code exports 5h/weekly subscription quotas after normal terminal responses. Save this source, then set up its exporter below. Readings go straight to the database; existing status-line output is preserved. No API key is needed. Idle readings become stale; the VS Code panel does not run the status line, but the optional usage cache reader reads the numbers Claude Code caches on disk for its /usage dialog." : "";
     // The setup guide stays inside the editor, below the source description.
     const guide = element("source-type-help");
@@ -1020,6 +1025,7 @@
                                       type.name + " setup guide") : null;
     if (guideLink) guide.append(guideLink);
     if (!type) return;
+    const concealed = [];
     for (const field of type.fields) {
       const label = document.createElement("label");
       label.htmlFor = "field-" + field.key; label.textContent = field.label;
@@ -1041,14 +1047,28 @@
       if (field.type === "int") {
         input.min = field.minimum; input.max = field.maximum; input.step = "1"; input.required = true;
       } else if (field.type === "url") input.required = true;
+      // A hidden field keeps its input, so saving does not reset its value.
+      const conceal = Boolean(field.hidden) && collectorOnly;
+      if (conceal) { label.hidden = true; input.hidden = true; concealed.push(label, input); }
       element("source-fields").append(label, input);
-      if (field.note) {
+      if (field.note && !conceal) {
         const note = document.createElement("p"); note.className = "note"; note.textContent = field.note;
         element("source-fields").append(note);
       }
     }
     element("key-section").hidden = !type.has_secret;
-    if (type.id === "claude") element("source-fields").append(...vscodePreset());
+    if (type.id === "claude" && collectorOnly) {
+      // No Claude Code files found by the daemon: the local readers are hidden
+      // and the readings come from a collector. The button brings the settings
+      // back for a profile in a place the daemon could not guess.
+      const reveal = el("button", "", "Show local reader settings"); reveal.type = "button";
+      reveal.addEventListener("click", () => {
+        for (const node of concealed) node.hidden = false;
+        reveal.remove();
+        element("source-fields").append(...vscodePreset());
+      });
+      element("source-fields").prepend(noClaudeNote(), reveal);
+    } else if (type.id === "claude") element("source-fields").append(...vscodePreset());
     if (type.id === "codex") element("source-fields").append(codexSignIn());
   }
   function codexSignIn() {
@@ -1305,19 +1325,10 @@
     if (open) loadServiceAlerts(id);
   }
   function ingestAddress(reveal) {
-    // The host is what this page was opened with. The device port is the
-    // daemon's, moved by the same offset as the admin port when the page was
-    // reached through a different one (a container publishing 18788 for 8788
-    // publishes 18787 for 8787). Behind a proxy there is no port to compare:
-    // the box is the person's to correct.
-    const path = /^https?:\/\/[^/]*(\/.*)$/.exec(reveal.ingest_url || "");
-    let port = reveal.device_port || 8787;
-    if (location.port && reveal.admin_port) {
-      const moved = port + Number(location.port) - reveal.admin_port;
-      if (moved >= 1 && moved <= 65535) port = moved;
-    }
-    return location.protocol + "//" + location.hostname + ":" + port
-      + (path ? path[1] : "/api/v1/ingest");
+    // The daemon builds it from the host this page was opened with, so the
+    // status-line commands and this box carry the same address. Behind a proxy
+    // there is no port to compare: the box is the person's to correct.
+    return reveal.ingest_url;
   }
   function downloadSetupFile(reveal, url) {
     // The token is shown once and the daemon keeps only its hash, so the setup
@@ -1367,27 +1378,18 @@
     title.textContent = "Remote token — shown only once, copy it now:";
     box.append(title);
     box.append(copyCell(tokenReveal.token));
-    if (tokenReveal.posix_snippet) {
-      // Claude Code in a terminal runs the status line after every response.
-      for (const [name, snippet] of [["POSIX (sh/bash) settings.json status line:",
-                                      tokenReveal.posix_snippet],
-                                     ["Windows PowerShell settings.json status line:",
-                                      tokenReveal.powershell_snippet]]) {
-        const label = document.createElement("p"); label.className = "note";
-        label.textContent = name + " edit the URL after pasting:";
-        box.append(label, copyCell(snippet));
-      }
-    }
     if (tokenReveal.collector_config) {
-      // Everything without a status line is read on a timer by the collector's
-      // watch command. Its setup command installs the file downloaded here.
+      // The simple route, and the first one shown: the collector's watch command
+      // reads on a timer, and its setup command installs the file downloaded here.
       const label = document.createElement("p"); label.className = "note";
       label.textContent = (tokenReveal.service === "codex"
-        ? "Codex has no status line, so the collector reads it on a timer. "
-        : "The VS Code panel does not run the status line. To report its activity and usage cache, ")
-        + "On the computer where " + (tokenReveal.service === "codex" ? "Codex is signed in" : "Claude Code runs")
+        ? "Codex has no status line, so the collector reads it on a timer. On the computer where Codex is signed in"
+        : "Simplest setup, works for Claude Code in a terminal and in VS Code; its quota comes from Claude "
+          + "Code's usage cache, which refreshes at irregular moments (open /usage to refresh it). "
+          + "On the computer where Claude Code runs")
         + ": download presto_collector.py (Settings tab) and this setup file into the same "
-        + "Downloads folder, then run: python presto_collector.py setup";
+        + "Downloads folder, run: python presto_collector.py setup, then keep it going with: "
+        + "python presto_collector.py watch";
       const address = document.createElement("input"); address.type = "text";
       address.className = "setup-address"; address.setAttribute("aria-label", "Daemon address for the collector");
       address.value = ingestAddress(tokenReveal);
@@ -1402,6 +1404,27 @@
       caution.textContent = "This way of reporting has been tested against a throwaway daemon, "
         + "not yet on a second real computer. Run it once with --once and read what it says.";
       box.append(caution);
+    }
+    if (tokenReveal.posix_snippet) {
+      // Optional, Claude Code in a terminal only: the status line runs the collector
+      // after every response, so the readings are live and nothing has to be kept
+      // running. It is not a command to type: Claude Code feeds it its status JSON.
+      const windows = /windows/i.test(navigator.userAgent || "");
+      const options = [["Windows PowerShell", tokenReveal.powershell_snippet],
+                       ["macOS, Linux or Git Bash (sh)", tokenReveal.posix_snippet]];
+      if (!windows) options.reverse();
+      const extra = document.createElement("div"); extra.className = "note";
+      extra.append(el("p", "note",
+        "Optional, for Claude Code in a terminal: accurate quota after every response from its status "
+        + "line, with nothing to keep running. Save presto_collector.py somewhere permanent, put this in Claude Code's "
+        + "settings.json as the status line command, and change only the path to presto_collector.py. "
+        + "It is not for typing into a terminal: Claude Code runs it and feeds it its status."));
+      extra.append(el("p", "note", options[0][0] + ":"), copyCell(options[0][1]));
+      const others = document.createElement("details");
+      others.append(el("summary", "", "Another kind of computer"),
+                    el("p", "note", options[1][0] + ":"), copyCell(options[1][1]));
+      extra.append(others);
+      box.append(extra);
     }
     const dismiss = document.createElement("button"); dismiss.type = "button";
     dismiss.textContent = "Hide";

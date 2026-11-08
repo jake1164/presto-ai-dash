@@ -107,7 +107,7 @@ class EnvelopeTests(unittest.TestCase):
         envelope = collector.build_envelope(payload(), "laptop", client_time=NOW)
         self.assertEqual(envelope["schema"], "presto-ai-dash.observation/1")
         self.assertEqual(envelope["collector"], {"name": "claude-statusline",
-                                                 "version": "1", "host": "laptop"})
+                                                 "version": collector.COLLECTOR_VERSION, "host": "laptop"})
         self.assertEqual(envelope["client_time"], NOW.isoformat())
         self.assertEqual(envelope["provider_version"], "2.1.296")
         self.assertEqual([w["id"] for w in envelope["windows"]], ["five_hour", "seven_day"])
@@ -125,7 +125,7 @@ class EnvelopeTests(unittest.TestCase):
         heartbeat = collector.heartbeat_envelope("laptop", client_time=NOW)
         self.assertEqual(heartbeat, {"schema": "presto-ai-dash.observation/1",
                                      "collector": {"name": "claude-statusline",
-                                                   "version": "1", "host": "laptop"},
+                                                   "version": collector.COLLECTOR_VERSION, "host": "laptop"},
                                      "client_time": NOW.isoformat()})
         self.assertNotIn("windows", heartbeat)
 
@@ -291,6 +291,20 @@ class DeliveryTests(CollectorBase):
         self.assertEqual(len(self.server.recorded), 1)
         self.assertEqual(run_main(self.args(), json.dumps(payload(percent=55.0)), self.state), 0)
         self.assertEqual(len(self.server.recorded), 2)
+
+    def test_a_terminal_gets_a_hint_instead_of_a_wait(self):
+        class Terminal(io.StringIO):
+            def isatty(self):
+                return True
+            @property
+            def buffer(self):
+                raise AssertionError("a terminal must not be read")
+        errors = io.StringIO()
+        with patch("sys.stdin", Terminal()), patch("sys.stderr", errors):
+            code = collector.main(self.args(), state_path=self.state)
+        self.assertEqual(code, 2)
+        self.assertIn("python presto_collector.py setup", errors.getvalue())
+        self.assertEqual(self.server.recorded, [])
 
     def test_garbage_or_oversized_stdin_posts_a_heartbeat_and_exits_zero(self):
         cases = ("not json at all", "{", "x" * (collector.MAX_INPUT + 10))

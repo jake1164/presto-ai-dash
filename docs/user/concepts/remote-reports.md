@@ -53,13 +53,14 @@ path. The route does not advertise itself.
    single-file Python 3.8+ script, and it is the same code that drives the
    local export. The panel shows its SHA-256, to compare after you copy it.
 3. Under **Accounts that report remotely**, on the same panel, press **Create
-   remote token** for the account. The token is shown once. Copy it into a file
-   on the remote computer, for example `~/.config/presto-ai-dash/claude.token`.
-   The daemon stores only its SHA-256 hash.
-4. On the remote computer, for Claude Code in a terminal, set the `statusLine`
-   command in that profile's Claude settings file to the snippet the page gives
-   you, then edit the URL placeholder to the daemon's real address, with the
-   path `/api/v1/ingest`, and check the token file path. For the VS Code panel
+   remote token** for the account. The token is shown once. Download the setup
+   file and run `python presto_collector.py setup` on the remote computer: it
+   saves the token as `~/.presto-ai-dash/<name>.token`. The daemon stores only
+   its SHA-256 hash.
+4. On the remote computer, for Claude Code in a terminal, optionally set the
+   `statusLine` command in that profile's Claude settings file to the snippet
+   the page gives you. It already holds the daemon's address and that token
+   file; change only the path to `presto_collector.py`. For the VS Code panel
    and for Codex, which have no status line, save the token and the
    `collector.json` the page gives you in `~/.presto-ai-dash/` and run
    `python3 presto_collector.py watch`.

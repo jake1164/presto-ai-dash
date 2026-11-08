@@ -486,7 +486,10 @@ def make_admin_handler(manager, token, allowed_hosts=(), token_generated=False,
                 return
             try:
                 if method == "POST":
-                    self._send(201, manager.create_ingest_token(instance_id))
+                    # The Host header was checked against the allowed names before
+                    # this point, so it is the address the person reached this page by.
+                    page_host, page_port = split_host_port(self.headers.get("Host", ""))
+                    self._send(201, manager.create_ingest_token(instance_id, page_host, page_port))
                 else:
                     self._send(200, manager.revoke_ingest_token(instance_id))
             except KeyError:

@@ -30,6 +30,8 @@ from providers.test_claude_usage_cache import cache_document
 NOW = datetime(2026, 10, 20, 8, tzinfo=timezone.utc)
 DAY = timedelta(days=1)
 THREE_THOUSAND = timedelta(seconds=3000)
+# Fresh at the default (30 minutes), stale at a threshold of 300 seconds.
+ONE_THOUSAND = timedelta(seconds=1000)
 
 
 def window(window_id, label, percent, observed, reset, period, source):
@@ -152,7 +154,7 @@ class ConfigFieldTests(unittest.TestCase):
     def test_the_field_is_declared_with_its_bounds(self):
         field = self.fields()["usage_cache_stale_seconds"]
         self.assertEqual(field["type"], "int")
-        self.assertEqual(field["default"], 7200)
+        self.assertEqual(field["default"], 1800)
         self.assertEqual(field["minimum"], 300)
         self.assertEqual(field["maximum"], 604800)
         self.assertEqual(field["label"], "Mark usage cache readings stale after (seconds)")
@@ -180,7 +182,7 @@ class ValidationTests(unittest.TestCase):
 
     def test_a_missing_value_uses_the_default(self):
         result = validate_settings(ClaudeSource, self.settings())
-        self.assertEqual(result["usage_cache_stale_seconds"], 7200)
+        self.assertEqual(result["usage_cache_stale_seconds"], 1800)
 
     def test_a_value_out_of_range_is_refused(self):
         for value in (299, 0, -1, 604801):
@@ -265,7 +267,7 @@ class SourceReportTests(SourceBase):
     def test_a_missing_setting_uses_the_default(self):
         self.write_cache()
         report = self.collect(self.source(self.observation(NOW - 6 * DAY))).metrics["quota"]
-        self.assertEqual(report["usage_cache_stale_seconds"], 7200)
+        self.assertEqual(report["usage_cache_stale_seconds"], 1800)
 
     def test_the_export_keeps_its_own_threshold(self):
         self.write_cache()
@@ -277,12 +279,19 @@ class SourceReportTests(SourceBase):
 class SourceStateTests(SourceBase):
     """The source's own windows follow the rule."""
 
-    def test_a_cache_window_3000_seconds_old_is_fresh_at_the_default(self):
-        self.write_cache()
+    def test_a_cache_window_1000_seconds_old_is_fresh_at_the_default(self):
+        self.write_cache(cache_document(fetched=NOW - ONE_THOUSAND))
         snapshot = self.collect(self.source(self.observation(NOW - 6 * DAY)))
         presented = present_quota(snapshot.metrics["quota"], NOW)
         self.assertEqual(self.window(presented, "five_hour")["state"], "available")
         self.assertIsNone(presented["hint"])
+
+    def test_a_cache_window_3000_seconds_old_is_stale_at_the_default(self):
+        # Two hours used to count as fresh; 50 minutes is now past the default.
+        self.write_cache()
+        snapshot = self.collect(self.source(self.observation(NOW - 6 * DAY)))
+        presented = present_quota(snapshot.metrics["quota"], NOW)
+        self.assertEqual(self.window(presented, "five_hour")["state"], "stale")
 
     def test_a_cache_window_3000_seconds_old_is_stale_when_the_setting_is_300(self):
         self.write_cache()
@@ -305,7 +314,7 @@ class SourceStateTests(SourceBase):
     def test_a_merged_report_judges_each_window_by_its_own_source(self):
         # The cache reports only the 5h window, so the weekly one stays with
         # the terminal export.
-        self.write_cache(cache_document(fetched=NOW - THREE_THOUSAND, weekly=None))
+        self.write_cache(cache_document(fetched=NOW - ONE_THOUSAND, weekly=None))
         snapshot = self.collect(self.source(self.observation(NOW - 6 * DAY)))
         presented = present_quota(snapshot.metrics["quota"], NOW)
         self.assertEqual(self.window(presented, "five_hour")["source"], "usage cache")

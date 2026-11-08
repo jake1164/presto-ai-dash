@@ -6,6 +6,18 @@ All notable changes to Presto AI Dash are documented here. Newest release at the
 
 ## [Unreleased]
 
+### Claude readings and containers
+
+- A Claude usage-cache reading now counts as stale after 30 minutes by default, down from two hours. Two hours let a reading that was several points behind real use still look current. Accounts that already saved the old value keep it; change **Mark usage cache readings stale after** to use the new one.
+- Where the daemon cannot see any Claude Code files, in a container or on a server that only receives a collector's readings, the Claude form hides the settings that read files on that machine (settings file, activity, usage cache and state file) and points to the remote collector. The stale thresholds stay, and the usage-cache one is labelled as applying to a collector's readings. **Show local reader settings** brings the hidden ones back for a profile in an unusual place, and an account that already turned a local reader on keeps seeing them. If a Claude profile is present, the full form is shown as before.
+
+### Remote token status-line commands
+
+- The status-line commands shown with a new remote token now carry the real daemon address, taken from the host the admin page was opened with, instead of a `REPLACE-WITH-DASH-ADDRESS` placeholder. They match the address already filled in for the setup file.
+- Their token file is now `~/.presto-ai-dash/<name>.token`, the folder where `presto_collector.py setup` saves it, instead of a different folder the person had to create. Only the path to `presto_collector.py` itself is still the person's to change.
+- A new remote token now shows the simple route first (download the setup file, run `setup`, then `watch`). The terminal status line is an optional extra below it, showing the command for the computer the page is open on and the other kind in a fold-out.
+- `presto_collector.py` is now version 2: typed into a terminal by hand, `claude-statusline` prints a one-line hint and exits with status 2 instead of waiting silently for input. Claude Code's own use is unchanged. Existing installs show "collector update available".
+
 ### Website search discovery
 
 - The marketing website now publishes a root sitemap containing its canonical

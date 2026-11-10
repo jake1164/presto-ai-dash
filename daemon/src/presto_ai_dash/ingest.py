@@ -14,7 +14,8 @@ import math
 import re
 
 from .collectors import served_version, update_state
-from .ingest_extras import clean_activity, clean_credits, clean_reset_credits, clean_usage_cache
+from .ingest_extras import (clean_activity, clean_credits, clean_mod_status, clean_reset_credits,
+                            clean_usage_cache)
 from .models import now_utc
 from .quotas import quota_report
 from .sources import source_type
@@ -156,6 +157,7 @@ def validate(envelope, source_class):
 # are kept apart from the daemon's own readers' output, so the source can tell
 # a reading pushed from another machine from one it read itself.
 _EXTRA_KEYS = {"activity": "pushed_activity", "usage_cache": "pushed_usage_cache",
+               "mod_status": "pushed_mod_status",
                "reset_credits": "reset_credits", "credits": "credits"}
 
 
@@ -168,7 +170,7 @@ def report_extras(envelope, source_class, now=None):
     now = now or datetime.now(timezone.utc)
     allowed = set(getattr(source_class, "push_extras", ()))
     result = {}
-    for name in ("activity", "usage_cache", "reset_credits", "credits"):
+    for name in ("activity", "usage_cache", "mod_status", "reset_credits", "credits"):
         if name not in envelope:
             continue
         if name not in allowed:
@@ -178,11 +180,13 @@ def report_extras(envelope, source_class, now=None):
             cleaned = clean_activity(value, now)
         elif name == "usage_cache":
             cleaned = clean_usage_cache(value, now, _check_window)
+        elif name == "mod_status":
+            cleaned = clean_mod_status(value)
         elif name == "reset_credits":
             cleaned = clean_reset_credits(value, now)
         else:
             cleaned = clean_credits(value)
-        if name in ("activity", "usage_cache"):
+        if name in ("activity", "usage_cache", "mod_status"):
             cleaned["received_at"] = now.isoformat()
         result[_EXTRA_KEYS[name]] = cleaned
     return result
@@ -245,6 +249,10 @@ def ingest(storage, instance_id, envelope, now=None):
                               source_class.stale_after_seconds)
         if source_class.report_note:
             report["note"] = source_class.report_note
+        # A source can name where the windows of a given collector came from.
+        label = getattr(source_class, "push_window_sources", {}).get(envelope["collector"]["name"])
+        for window in report["windows"] if label else ():
+            window["source"] = label
         report.update(extras)
     elif extras:
         if not getattr(source_class, "push_default_windows", None):

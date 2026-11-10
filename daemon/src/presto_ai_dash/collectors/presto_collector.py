@@ -657,6 +657,12 @@ class Account(object):
             self.mod_reader = module.ModReader(self.settings["mod_folder"])
         result = self.mod_reader.refresh(now)
         reading = result["reading"]
+        # Was the mod installed here by claude-mod install? Then silence is a problem to report.
+        expected = os.path.exists(os.path.join(os.path.dirname(self.settings["mod_folder"]),
+                                               "claude-mod", module.RECORD_NAME))
+        state = module.daemon_state(result["status"], expected)
+        if state:
+            pieces["mod_status"] = {"state": state}
         if reading is None:
             notes.append("claude mod: " + "; ".join([result["status"]] + result["notes"]))
             return
@@ -2660,6 +2666,23 @@ class ModReader(object):
             return {"status": "loaded, no reading yet", "reading": None, "notes": notes}
         return {"status": "unreadable files" if unreadable else "no sessions yet",
                 "reading": None, "notes": notes}
+
+
+# What the collector tells the daemon about the mod. Files that exist prove the
+# mod is loaded, so those states are always sent; "not loaded" and "unreadable"
+# are only a problem on a computer where the mod was installed, and say nothing
+# on one where it never was.
+_LOADED_STATES = {"reading": "working", "waiting for a response": "idle",
+                  "loaded, no reading yet": "loaded"}
+
+
+def daemon_state(status, expected):
+    """The state to report for a reader status, or None to report nothing."""
+    if status in _LOADED_STATES:
+        return _LOADED_STATES[status]
+    if not expected:
+        return None
+    return "unreadable" if status == "unreadable files" else "not_loaded"
 
 
 # ---- installing the mod into Claude Code ----------------------------------

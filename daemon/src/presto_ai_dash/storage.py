@@ -407,7 +407,7 @@ class Storage:
 
     # Readings a collector pushes beside the quota windows. A later push of the
     # windows alone (a status line after a response) must not erase them.
-    PUSHED_KEYS = ("pushed_activity", "pushed_usage_cache")
+    PUSHED_KEYS = ("pushed_activity", "pushed_usage_cache", "pushed_mod_status")
 
     def save_observation(self, instance_id, report, evidence, collector_host=None,
                          collector_version=None, progress=None, now=None, extras=None,

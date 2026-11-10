@@ -330,6 +330,23 @@ class ModReader(object):
                 "reading": None, "notes": notes}
 
 
+# What the collector tells the daemon about the mod. Files that exist prove the
+# mod is loaded, so those states are always sent; "not loaded" and "unreadable"
+# are only a problem on a computer where the mod was installed, and say nothing
+# on one where it never was.
+_LOADED_STATES = {"reading": "working", "waiting for a response": "idle",
+                  "loaded, no reading yet": "loaded"}
+
+
+def daemon_state(status, expected):
+    """The state to report for a reader status, or None to report nothing."""
+    if status in _LOADED_STATES:
+        return _LOADED_STATES[status]
+    if not expected:
+        return None
+    return "unreadable" if status == "unreadable files" else "not_loaded"
+
+
 # ---- installing the mod into Claude Code ----------------------------------
 #
 # Claude Code loads a mod from any folder named in the CLAUDE_CODE_PLUGIN_DIRS

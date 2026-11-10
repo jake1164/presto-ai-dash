@@ -19,6 +19,7 @@ WEEKLY_WINDOW_ID = "seven_day"
 # so a number is never presented as if another source had produced it.
 SOURCE_EXPORT = "terminal export"
 SOURCE_CACHE = "usage cache"
+SOURCE_MOD = "claude mod"
 
 # How long a reading from Claude Code's usage cache stays fresh. The cache is
 # refreshed only when Claude Code decides to (opening /usage does it), so the
@@ -168,6 +169,13 @@ def claude_hint(report, now=None):
     measured = [window for window in report["windows"]
                 if window["used_percent"] is not None]
     seen = report.get("collector_seen_at")
+    mod = report.get("mod")
+    if isinstance(mod, dict):
+        # The mod is installed on the collector's computer: the advice is about it,
+        # not about opening /usage or a terminal.
+        hint = mod_hint(report, mod, measured, now)
+        if hint:
+            return hint
     cache = report.get("usage_cache")
     if isinstance(cache, dict):
         if cache.get("available"):
@@ -200,6 +208,27 @@ def claude_hint(report, now=None):
     if seen:
         signals.append(timestamp(seen))
     return "No report %s - run claude" % compact_age((now - max(signals)).total_seconds())
+
+
+def mod_hint(report, mod, measured, now):
+    """The hint for an account whose collector has the Presto Claude mod installed.
+
+    Only reached when no window is fresh. At most MAX_HINT_CHARS ASCII characters.
+    """
+    state = mod.get("state")
+    if state == "not_loaded":
+        return "Reload VS Code (Claude mod)"
+    if state == "unreadable":
+        return "Claude mod files unreadable"
+    if not measured:
+        return "Waiting for a Claude reply"
+    if all(window["resets_at"] and timestamp(window["resets_at"]) <= now for window in measured):
+        return "Awaiting refresh"
+    newest = max(timestamp(window["observed_at"]) for window in measured)
+    age = compact_age((now - newest).total_seconds())
+    if claude_in_use(report, now):
+        return "In use - quota %s old" % age
+    return "Quota %s old - use Claude" % age
 
 
 def cache_hint(report, measured, now):
@@ -280,6 +309,7 @@ def claude_provenance(report, config=None, now=None):
     report = report if isinstance(report, dict) else {}
     config = config if isinstance(config, dict) else {}
     return {"quota": _quota_source_line(report, now, config),
+            "mod": _mod_line(report),
             "activity": _activity_source_line(report, config, now),
             "usage_cache": _usage_cache_line(report, config, now),
             "usage_cache_refreshes": _usage_cache_refresh_line(report, config, now),
@@ -303,14 +333,36 @@ def _quota_source_line(report, now, config):
     when = observed.astimezone().strftime("%Y-%m-%d %H:%M")
     source = _source_label(newest.get("source"))
     host = report.get("collector_host")
-    origin = " from %s" % ascii_label(host) if host and source == SOURCE_EXPORT else ""
+    origin = (" from %s" % ascii_label(host)
+              if host and source in (SOURCE_EXPORT, SOURCE_MOD) else "")
     return "Quota: %s - last reading %s%s (%s old)" % (
         source, when, origin, age_label((now - observed).total_seconds()))
 
 
 def _source_label(source):
     """The short label of where a reading came from."""
-    return SOURCE_CACHE if source == SOURCE_CACHE else SOURCE_EXPORT
+    return source if source in (SOURCE_CACHE, SOURCE_MOD) else SOURCE_EXPORT
+
+
+_MOD_LINES = {
+    "working": "working: it is sending readings after each Claude response",
+    "idle": "loaded, waiting for the next Claude response",
+    "loaded": "loaded, no reading yet (a reading arrives after the next response)",
+    "not_loaded": ("installed but not loaded: reload the VS Code window or restart Claude "
+                   "Code, then use Claude once"),
+    "unreadable": ("its files cannot be read: run python presto_collector.py claude-mod "
+                   "status on that computer"),
+}
+
+
+def _mod_line(report):
+    """What the Presto Claude mod on the collector's computer is doing, if it is installed there."""
+    mod = report.get("mod")
+    if not isinstance(mod, dict) or mod.get("state") not in _MOD_LINES:
+        return None
+    host = mod.get("reported_by")
+    return "Claude mod%s: %s" % (" on %s" % ascii_label(host) if host else "",
+                                 _MOD_LINES[mod["state"]])
 
 
 def _activity_source_line(report, config, now):

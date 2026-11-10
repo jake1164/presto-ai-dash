@@ -163,6 +163,16 @@ Limits to know about:
   while there is no reading yet. Once there is a reading, the Presto shows its
   age (`stale 2h`) and the admin page carries the longer advice.
 
+**What has been tested.** On Windows 11 with the VS Code extension 2.1.319 and
+Claude Code 2.1.314, and on a Mac with the VS Code extension: the mod loads
+after the window is reloaded, writes a reading after each response, and the
+collector sends it. Against `/usage` the 5-hour figure matched and the weekly
+figure was within one point. An idle reading kept its value and was marked stale when
+checked at 17 minutes. A Windows computer and a Mac reporting the
+same account to one daemon each took over as the newest reading when they
+answered last, and `claude-mod remove` restored Claude's settings file exactly.
+Linux, WSL and other Claude Code versions have not been tested.
+
 ## The local activity logs
 
 Claude Code and its VS Code panel write session logs under

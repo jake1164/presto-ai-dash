@@ -17,6 +17,7 @@ file that a tool on your own machine wrote.
 | What | Where it comes from | What is taken |
 | --- | --- | --- |
 | Claude quota | The Claude Code status line | The 5-hour and weekly percentages, their reset times, a version |
+| Claude mod (VS Code panel) | A small file the Presto Claude mod writes beside the collector after each response, if you installed it with `claude-mod install` | The 5-hour and weekly percentages, their reset times, the time of the response. Not prompts, files or credentials |
 | Claude usage cache | `~/.claude.json`, which Claude Code writes for its own `/usage` dialog | The fetch time, the two windows, the included credit |
 | Claude activity | The local session logs | Timestamps, the surface, the model name, token counts |
 | Codex allowance | A local Codex app-server | Allowance buckets, percentages, resets, banked reset credits |

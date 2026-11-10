@@ -10,6 +10,9 @@ each one means.
 | --- | --- | --- |
 | `Run claude in a terminal` | Nothing has ever been measured and no collector has reported | Run Claude Code in a terminal, or turn on the usage cache reader |
 | `Waiting for a Claude reply` | The collector is alive but no window was ever measured | Carry on working in Claude Code; the fields arrive after a response |
+| `Reload VS Code (Claude mod)` | The Claude mod is installed but Claude Code has not loaded it | Reload the VS Code window, then use Claude once |
+| `Claude mod files unreadable` | The mod's output files cannot be read | Run `python presto_collector.py claude-mod status` on that computer |
+| `Quota 2h old - use Claude` | The mod is loaded but Claude has not answered for two hours | Use Claude; the next response updates it |
 | `Awaiting refresh` | Every measured window's reset has passed | Use Claude again, or open `/usage` |
 | `Reply in claude to refresh` | There are old readings and the collector was seen recently | Reply in Claude Code to get a fresh reading |
 | `No report 6d - run claude` | Nothing has reported for six days | Run Claude Code in a terminal |

@@ -58,7 +58,7 @@ Presto AI Dash is an independent project, not made or endorsed by Pimoroni.
 
 <table>
   <tr>
-    <td width="400"><a href="https://jake1164.github.io/presto-ai-dash/docs/guides/claude/"><strong>Claude Code ↗</strong></a><br>Subscription quota &amp; activity</td>
+    <td width="400"><a href="https://jake1164.github.io/presto-ai-dash/docs/guides/claude/"><strong>Claude Code ↗</strong></a><br>Subscription quota &amp; activity, including the VS Code panel</td>
     <td width="400"><a href="https://jake1164.github.io/presto-ai-dash/docs/guides/codex/"><strong>OpenAI Codex ↗</strong></a><br>Quotas, resets &amp; banked credits</td>
   </tr>
   <tr>
@@ -85,7 +85,7 @@ Presto AI Dash is designed to grow. Request a new provider, subscription, or loc
 2. [Add your first source](https://jake1164.github.io/presto-ai-dash/docs/getting-started/add-the-first-source/), or enable **Demo mode** on the admin page's **Settings** tab. It shows six sample accounts, marks them with a DEMO chip, and writes nothing.
 3. [Set up the Presto](https://jake1164.github.io/presto-ai-dash/docs/getting-started/set-up-the-presto/) to connect over Wi-Fi.
 
-For Claude and Codex with a Docker daemon, run a [remote collector](https://jake1164.github.io/presto-ai-dash/docs/guides/remote-collectors/) on the computer where you use them.
+For Claude and Codex with a Docker daemon, run a [remote collector](https://jake1164.github.io/presto-ai-dash/docs/guides/remote-collectors/) on the computer where you use them. For Claude in the VS Code panel, install the [Claude mod](https://jake1164.github.io/presto-ai-dash/docs/guides/claude/#the-claude-mod-vs-code-panel) with the collector; two computers can report the same account.
 
 For configuration, troubleshooting, security, and detailed limitations, see the [documentation](https://jake1164.github.io/presto-ai-dash/docs/) and [privacy notes](https://jake1164.github.io/presto-ai-dash/docs/privacy/). The app itself sends nothing anywhere; only the documentation website counts page views, with Google Analytics, as the privacy notes explain.
 

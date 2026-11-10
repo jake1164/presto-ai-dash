@@ -33,7 +33,7 @@ them is a measurement.
 In practice this means a reading is labelled with its source, and the
 newest reading per window wins.
 
-### Claude's routes
+### Claude's routes {#claudes-three-routes}
 
 Claude is the one account that can be read several ways, so it shows the
 origin of every window:

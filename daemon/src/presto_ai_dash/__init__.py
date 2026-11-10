@@ -8,6 +8,6 @@ See https://jake1164.github.io/presto-ai-dash/docs/developers/architecture/ for 
 shape of the system.
 """
 
-__version__ = "0.50.0"
+__version__ = "0.51.0"
 
 APP_NAME = "presto-ai-dash"

@@ -24,6 +24,7 @@ SECTIONS = (
     ("child_env", PACKAGE / "child_env.py"),
     ("claude_activity", PACKAGE / "collectors" / "claude_activity.py"),
     ("claude_usage_cache", PACKAGE / "collectors" / "claude_usage_cache.py"),
+    ("claude_mod", PACKAGE / "collectors" / "claude_mod.py"),
     ("codex_report", PACKAGE / "collectors" / "codex_report.py"),
     ("codex_rpc", PACKAGE / "sources" / "_codex_rpc.py"),
 )

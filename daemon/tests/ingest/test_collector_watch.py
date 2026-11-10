@@ -145,7 +145,8 @@ class ConfigTests(FolderBase):
             "a long interval": dict(interval_seconds=10 ** 6),
             "a text interval": dict(interval_seconds="60"),
             "a text flag": dict(accounts=[dict(good, activity="yes")]),
-            "both readers off": dict(accounts=[dict(good, activity=False, usage_cache=False)]),
+            "every reader off": dict(accounts=[dict(good, activity=False, usage_cache=False,
+                                                    mod=False)]),
             "a bad timeout": dict(accounts=[{"service": "codex", "token_file": "a",
                                              "timeout": 0}]),
             "the same token file twice": dict(accounts=[good, good]),
@@ -218,6 +219,33 @@ class EmbeddedReaderTests(FolderBase):
 def collector_marker(which):
     tool = build_tool()
     return tool.BEGIN if which == "BEGIN" else tool.END
+
+
+class TokenPermissionNoteTests(FolderBase):
+    def test_a_readable_token_is_mentioned_once_not_every_round(self):
+        token = self.folder / "claude.token"
+        token.write_text("secret\n", encoding="utf-8")
+        collector._TOKEN_NOTED.discard(str(token))
+        errors = io.StringIO()
+        fake_mode = type("Stat", (), {"st_mode": 0o100644})()
+        with patch.object(collector.os, "name", "posix"), \
+                patch.object(collector.os, "stat", return_value=fake_mode), \
+                patch.object(sys, "stderr", errors):
+            for _round in range(5):
+                self.assertEqual(collector._read_token_checked(str(token)), "secret")
+        self.assertEqual(errors.getvalue().count("chmod 600"), 1)
+
+    def test_a_private_token_is_never_mentioned(self):
+        token = self.folder / "private.token"
+        token.write_text("secret\n", encoding="utf-8")
+        collector._TOKEN_NOTED.discard(str(token))
+        errors = io.StringIO()
+        fake_mode = type("Stat", (), {"st_mode": 0o100600})()
+        with patch.object(collector.os, "name", "posix"), \
+                patch.object(collector.os, "stat", return_value=fake_mode), \
+                patch.object(sys, "stderr", errors):
+            collector._read_token_checked(str(token))
+        self.assertEqual(errors.getvalue(), "")
 
 
 class ReadingTests(FolderBase):

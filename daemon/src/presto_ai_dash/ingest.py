@@ -2,9 +2,10 @@
 
 Both transports — the in-process status-line helper and the remote HTTP route
 (Phases 3+) — store readings through :func:`ingest`, so every envelope passes
-the same validation before anything is written. The client's clock is
-informational: every stored timestamp, ``collector_seen_at`` included, is
-stamped by :meth:`Storage.save_observation`, never trusted from the envelope.
+the same validation before anything is written. ``collector_seen_at`` is the
+daemon's own receive time. The client's ``client_time`` is believed only for
+the age of a quota reading, and only within a bounded skew of the daemon's own
+clock (see :func:`reading_time`); outside it the receive time is used.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -13,7 +14,8 @@ import math
 import re
 
 from .collectors import served_version, update_state
-from .ingest_extras import clean_activity, clean_credits, clean_reset_credits, clean_usage_cache
+from .ingest_extras import (clean_activity, clean_credits, clean_mod_status, clean_reset_credits,
+                            clean_usage_cache)
 from .models import now_utc
 from .quotas import quota_report
 from .sources import source_type
@@ -30,6 +32,11 @@ MAX_LABEL_CHARS = 32
 MAX_PERIOD_MINUTES = 527040
 MAX_USED_PERCENT = 1000
 MAX_RESET_DAYS = 400
+# How far a sender's clock may differ from ours before it is not believed. A
+# reading made a little in the future is capped at the receive time; one made
+# up to a day ago is a queued retry and keeps its real age.
+CLOCK_AHEAD = timedelta(minutes=5)
+CLOCK_BEHIND = timedelta(hours=24)
 
 _TOP_LEVEL_KEYS = frozenset(("schema", "collector", "provider_version", "client_time",
                              "windows", "evidence", "progress"))
@@ -150,6 +157,7 @@ def validate(envelope, source_class):
 # are kept apart from the daemon's own readers' output, so the source can tell
 # a reading pushed from another machine from one it read itself.
 _EXTRA_KEYS = {"activity": "pushed_activity", "usage_cache": "pushed_usage_cache",
+               "mod_status": "pushed_mod_status",
                "reset_credits": "reset_credits", "credits": "credits"}
 
 
@@ -162,7 +170,7 @@ def report_extras(envelope, source_class, now=None):
     now = now or datetime.now(timezone.utc)
     allowed = set(getattr(source_class, "push_extras", ()))
     result = {}
-    for name in ("activity", "usage_cache", "reset_credits", "credits"):
+    for name in ("activity", "usage_cache", "mod_status", "reset_credits", "credits"):
         if name not in envelope:
             continue
         if name not in allowed:
@@ -172,14 +180,38 @@ def report_extras(envelope, source_class, now=None):
             cleaned = clean_activity(value, now)
         elif name == "usage_cache":
             cleaned = clean_usage_cache(value, now, _check_window)
+        elif name == "mod_status":
+            cleaned = clean_mod_status(value)
         elif name == "reset_credits":
             cleaned = clean_reset_credits(value, now)
         else:
             cleaned = clean_credits(value)
-        if name in ("activity", "usage_cache"):
+        if name in ("activity", "usage_cache", "mod_status"):
             cleaned["received_at"] = now.isoformat()
         result[_EXTRA_KEYS[name]] = cleaned
     return result
+
+
+def reading_time(client_time, received):
+    """When a pushed quota reading was made, as well as the daemon can tell.
+
+    The sender's ``client_time`` when it carries a UTC offset and lies between a
+    day before and a few minutes after the receive time, capped at the receive
+    time. Otherwise the receive time itself: a clock that far off, or one that
+    cannot be read, is no evidence of age. The result never exceeds ``received``.
+    """
+    if received.tzinfo is None:
+        received = received.replace(tzinfo=timezone.utc)
+    try:
+        moment = datetime.fromisoformat(client_time.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        return received
+    if moment.tzinfo is None:
+        return received
+    moment = moment.astimezone(timezone.utc)
+    if moment < received - CLOCK_BEHIND or moment > received + CLOCK_AHEAD:
+        return received
+    return min(moment, received)
 
 
 def _default_report(source_class):
@@ -217,6 +249,10 @@ def ingest(storage, instance_id, envelope, now=None):
                               source_class.stale_after_seconds)
         if source_class.report_note:
             report["note"] = source_class.report_note
+        # A source can name where the windows of a given collector came from.
+        label = getattr(source_class, "push_window_sources", {}).get(envelope["collector"]["name"])
+        for window in report["windows"] if label else ():
+            window["source"] = label
         report.update(extras)
     elif extras:
         if not getattr(source_class, "push_default_windows", None):
@@ -228,7 +264,8 @@ def ingest(storage, instance_id, envelope, now=None):
                              collector_version=collector["version"],
                              progress=envelope.get("progress"),
                              now=received, extras=None if report is not None else extras,
-                             base_report=base_report)
+                             base_report=base_report,
+                             observed_at=reading_time(envelope.get("client_time"), received))
     _note_outdated(instance_id, collector)
     return True
 

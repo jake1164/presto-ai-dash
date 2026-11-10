@@ -384,7 +384,10 @@ host label. **No credentials, no prompts, no transcripts.**
 That is the terminal's status line. Two things have no status line: the
 **VS Code panel** and **Codex**. For those the collector has a `watch` mode,
 which reads on a timer and pushes with the account's own token, from a folder
-of its own (`~/.presto-ai-dash/collector.json`). You do not write it: when you
+of its own (`~/.presto-ai-dash/collector.json`). For the VS Code panel's quota
+it uses the Claude mod, which you install on that computer with
+`python presto_collector.py claude-mod install` (see
+[Claude](../guides/claude.md)). You do not write it: when you
 create the token, press **Download setup file** (check the address first),
 download `presto_collector.py` beside it, and on that computer run
 `python presto_collector.py setup`. It finds the download, saves your settings

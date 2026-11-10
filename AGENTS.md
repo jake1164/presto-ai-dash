@@ -28,8 +28,12 @@ touchscreen. Start with `README.md`; `CHANGELOG.md` says what each release holds
   any kind. Provider calls are reads of documented usage/limit data. The only
   exception is setup the user starts themselves in the admin page: connecting or
   disconnecting an account (Codex sign-in and sign-out) and installing or
-  removing the Claude status-line export. These never run from polling or from
-  a remote request. If a provider's API offers an action (for example Codex's
+  removing the Claude status-line export. The one other exception is installing
+  or removing the Presto Claude mod (a small quota-export plugin) with the
+  collector's `claude-mod` command, which the user runs on their own computer.
+  It must explain the change, ask for confirmation, back up the Claude
+  settings file before editing it, and be undoable. These never run from
+  polling or from a remote request. If a provider's API offers an action (for example Codex's
   reset-credit redeem method), do not wire it up.
   Settings of this app's own daemon are not provider accounts: the user may change
   them in the admin page, and the Presto may change the ones documented for it

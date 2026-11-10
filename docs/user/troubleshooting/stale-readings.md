@@ -11,6 +11,7 @@ presents it as a live number.
 | The service was unreachable for a while | The Status tab names the last problem | Fix the service, or check its `base_url` |
 | The daemon was stopped | No collection, no new reading | Start the daemon |
 | The collector stopped | `No report <age> - run claude` | Run Claude Code in a terminal |
+| The Claude mod is loaded but Claude has not answered for a while | `Quota <age> old - use Claude` | Use Claude; the next response updates it |
 | The usage cache is simply old | `Quota <age> old - open /usage` | Open `/usage` in Claude Code |
 | The window's reset has passed | The window shows `--` | Use the service again |
 | The provider stopped reporting a field | The window says *unavailable* | Nothing you can do; it is the provider's shape |

@@ -4,7 +4,24 @@ All notable changes to Presto AI Dash are documented here. Newest release at the
 
 ---
 
-## [Unreleased]
+## [v0.51.0] — 2026-11-10
+
+Claude's quota now stays current from the VS Code panel, and two computers can report the same Claude account.
+
+### Claude quota from the VS Code panel
+
+- The VS Code panel never runs Claude Code's status line, so its quota used to arrive only from the usage cache, and only after you opened `/usage`. A new small Claude Code mod, installed with `python presto_collector.py claude-mod install`, writes the 5-hour and weekly quota to a local file after each response, and the collector's `watch` mode sends it. The reading is labelled `claude mod` and ages honestly: a file that is merely touched, or an idle panel, never looks fresh. Running Claude uses nothing extra: the mod reads no prompts, files or credentials, makes no network request and never asks Claude anything.
+- The install command says what it will change, asks first, saves a backup of Claude Code's settings file beside it before adding one setting, and does nothing when run again, except that after a collector update it explains and asks before replacing the mod's own files. `claude-mod status` says whether it is working and `claude-mod remove` takes back exactly what was added. It needs Claude Code mods (the VS Code extension 2.1.299 or later).
+- If the mod is installed but Claude Code has not loaded it, the admin page says `Reload VS Code (Claude mod)` and explains, and the Presto shows the same words while there is no reading yet. With the mod installed, a stale reading says `Quota 2h old - use Claude` on the admin page instead of sending you to `/usage` or a terminal; the Presto shows the reading's age (`stale 2h`) as before. The detail card now says `Quota via mod`. A computer that never installed the mod sees none of this.
+- The Claude card describes a reading from the mod as the mod's, instead of saying the VS Code panel gets no quota. In `watch` mode, the note that a token file can be read by other users now appears once, not every round.
+- Tested on Windows 11 (VS Code extension 2.1.319, Claude Code 2.1.314) and on a Mac with the VS Code extension, including a Windows computer and a Mac reporting one account at the same time. Linux, WSL and other Claude Code versions have not been tested.
+- `presto_collector.py` is now version 3 (the mod's reader and install command are inside it). Existing installs show "collector update available". A version 3 collector needs this daemon version for the `claude mod` label, the mod's state and its hints; with an older daemon the quota still arrives, labelled as the terminal export.
+
+### Quota from several computers
+
+- When two computers report the same Claude account, each quota window now keeps the newest reading. A delayed or repeated older report no longer replaces a newer one, and a report for a window that has since reset no longer replaces the new window. Before, whichever report arrived last won and was stamped as new.
+- A report is now dated by when its sender says it was made, as long as that is within a day before and five minutes after the daemon received it, and never later than that. A report that arrives late keeps its real age. A wrong clock can make a reading look older, never newer. Outside those bounds the daemon uses its own receive time, as before.
+- A report that only carried the usage cache can no longer hide a status-line reading made just before it.
 
 ### Claude readings and containers
 
@@ -17,6 +34,14 @@ All notable changes to Presto AI Dash are documented here. Newest release at the
 - Their token file is now `~/.presto-ai-dash/<name>.token`, the folder where `presto_collector.py setup` saves it, instead of a different folder the person had to create. Only the path to `presto_collector.py` itself is still the person's to change.
 - A new remote token now shows the simple route first (download the setup file, run `setup`, then `watch`). The terminal status line is an optional extra below it, showing the command for the computer the page is open on and the other kind in a fold-out.
 - `presto_collector.py` is now version 2: typed into a terminal by hand, `claude-statusline` prints a one-line hint and exits with status 2 instead of waiting silently for input. Claude Code's own use is unchanged. Existing installs show "collector update available".
+
+### Docker image
+
+- The Docker image is now built on Python 3.15 (Alpine 3.24), up from Python 3.13.
+
+### Product page
+
+- The product page at the root of the website has a redesigned landing page.
 
 ### Website search discovery
 
@@ -31,6 +56,14 @@ All notable changes to Presto AI Dash are documented here. Newest release at the
 - Nothing is sent, and no cookie is set, until the reader accepts the cookie banner. One choice now covers all three surfaces, so nobody is asked twice, and the cookie settings link in either footer changes it later. Rejecting it, or revoking an earlier acceptance, leaves no analytics code running at all.
 - Withdrawing consent on either the product page or documentation removes first-party Google Analytics cookies. Custom events use the documented gtag command, and the introductory overview counts as documentation interest rather than installation intent. Documentation canonical URLs now use `https://presto-dash.com/docs/`.
 - The installed application is unchanged and still sends nothing: the daemon, its admin page and the Presto contain no analytics of any kind.
+
+**Install**
+
+```text
+pipx install presto-ai-dash
+ghcr.io/jake1164/presto-ai-dash:0.51.0
+ghcr.io/jake1164/presto-ai-dash:latest
+```
 
 ## [v0.50.0] — 2026-11-01
 

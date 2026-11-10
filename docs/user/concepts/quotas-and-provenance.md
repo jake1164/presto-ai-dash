@@ -33,20 +33,21 @@ them is a measurement.
 In practice this means a reading is labelled with its source, and the
 newest reading per window wins.
 
-### Claude's three routes
+### Claude's routes {#claudes-three-routes}
 
-Claude is the one account that can be read three ways, so it shows the
+Claude is the one account that can be read several ways, so it shows the
 origin of every window:
 
 | Label | What it means |
 | --- | --- |
 | `terminal export` | The quota the Claude Code status line reported |
 | `usage cache` | The numbers Claude Code caches on disk for its own `/usage` dialog |
+| `claude mod` | The quota Claude Code reported after a response in the VS Code panel, written by the Presto Claude mod |
 | `local logs` | Timestamps and token counts from the local session logs (activity, not quota) |
 
-The newest reading per window wins, whatever its route. When the terminal
-export and the usage cache report the same moment, the terminal export wins,
-because it is the supported one.
+The newest reading per window wins, whatever its route. When the usage cache
+reports the same moment as the terminal export or the mod, the export or mod wins,
+because they come from a response Claude Code just made.
 
 The detail card says it in words: `Quota via export, 6 days old` or
 `Quota via cache, 2 h old`. The admin page labels each window with its
@@ -67,7 +68,7 @@ route as well.
 
 | Number | Source of truth | Read as |
 | --- | --- | --- |
-| Claude 5h and weekly quota | The Claude Code status line, or the local usage cache | HTTP from Claude Code, or a local file |
+| Claude 5h and weekly quota | The Claude Code status line, the Presto Claude mod, or the local usage cache | HTTP from Claude Code, or a local file |
 | Claude last used | The local session logs | A local file, read for timestamps and token counts |
 | Claude included credit | The local usage cache | A local file |
 | Codex allowance | The Codex app-server on this machine | A local subprocess, read-only methods |
@@ -78,11 +79,13 @@ route as well.
 | Ollama speed | A samples file written by a collector | A local file; never measured by prompting |
 | LiteLLM usage | The gateway's daily activity endpoint | One authenticated HTTPS GET |
 
-The daemon always owns the clock. A reading that arrives from another
-machine is stamped with the time the daemon received it, so a remote
-collector's clock cannot make a stale number look fresh. The one exception
-is the Claude usage cache, which carries its own fetch time because it can
-be hours old; the daemon caps it at the receive time and labels it.
+The daemon always owns the clock. It dates a quota reading by when its sender
+says it was made (`client_time`) only if that is between a day before and five
+minutes after the moment the daemon received it, and never later than that
+moment; otherwise by the moment it received it. So a wrong clock can make a
+reading look older, never newer than it arrived. The Claude usage cache
+carries its own fetch time, because it can be hours old; the daemon caps it
+at the receive time and labels it.
 
 ## What is never derived
 

@@ -57,6 +57,22 @@ would read on its own computer, and pushes it with that account's own token:
 It is a long-running command, so it must be started: at login, as a service,
 or in a container. Everything it needs is in one folder.
 
+### `claude-mod`
+
+The VS Code panel never runs the status line. This command installs, checks
+or removes a small Claude Code *mod* that writes the quota to a local file
+after each response, which `watch` then sends. It is the one thing the
+collector does to Claude Code's own files, so it says what it will change,
+asks first, and saves a backup of Claude's settings file before touching it:
+
+```text
+python presto_collector.py claude-mod install
+python presto_collector.py claude-mod status
+python presto_collector.py claude-mod remove
+```
+
+See [The Claude mod](claude.md#the-claude-mod-vs-code-panel).
+
 ## The collector folder
 
 `watch` reads its settings from `~/.presto-ai-dash/collector.json` (on Windows,
@@ -133,6 +149,7 @@ running when the task is stopped). Nothing it needs is administrator-only.
 | Reports | By |
 | --- | --- |
 | The 5-hour and weekly quota, after a terminal response | `claude-statusline` |
+| The 5-hour and weekly quota, after a VS Code panel response | `watch`, with the [Claude mod](claude.md#the-claude-mod-vs-code-panel) installed |
 | Last use, surface, request and token counts, from Claude's session logs | `watch` |
 | The usage cache: the two quota windows and the included credit, with Claude Code's own fetch time | `watch` |
 | Codex limits, reset credits and the credit balance | `watch` |
@@ -287,13 +304,19 @@ watch.
 
 - It validates the body strictly. An unknown key, a bad percentage or a bad
   timestamp is refused, and nothing is stored. A source takes only the extra
-  readings that belong to it: Claude takes `activity` and `usage_cache`, Codex
+  readings that belong to it: Claude takes `activity`, `usage_cache` and `mod_status`, Codex
   takes `reset_credits` and `credits`.
-- It stamps the reading with its own receive time. The remote machine's
-  clock is informational only. **The one exception** is the usage cache, which
+- It dates a quota reading by the moment the sender says it was made
+  (`client_time`), but only if that is between a day before and five minutes
+  after the moment it received the report, and never later than that moment;
+  otherwise by its own receive time. So a late report keeps its real age and a
+  wrong clock can make a reading look older, never newer. The usage cache
   keeps the time Claude Code fetched it: that reading may be hours old, and
   stamping it "now" would show old numbers as new. That time is capped at the
   receive time, and a reading older than seven days is refused.
+- With two computers reporting for one account, each quota window keeps the
+  newest reading. A delayed or repeated older report cannot roll it back, and
+  a report for a window that has since reset cannot replace the new window.
 - It keeps the previous timestamp when the evidence hash is unchanged, so a
   redraw is not a new reading. A Codex reading is a fresh look at the provider
   every time, so each one restarts the clock.

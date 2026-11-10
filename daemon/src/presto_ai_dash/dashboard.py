@@ -33,7 +33,7 @@ def _short_label(value, limit=10):
 
 def _source_short(source):
     """A short label for where a reading came from, for the narrow card."""
-    return "cache" if source == "usage cache" else "export"
+    return {"usage cache": "cache", "claude mod": "mod"}.get(source, "export")
 
 
 def _money(value):

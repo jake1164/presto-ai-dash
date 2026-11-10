@@ -17,6 +17,7 @@ WINDOWS = (("five_hour", "5h", 300), ("seven_day", "Weekly", 10080))
 # presented as if another source had produced it.
 SOURCE_EXPORT = "terminal export"
 SOURCE_CACHE = "usage cache"
+SOURCE_MOD = "claude mod"
 
 NOTE_EXPORT = ("Claude Code terminal export; idle readings become stale. "
                "The VS Code panel does not run the status line, so quota only "
@@ -25,9 +26,14 @@ NOTE_CACHE = ("Claude Code terminal export and its local usage cache; idle readi
               "become stale. The VS Code panel does not run the status line, so quota "
               "arrives from terminal sessions and from the usage cache Claude Code "
               "writes for its /usage dialog (opening /usage refreshes it).")
+NOTE_MOD = ("Claude Code mod: the quota is read after each Claude response, so "
+            "an idle session's reading becomes stale.")
 # A pushed activity summary older than this is no longer a reading: the
 # collector that sent it has stopped, and its token totals would stand still.
 PUSHED_ACTIVITY_SECONDS = 600
+# The same for what a collector says about its Claude mod: after this the
+# collector has stopped, and its last word is no longer news.
+PUSHED_MOD_STATUS_SECONDS = 600
 
 NOTE_AWAITING = "Awaiting quota export from normal Claude Code terminal use"
 NOTE_AWAITING_CACHE = ("Awaiting quota export from normal Claude Code terminal use "
@@ -46,7 +52,10 @@ class ClaudeSource(Source):
     push_window_ids = ("five_hour", "seven_day")
     # A collector may also push what the local readers would find on its own
     # machine, and may do so before any quota has been reported.
-    push_extras = frozenset(("activity", "usage_cache"))
+    push_extras = frozenset(("activity", "usage_cache", "mod_status"))
+    # Quota windows from the collector's watch mode come from the Presto Claude
+    # mod; the status-line collector's come from the terminal export.
+    push_window_sources = {"claude-watch": SOURCE_MOD}
     push_default_windows = WINDOWS
     # The fields that read Claude Code's files on this machine. Where those
     # files cannot be seen (a container, which the docs say not to mount, or a
@@ -150,6 +159,16 @@ class ClaudeSource(Source):
         reading["reported_by"] = host
         return reading
 
+    @staticmethod
+    def _pushed_mod_status(stored, now, host):
+        """What a collector last said about its Claude mod, or None once it has gone quiet."""
+        pushed = stored.get("pushed_mod_status") if stored else None
+        if not isinstance(pushed, dict) or "received_at" not in pushed:
+            return None
+        if now - timestamp(pushed["received_at"]) > timedelta(seconds=PUSHED_MOD_STATUS_SECONDS):
+            return None
+        return {"state": pushed.get("state"), "reported_by": host}
+
     def _merge_cache(self, report, cache):
         """The newest reading per window wins; the terminal export wins a tie.
 
@@ -182,8 +201,11 @@ class ClaudeSource(Source):
         report["windows"] = windows
 
     @staticmethod
-    def _note(observation, cache):
+    def _note(observation, cache, windows=()):
         """Why the quota looks the way it does, in the current wording."""
+        if any(w.get("source") == SOURCE_MOD and w.get("state") == "available"
+               for w in windows):
+            return NOTE_MOD
         if cache is not None and cache.get("available"):
             return NOTE_CACHE
         if observation is None:
@@ -234,8 +256,11 @@ class ClaudeSource(Source):
         else:
             report = deepcopy(stored)
         # What a collector pushed is the source's input, not part of its report.
-        for key in ("pushed_activity", "pushed_usage_cache"):
+        for key in ("pushed_activity", "pushed_usage_cache", "pushed_mod_status"):
             report.pop(key, None)
+        mod = self._pushed_mod_status(stored, now, host)
+        if mod is not None:
+            report["mod"] = mod
         # Every window says where it came from.
         for window in report["windows"]:
             window.setdefault("source", SOURCE_EXPORT)
@@ -245,7 +270,7 @@ class ClaudeSource(Source):
             self._merge_cache(report, cache)
         # The note is the wording of today, not a copy frozen into the stored
         # reading when it was received (ingest writes one into every report).
-        report["note"] = self._note(observation, cache)
+        report["note"] = self._note(observation, cache, report["windows"])
         # Every report carries the collector trail (None before the first
         # push), so payload building can produce freshness hints (Phase 4).
         report["stale_after_seconds"] = self.config.get("stale_after_seconds", 900)

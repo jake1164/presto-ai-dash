@@ -23,6 +23,7 @@ Claude it is different for each route:
 | Route | Threshold | Default | Why |
 | --- | --- | --- | --- |
 | Terminal export | `Mark idle readings stale after (seconds)` | 900 | The status line only runs after a Claude reply |
+| Claude mod | `Mark idle readings stale after (seconds)` | 900 | Like the status line, it only updates after a Claude response |
 | Usage cache | `Mark usage cache readings stale after (seconds)` | 1800 | Claude Code refreshes the cache on its own schedule (opening `/usage` does it), so a reading can lag behind real use |
 
 Each window of a merged report is judged by the route it came from, so a
@@ -59,6 +60,20 @@ polls, so the advice is current when the device draws it.
 | Measured windows exist, none fresh, collector seen recently | `Reply in claude to refresh` |
 | Measured windows exist, none fresh, collector quiet | `No report 6d - run claude` |
 | At least one window is fresh and measured | no hint |
+
+### Claude, with the Claude mod installed
+
+Used when the collector's computer has the mod. Only reached when no window is
+fresh.
+
+| Situation | Hint |
+| --- | --- |
+| Installed, but Claude Code has not loaded it | `Reload VS Code (Claude mod)` |
+| Its files cannot be read | `Claude mod files unreadable` |
+| Loaded, no reading yet | `Waiting for a Claude reply` |
+| Every measured window's reset has passed | `Awaiting refresh` |
+| Loaded, but no recent response | `Quota 2h old - use Claude` |
+| In use, quota older than the threshold | `In use - quota 20m old` |
 
 ### Claude, with the usage cache reader on
 

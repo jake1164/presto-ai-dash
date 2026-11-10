@@ -1914,7 +1914,7 @@
     }
     if (source.provenance) {
       // Labelled lines: each one says where its number comes from.
-      for (const key of ["quota", "activity", "usage_cache", "usage_cache_refreshes",
+      for (const key of ["quota", "mod", "activity", "usage_cache", "usage_cache_refreshes",
                          "credit", "status_note"]) {
         const line = source.provenance[key];
         if (!line) continue;

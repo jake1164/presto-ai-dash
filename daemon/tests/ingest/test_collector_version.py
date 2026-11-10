@@ -29,6 +29,7 @@ from presto_ai_dash.collectors import presto_collector as collector
 RELEASED = {
     "1": "1d9d0e9a0ac52af47afe56e77ce6ff112290386b321daffa7ae00c6c39f84d1e",
     "2": "aa276f9c12fbdc7424fdb9f2e041452d9203a5e6d5f336a5572d97e9a146d04c",
+    "3": "6b61d1c5ed181744ffc26542de977e7e4fe12d4e6d248bfa5a819411342ee645",
 }
 
 

@@ -36,6 +36,9 @@ ACTIVITY_KEYS = frozenset(("available", "complete", "reason", "last_request_at",
                            "last_entrypoint", "requests_5h", "tokens_5h", "tokens_7d"))
 USAGE_CACHE_KEYS = frozenset(("available", "reason", "fetched_at", "windows", "credit",
                               "account_changed", "refreshes", "since"))
+MOD_STATUS_KEYS = frozenset(("state",))
+# What a collector says about the Presto Claude mod on its computer, as a state and nothing else.
+MOD_STATES = frozenset(("working", "idle", "loaded", "not_loaded", "unreadable"))
 CREDIT_KEYS = frozenset(("limit", "used", "currency", "resets_at"))
 RESET_CREDIT_KEYS = frozenset(("available", "expires_at"))
 CREDITS_KEYS = frozenset(("balance", "unlimited"))
@@ -107,6 +110,15 @@ def clean_activity(value, now):
     result["tokens_5h"] = _count(value.get("tokens_5h"), MAX_TOKENS, "activity.tokens_5h")
     result["tokens_7d"] = _count(value.get("tokens_7d"), MAX_TOKENS, "activity.tokens_7d")
     return result
+
+
+def clean_mod_status(value):
+    """The state of the Presto Claude mod on the collector's computer."""
+    _exact(value, MOD_STATUS_KEYS, "mod_status")
+    state = value.get("state")
+    if state not in MOD_STATES:
+        raise ValueError("mod_status.state must be one of: %s" % ", ".join(sorted(MOD_STATES)))
+    return {"state": state}
 
 
 def _money(value, what):

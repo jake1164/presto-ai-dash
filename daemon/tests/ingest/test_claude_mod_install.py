@@ -298,6 +298,12 @@ class DescribeTests(Base):
                        "reads no", "no network request", "register.js"):
             self.assertIn(needle, text)
 
+    def test_a_refresh_says_what_is_replaced_and_that_the_settings_stay(self):
+        text = "\n".join(claude_mod.describe_refresh(str(self.state), str(self.settings)))
+        for needle in (self.place["plugin_dir"], str(self.settings), "out of date or missing",
+                       "not changed", "claude-mod remove", "reads no", "register.js"):
+            self.assertIn(needle, text)
+
     def test_an_environment_that_already_sets_the_folders_is_pointed_out(self):
         text = "\n".join(claude_mod.describe_install(str(self.state), str(self.settings),
                                                      {SETTING: "/somewhere"}))
@@ -335,25 +341,57 @@ class CommandTests(Base):
         self.assertEqual(self.settings.read_bytes(), before)
         self.assertEqual(len(self.backups()), 1)
 
-    def test_an_installed_mod_with_old_files_is_refreshed_without_touching_the_settings(self):
+    def old_register(self):
+        register = Path(self.place["plugin_dir"]) / "hooks" / "register.js"
+        register.write_text("// an older collector's mod\n")
+        return register
+
+    def test_an_installed_mod_with_old_files_is_explained_asked_and_refreshed(self):
         self.write_settings({"model": "sonnet"})
         self.run_command("install", assume_yes=True)
         before = self.settings.read_bytes()
-        register = Path(self.place["plugin_dir"]) / "hooks" / "register.js"
-        register.write_text("// an older collector's mod\n")
-        code, output = self.run_command("install", interactive=False)
+        register = self.old_register()
+        code, output = self.run_command("install", "y\n")
         self.assertEqual(code, 0, output)
+        self.assertLess(output.index("out of date or missing"),
+                        output.index("Refresh the mod's files? [y/N]"))
+        self.assertIn(self.place["plugin_dir"], output)
         self.assertIn("refreshed", output)
         self.assertIn("Claude's settings were not changed", output)
         self.assertNotIn("older collector", register.read_text(encoding="utf-8"))
         self.assertEqual(self.settings.read_bytes(), before)
         self.assertEqual(len(self.backups()), 1)
 
-    def test_a_listed_mod_whose_files_were_deleted_is_put_back(self):
+    def test_an_answer_of_no_leaves_old_mod_files_alone(self):
+        self.write_settings({"model": "sonnet"})
+        self.run_command("install", assume_yes=True)
+        register = self.old_register()
+        for answer in ("n\n", "\n", "maybe\n"):
+            code, output = self.run_command("install", answer)
+            self.assertEqual(code, 2, output)
+            self.assertIn("Nothing was changed", output)
+        self.assertIn("older collector", register.read_text(encoding="utf-8"))
+
+    def test_with_no_terminal_old_mod_files_are_not_replaced_unless_told_to(self):
+        self.write_settings({"model": "sonnet"})
+        self.run_command("install", assume_yes=True)
+        register = self.old_register()
+        code, output = self.run_command("install", interactive=False)
+        self.assertEqual(code, 2, output)
+        self.assertIn("--yes", output)
+        self.assertIn("older collector", register.read_text(encoding="utf-8"))
+        code, output = self.run_command("install", interactive=False, assume_yes=True)
+        self.assertEqual(code, 0, output)
+        self.assertNotIn("older collector", register.read_text(encoding="utf-8"))
+
+    def test_a_listed_mod_whose_files_were_deleted_is_put_back_after_asking(self):
         self.run_command("install", assume_yes=True)
         import shutil
         shutil.rmtree(self.place["plugin_dir"])
         code, output = self.run_command("install", interactive=False)
+        self.assertEqual(code, 2, output)
+        self.assertFalse((Path(self.place["plugin_dir"]) / "hooks" / "register.js").exists())
+        code, output = self.run_command("install", "y\n")
         self.assertEqual(code, 0, output)
         self.assertTrue((Path(self.place["plugin_dir"]) / "hooks" / "register.js").is_file())
 

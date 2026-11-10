@@ -135,7 +135,10 @@ settings file beside it (`settings.json.presto-backup-<date and time>`), and
 adds one setting, `CLAUDE_CODE_PLUGIN_DIRS`, naming the mod's folder. Then
 reload the VS Code window so Claude Code loads the mod. `claude-mod status`
 says whether it is installed and producing readings, and `claude-mod remove`
-takes back exactly what was added. Running `install` again changes nothing.
+takes back exactly what was added. Running `install` again changes nothing
+when the mod is already current. After you update the collector, running it
+again explains the refresh, asks first, and replaces only the mod's own files;
+Claude's settings are left alone.
 
 What the mod does, and does not do:
 

@@ -226,6 +226,45 @@ class PushedUsageCacheTests(MergeBase):
                          usage_cache=self.cache(at(25), 54.0)), at(32, 1))
         self.assertEqual(self.stored_cache()["windows"][0]["used_percent"], 54.0)
 
+    def unavailable(self, reason, account_changed=False):
+        return usage_cache(now=at(40), available=False, reason=reason, fetched_at=None,
+                           windows=[], credit=None, account_changed=account_changed,
+                           refreshes=[], since=None)
+
+    def test_a_cache_that_is_merely_unavailable_does_not_replace_a_good_one(self):
+        self.push(report("mac", at(30), 55.0, RESET_A, usage_cache=self.cache(at(25), 54.0)),
+                  at(30, 1))
+        body = heartbeat("windows", at(33))
+        body["usage_cache"] = self.unavailable("file not found")
+        self.push(body, at(33, 1))
+        stored = self.stored_cache()
+        self.assertTrue(stored["available"])
+        self.assertEqual(stored["windows"][0]["used_percent"], 54.0)
+
+    def test_an_account_change_replaces_the_stored_cache(self):
+        self.push(report("mac", at(30), 55.0, RESET_A, usage_cache=self.cache(at(25), 54.0)),
+                  at(30, 1))
+        body = heartbeat("mac", at(33))
+        body["usage_cache"] = self.unavailable("account changed", account_changed=True)
+        self.push(body, at(33, 1))
+        stored = self.stored_cache()
+        self.assertFalse(stored["available"])
+        self.assertTrue(stored["account_changed"])
+        self.assertEqual(stored["windows"], [])
+        self.assertIsNone(stored["credit"])
+
+    def test_a_good_cache_after_an_account_change_replaces_it(self):
+        self.push(report("mac", at(30), 55.0, RESET_A, usage_cache=self.cache(at(25), 54.0)),
+                  at(30, 1))
+        body = heartbeat("mac", at(33))
+        body["usage_cache"] = self.unavailable("account changed", account_changed=True)
+        self.push(body, at(33, 1))
+        self.push(report("windows", at(36), 56.0, RESET_A, tag="b",
+                         usage_cache=self.cache(at(35), 57.0)), at(36, 1))
+        stored = self.stored_cache()
+        self.assertTrue(stored["available"])
+        self.assertEqual(stored["windows"][0]["used_percent"], 57.0)
+
 
 if __name__ == "__main__":
     unittest.main()

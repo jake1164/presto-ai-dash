@@ -94,11 +94,15 @@ def _keep_newer_cache(target, previous):
 
     ``target`` is the report about to be stored and ``previous`` the stored one.
     A pushed cache with no fetch time (an unavailable one) never beats a stored
-    cache that has one.
+    cache that has one, except when it says the profile switched accounts: that
+    is the current state, not an old measurement, and the stored reading belongs
+    to the other account.
     """
     key = "pushed_usage_cache"
     old, new = previous.get(key), target.get(key)
     if not old or not new:
+        return
+    if new.get("account_changed"):
         return
     old_time, new_time = _cache_time(old), _cache_time(new)
     if old_time is not None and (new_time is None or new_time < old_time):

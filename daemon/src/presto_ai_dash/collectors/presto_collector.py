@@ -938,10 +938,13 @@ def claude_mod_command(action, settings=None, state_dir=None, assume_yes=False, 
                      "    python presto_collector.py claude-mod status"])
                 return 0
             if found["listed"]:
-                # Only the collector's own files change; Claude's settings are not touched.
+                # Claude's settings stay as they are, but Claude Code runs these files,
+                # so replacing them is explained and confirmed like an install.
+                say(module.describe_refresh(state_dir, settings) + [""])
+                if not agreed("Refresh the mod's files?"):
+                    return 2
                 done = module.install(state_dir, settings, moment)
-                say(["The Presto Claude mod is already listed in %s." % settings,
-                     "Its files were out of date (or missing), so they were refreshed in:",
+                say(["The mod's files were refreshed in:",
                      "    " + done["plugin_dir"],
                      "Claude's settings were not changed. Restart Claude Code (reload the VS Code",
                      "window, or run /reload-plugins in a session) to load the newer mod."])
@@ -2861,6 +2864,45 @@ def inspect(state_dir, settings_path):
     return {"listed": listed, "files_current": current}
 
 
+def _what_the_mod_does(place):
+    """What the mod does and where to read it, as lines shared by every explanation."""
+    return [
+        "What the mod does:",
+        "  After each Claude response it writes your 5-hour and weekly usage",
+        "  percentages and their reset times to:",
+        "       " + place["out_dir"],
+        "  The collector sends those to your Presto daemon. The mod reads no",
+        "  prompts, files or credentials, makes no network request and starts no",
+        "  process. Claude Code does not sandbox mods, so you can read all of it:",
+        "       " + os.path.join(place["plugin_dir"], "hooks", "register.js"),
+    ]
+
+
+def describe_refresh(state_dir, settings_path):
+    """What refreshing a mod that is already listed will do, as a list of lines.
+
+    The settings are not touched, but Claude Code loads and runs the mod's
+    files, so replacing them is explained and confirmed like an install.
+    """
+    place = locations(state_dir, settings_path)
+    return [
+        "Refresh the Presto Claude mod",
+        "",
+        "The mod is already listed in:",
+        "     " + place["settings"],
+        "but its files are out of date or missing.",
+        "",
+        "What will change on this computer:",
+        "  The mod's files (3 files) are replaced with the current ones in:",
+        "       " + place["plugin_dir"],
+        "  Claude's settings are not changed, so no new backup is made.",
+        "",
+    ] + _what_the_mod_does(place) + [
+        "",
+        "To undo it at any time:  python presto_collector.py claude-mod remove",
+    ]
+
+
 def describe_install(state_dir, settings_path, environ=None):
     """The plain-English account of what installing will do, as a list of lines."""
     place = locations(state_dir, settings_path)
@@ -2876,14 +2918,7 @@ def describe_install(state_dir, settings_path, environ=None):
         "     Before that file is changed, a copy is saved beside it as:",
         "       " + os.path.basename(place["settings"]) + BACKUP_MARKER + "<date and time>",
         "",
-        "What the mod does:",
-        "  After each Claude response it writes your 5-hour and weekly usage",
-        "  percentages and their reset times to:",
-        "       " + place["out_dir"],
-        "  The collector sends those to your Presto daemon. The mod reads no",
-        "  prompts, files or credentials, makes no network request and starts no",
-        "  process. Claude Code does not sandbox mods, so you can read all of it:",
-        "       " + os.path.join(place["plugin_dir"], "hooks", "register.js"),
+    ] + _what_the_mod_does(place) + [
         "",
         "To undo it at any time:  python presto_collector.py claude-mod remove",
     ]

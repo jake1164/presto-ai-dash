@@ -65,9 +65,14 @@ def _window_wins(new, old, made_at):
 
     A window that resets later is a later window and a window that resets
     earlier is an earlier one, whatever order the reports arrive in. Within one
-    window the reading made later wins, and a tie goes to the newer report.
+    window the reading made later wins, and a tie goes to the newer report. A
+    window with no measurement (the placeholder a cache-only report leaves, or
+    a window Claude has dropped) never beats one that has a measurement just
+    because it was stamped later.
     """
     if old is None:
+        return True
+    if old.get("used_percent") is None and new.get("used_percent") is not None:
         return True
     new_reset, old_reset = new.get("resets_at"), old.get("resets_at")
     if new_reset and old_reset:

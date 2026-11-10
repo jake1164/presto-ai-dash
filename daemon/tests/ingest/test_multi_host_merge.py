@@ -124,6 +124,27 @@ class WindowsAreIndependentTests(MergeBase):
         self.assertEqual(datetime.fromisoformat(windows["seven_day"]["observed_at"]), at(12))
 
 
+class PlaceholderWindowTests(MergeBase):
+    def test_a_cache_only_report_does_not_block_an_earlier_made_reading(self):
+        # The cache report creates empty windows stamped with its receive time;
+        # a status-line reading made just before it, arriving after, must win.
+        body = heartbeat("mac", at(10))
+        body["usage_cache"] = usage_cache(now=at(10), fetched_at=at(0).isoformat())
+        self.push(body, at(10, 1))
+        self.assertIsNone(self.five()["used_percent"])
+        self.push(report("windows", at(8), 55.0, RESET_A), at(10, 2))
+        self.assertEqual(self.five()["used_percent"], 55.0)
+        self.assertEqual(datetime.fromisoformat(self.five()["observed_at"]), at(8))
+
+    def test_an_older_report_without_a_measurement_does_not_wipe_a_reading(self):
+        self.push(report("mac", at(10), 55.0, RESET_A), at(10, 1))
+        empty = report("windows", at(5), 0.0, RESET_A)
+        for window in empty["windows"]:
+            window.update(used_percent=None, resets_at=None, state="unavailable")
+        self.push(empty, at(11))
+        self.assertEqual(self.five()["used_percent"], 55.0)
+
+
 class HeartbeatTests(MergeBase):
     def test_a_heartbeat_never_refreshes_the_quota_age(self):
         self.push(report("mac", at(5), 55.0, RESET_A), at(5, 1))

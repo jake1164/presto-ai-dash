@@ -155,9 +155,12 @@ The response body never echoes the input.
    settings file can be shared without leaking it.
 6. **Send no credentials.** The envelope carries readings and hashes, not
    tokens, session identities or prompt text.
-7. **Let the daemon own the time.** `client_time` is informational. The
-   daemon stamps the reading with its own receive time, so a remote machine
-   with a wrong clock cannot make a stale number look fresh.
+7. **Let the daemon own the time.** Set `client_time` to the moment the
+   provider produced the reading (for a status line, when it ran). The daemon
+   dates a quota reading by it only within a day before and five minutes
+   after its own receive time, and never later than that, so a late report
+   keeps its real age and a wrong clock cannot make a stale number look
+   fresh. Never set it to the time a file was merely read or touched.
 
 ### The one exception
 

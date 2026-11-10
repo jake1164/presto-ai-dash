@@ -6,6 +6,19 @@ All notable changes to Presto AI Dash are documented here. Newest release at the
 
 ## [Unreleased]
 
+### Claude quota from the VS Code panel
+
+- The VS Code panel never runs Claude Code's status line, so its quota used to arrive only from the usage cache, and only after you opened `/usage`. A new small Claude Code mod, installed with `python presto_collector.py claude-mod install`, writes the 5-hour and weekly quota to a local file after each response, and the collector's `watch` mode sends it. The reading is labelled `claude mod` and ages honestly: a file that is merely touched, or an idle panel, never looks fresh. Running Claude uses nothing extra: the mod reads no prompts, files or credentials, makes no network request and never asks Claude anything.
+- The install command says what it will change, asks first, saves a backup of Claude Code's settings file beside it before adding one setting, and does nothing when run again. `claude-mod status` says whether it is working and `claude-mod remove` takes back exactly what was added. It needs Claude Code mods (the VS Code extension 2.1.299 or later).
+- If the mod is installed but Claude Code has not loaded it, the Claude card says `Reload VS Code (Claude mod)` and the admin page explains. With the mod installed, a stale reading says `Quota 2h old - use Claude` instead of sending you to `/usage` or a terminal. A computer that never installed the mod sees none of this.
+- `presto_collector.py` is now version 3 (the mod's reader and install command are inside it). Existing installs show "collector update available".
+
+### Quota from several computers
+
+- When two computers report the same Claude account, each quota window now keeps the newest reading. A delayed or repeated older report no longer replaces a newer one, and a report for a window that has since reset no longer replaces the new window. Before, whichever report arrived last won and was stamped as new.
+- A report is now dated by when its sender says it was made, as long as that is within a day before and five minutes after the daemon received it, and never later than that. A report that arrives late keeps its real age. A wrong clock can make a reading look older, never newer. Outside those bounds the daemon uses its own receive time, as before.
+- A report that only carried the usage cache can no longer hide a status-line reading made just before it.
+
 ### Claude readings and containers
 
 - A Claude usage-cache reading now counts as stale after 30 minutes by default, down from two hours. Two hours let a reading that was several points behind real use still look current. Accounts that already saved the old value keep it; change **Mark usage cache readings stale after** to use the new one.

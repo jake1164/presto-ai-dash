@@ -21,6 +21,20 @@ files. Run the collector's `watch` mode on the computer where the panel runs:
 it pushes the usage cache and the activity to the daemon. See
 [Remote collectors](../guides/remote-collectors.md).
 
+### Use the Claude mod (best)
+
+A small Claude Code mod can see the quota after each response in the panel.
+On the computer where the panel runs, with the collector's `watch` going:
+
+1. Run `python presto_collector.py claude-mod install`. It explains what it
+   changes, asks first and saves a backup of Claude's settings file.
+2. Reload the VS Code window.
+3. Use Claude once, then run `python presto_collector.py claude-mod status`.
+
+The quota is then labelled `claude mod` and follows each response. If the card
+says `Reload VS Code (Claude mod)`, Claude Code has not loaded it yet. See
+[The Claude mod](../guides/claude.md#the-claude-mod-vs-code-panel).
+
 ### Use the usage cache
 
 Claude Code caches the numbers behind its own `/usage` dialog on disk. The
@@ -51,7 +65,9 @@ yellow warning: the hint says what is stale instead.
 ## What this does not give you
 
 - **Quota from the panel directly.** The panel does not run the status line,
-  and there is no supported way to ask it for the allowance.
+  and there is no supported way to ask it for the allowance. The Claude mod
+  reads what Claude Code already knows after each response; it cannot ask for
+  anything, so an idle panel shows its last reading with its age.
 - **Activity from other machines.** The session logs are on the machine
   where Claude Code ran. Use on claude.ai, on a phone or on another computer
   never appears.

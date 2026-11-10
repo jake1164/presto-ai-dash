@@ -1,6 +1,6 @@
 # Claude
 
-Claude is the one source that can be read three ways, and each way knows
+Claude is the one source that can be read four ways, and each way knows
 something the others do not. This page explains all three, what each costs
 you, and how to choose.
 
@@ -8,6 +8,7 @@ you, and how to choose.
 | --- | --- | --- | --- |
 | [Terminal status line](#the-terminal-status-line) | Yes | Yes (a reply happened) | One button in the admin page |
 | [Local usage cache](#the-local-usage-cache) | Yes | No | One checkbox, and opening `/usage` now and then |
+| [Claude mod](#the-claude-mod-vs-code-panel) (VS Code panel) | Yes | No | One command on the computer where the panel runs |
 | [Local activity logs](#the-local-activity-logs) | No | Yes | One checkbox |
 
 None of them sends a prompt, changes a provider setting or talks to a
@@ -112,6 +113,54 @@ every daemon start. The admin page shows it per account as
 every <gap>; since <time>)`. The gap is only shown with at least three
 refreshes, because two do not make a rate.
 
+## The Claude mod (VS Code panel)
+
+The VS Code panel never runs the status line, so it cannot send quota the
+way a terminal does. Claude Code does let a small plugin, called a *mod*, see
+the 5-hour and weekly figures after each response. The Presto Claude mod
+writes those figures to a local file, and the collector's `watch` mode sends
+them to the daemon. You get the same accurate quota the status line gives,
+without opening `/usage`.
+
+It needs Claude Code mods (the VS Code extension, version 2.1.299 or later),
+the one-file collector on the computer where the panel runs, and `watch`
+running there. Install it on that computer, not on the daemon's:
+
+```text
+python presto_collector.py claude-mod install
+```
+
+The command explains what it will change, asks first, saves a copy of Claude's
+settings file beside it (`settings.json.presto-backup-<date and time>`), and
+adds one setting, `CLAUDE_CODE_PLUGIN_DIRS`, naming the mod's folder. Then
+reload the VS Code window so Claude Code loads the mod. `claude-mod status`
+says whether it is installed and producing readings, and `claude-mod remove`
+takes back exactly what was added. Running `install` again changes nothing.
+
+What the mod does, and does not do:
+
+- After each response it writes your 5-hour and weekly percentages and their
+  reset times, and the moment of the response, to one small file per Claude
+  session in `~/.presto-ai-dash/claude-quota`.
+- It reads no prompts, files or credentials, makes no network request, starts
+  no process, and never asks Claude anything, so it costs no usage.
+- Claude Code does not sandbox mods. This one is a short file you can read:
+  `~/.presto-ai-dash/claude-mod/presto-quota/hooks/register.js`.
+- A reading is labelled `claude mod`. It is dated by the response that
+  produced it, so an idle panel's reading ages honestly and is never
+  refreshed by the file being touched.
+
+Limits to know about:
+
+- Quota arrives only when Claude answers in a session that has the mod. An
+  idle panel shows its last reading with its age.
+- The figures are account-wide, so use on another computer, on claude.ai or on
+  a phone appears at the next response in a session that has the mod, not
+  before.
+- It reports the 5-hour and weekly windows only, not per-model weekly limits.
+- If the mod is installed but Claude Code has not loaded it, the card says
+  `Reload VS Code (Claude mod)` and the admin page says why.
+
 ## The local activity logs
 
 Claude Code and its VS Code panel write session logs under
@@ -161,9 +210,9 @@ reader counts each response once, by request id.
 | If you... | Use |
 | --- | --- |
 | work in a terminal and want accurate quota | the terminal status line |
-| mostly use the VS Code panel and want quota | the usage cache, and open `/usage` now and then |
+| mostly use the VS Code panel and want quota | the Claude mod (the usage cache is the fallback, and needs `/usage` now and then) |
 | want to know that Claude is in use, without quota | the local activity logs |
-| want everything | all three; each is independent and each says which route a number came from |
+| want everything | all of them; each is independent and each says which route a number came from |
 
 The **Set up for VS Code** button in the account's Edit form ticks the two
 readers for you. It only ticks the boxes; nothing is saved until you press

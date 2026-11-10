@@ -14,9 +14,11 @@ laptop.
   on.
 - It is **one account at a time**. Each remote token is write-only for one
   account and cannot read anything.
-- The daemon **owns the time**. A pushed reading is stamped with the time the
-  daemon received it, so a remote machine with a wrong clock cannot make a
-  stale number look fresh.
+- The daemon **owns the time**. A quota reading is dated by the moment its
+  sender says it was made only if that is within a day before and five
+  minutes after the daemon received it, and never later than that moment, so
+  a remote machine with a wrong clock can make a reading look older but
+  never newer than it arrived.
 - The body carries **no credentials**. Only quota windows, evidence hashes,
   a short host label and, from `watch`, the same short list of fields the
   daemon's own readers keep: activity counts, usage-cache numbers and Codex
@@ -100,10 +102,14 @@ computer's reports immediately.
   one keeps its previous timestamp, so a redraw is not a new reading.
 - `progress` is a hash that changes only when the provider did real work. It
   is the "last reply seen" signal.
-- `client_time` is informational. The daemon's own clock is what counts.
+- `client_time` is the moment the sender made the reading. The daemon believes
+  it only inside the bounds above, so a late report keeps its real age and a
+  wrong clock is ignored. The time the daemon received the report always
+  counts for whether the collector is alive.
 
 `watch` adds optional keys for what it reads, each checked field by field:
-Claude's `activity` and `usage_cache`, and Codex's `reset_credits` and
+Claude's `activity`, `usage_cache` and `mod_status` (whether the Claude mod is
+working), and Codex's `reset_credits` and
 `credits`. A source takes only its own, and anything else in an object is
 refused. A usage-cache reading carries the time Claude Code fetched it, which
 is the one time the daemon accepts from a collector: capped at the receive

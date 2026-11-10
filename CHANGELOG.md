@@ -35,6 +35,14 @@ Claude's quota now stays current from the VS Code panel, and two computers can r
 - A new remote token now shows the simple route first (download the setup file, run `setup`, then `watch`). The terminal status line is an optional extra below it, showing the command for the computer the page is open on and the other kind in a fold-out.
 - `presto_collector.py` is now version 2: typed into a terminal by hand, `claude-statusline` prints a one-line hint and exits with status 2 instead of waiting silently for input. Claude Code's own use is unchanged. Existing installs show "collector update available".
 
+### Docker image
+
+- The Docker image is now built on Python 3.15 (Alpine 3.24), up from Python 3.13.
+
+### Product page
+
+- The product page at the root of the website has a redesigned landing page.
+
 ### Website search discovery
 
 - The marketing website now publishes a root sitemap containing its canonical

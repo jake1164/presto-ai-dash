@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 import json
 import os
 import re
+import shutil
 import stat
 import time
 
@@ -327,3 +328,285 @@ class ModReader(object):
             return {"status": "loaded, no reading yet", "reading": None, "notes": notes}
         return {"status": "unreadable files" if unreadable else "no sessions yet",
                 "reading": None, "notes": notes}
+
+
+# ---- installing the mod into Claude Code ----------------------------------
+#
+# Claude Code loads a mod from any folder named in the CLAUDE_CODE_PLUGIN_DIRS
+# setting (absolute paths, ";" apart on Windows and ":" elsewhere), which can
+# live in the "env" block of its settings file. So installing is: write the
+# mod's three files into a folder of ours, and add that folder to the setting.
+# Nothing else of Claude Code's is touched, the settings file is copied to a
+# backup first, and removing takes back exactly what was added.
+
+PLUGIN_DIRS_SETTING = "CLAUDE_CODE_PLUGIN_DIRS"
+BACKUP_MARKER = ".presto-backup-"
+RECORD_NAME = "install.json"
+MAX_SETTINGS_BYTES = 1024 * 1024
+
+
+class ModInstallError(Exception):
+    """Something to tell the user, in plain words, before anything was changed."""
+
+
+def locations(state_dir, settings_path):
+    """Where everything lives, from the folder the collector keeps its files in."""
+    state_dir = os.path.abspath(state_dir)
+    base = os.path.join(state_dir, "claude-mod")
+    return {"settings": os.path.abspath(settings_path),
+            "plugin_dir": os.path.join(base, MOD_NAME),
+            "record": os.path.join(base, RECORD_NAME),
+            "out_dir": os.path.join(state_dir, "claude-quota")}
+
+
+def _same_folder(first, second):
+    return os.path.normcase(os.path.normpath(first)) == os.path.normcase(os.path.normpath(second))
+
+
+def _entries(value):
+    return [item for item in value.split(os.pathsep) if item.strip()]
+
+
+def _load_settings(path):
+    """The settings as ``(dict, existed)``. Refuses what it cannot safely change."""
+    try:
+        with open(path, "rb") as handle:
+            raw = handle.read(MAX_SETTINGS_BYTES + 1)
+    except FileNotFoundError:
+        return {}, False
+    except OSError as error:
+        raise ModInstallError("cannot read %s (%s)" % (path, type(error).__name__)) from None
+    if len(raw) > MAX_SETTINGS_BYTES:
+        raise ModInstallError("%s is larger than %d bytes; not touching it" % (path, MAX_SETTINGS_BYTES))
+    try:
+        data = json.loads(raw.decode("utf-8-sig"))
+    except (ValueError, UnicodeError, RecursionError):
+        raise ModInstallError("%s is not plain JSON (comments or a typo?), so it was left "
+                              "untouched. Fix it, or add the setting yourself: in its \"env\" "
+                              "block set %s to the mod folder." % (path, PLUGIN_DIRS_SETTING)) from None
+    if not isinstance(data, dict):
+        raise ModInstallError("%s does not hold one JSON object; not touching it" % path)
+    env = data.get("env")
+    if env is not None and not isinstance(env, dict):
+        raise ModInstallError("the \"env\" setting in %s is not an object; not touching it" % path)
+    if env is not None and PLUGIN_DIRS_SETTING in env and not isinstance(env[PLUGIN_DIRS_SETTING], str):
+        raise ModInstallError("%s in %s is not text; not touching it" % (PLUGIN_DIRS_SETTING, path))
+    return data, True
+
+
+def _write_atomically(path, text):
+    """Write a file in whole or not at all, keeping the mode of the one it replaces."""
+    folder = os.path.dirname(path)
+    os.makedirs(folder, exist_ok=True)
+    temporary = os.path.join(folder, ".%s.presto-tmp" % os.path.basename(path))
+    try:
+        with open(temporary, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+        if os.path.exists(path):
+            shutil.copymode(path, temporary)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.remove(temporary)
+
+
+def _save_settings(path, data):
+    _write_atomically(path, json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+
+
+def make_backup(path, now=None):
+    """Copy the settings file beside itself, never over an earlier copy. None if there is none."""
+    if not os.path.exists(path):
+        return None
+    stamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%d-%H%M%S")
+    candidate, number = path + BACKUP_MARKER + stamp, 0
+    while os.path.exists(candidate):
+        number += 1
+        candidate = "%s%s%s-%d" % (path, BACKUP_MARKER, stamp, number)
+    shutil.copy2(path, candidate)
+    return candidate
+
+
+def list_backups(settings_path):
+    folder = os.path.dirname(settings_path) or "."
+    prefix = os.path.basename(settings_path) + BACKUP_MARKER
+    try:
+        return sorted(os.path.join(folder, name) for name in os.listdir(folder)
+                      if name.startswith(prefix))
+    except OSError:
+        return []
+
+
+def _read_record(record_path):
+    try:
+        with open(record_path, "r", encoding="utf-8") as handle:
+            data = json.loads(handle.read(65536))
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def inspect(state_dir, settings_path):
+    """Whether the mod is listed in the settings and whether its files are the current ones.
+
+    Returns ``{"listed", "files_current"}``; raises ModInstallError for settings
+    that cannot be read, as installing would.
+    """
+    place = locations(state_dir, settings_path)
+    data, _ = _load_settings(place["settings"])
+    env = data.get("env") if isinstance(data.get("env"), dict) else {}
+    listed = any(_same_folder(item, place["plugin_dir"])
+                 for item in _entries(env.get(PLUGIN_DIRS_SETTING, "")))
+    current = True
+    for relative, text in mod_files(place["out_dir"]).items():
+        try:
+            with open(os.path.join(place["plugin_dir"], *relative.split("/")), "r",
+                      encoding="utf-8", newline="") as handle:
+                current = current and handle.read() == text
+        except OSError:
+            current = False
+    return {"listed": listed, "files_current": current}
+
+
+def describe_install(state_dir, settings_path, environ=None):
+    """The plain-English account of what installing will do, as a list of lines."""
+    place = locations(state_dir, settings_path)
+    environ = os.environ if environ is None else environ
+    lines = [
+        "Install the Presto Claude mod",
+        "",
+        "What will change on this computer:",
+        "  1. A small Claude Code mod (3 files) is written to:",
+        "       " + place["plugin_dir"],
+        "  2. That folder is added to the %s setting in:" % PLUGIN_DIRS_SETTING,
+        "       " + place["settings"],
+        "     Before that file is changed, a copy is saved beside it as:",
+        "       " + os.path.basename(place["settings"]) + BACKUP_MARKER + "<date and time>",
+        "",
+        "What the mod does:",
+        "  After each Claude response it writes your 5-hour and weekly usage",
+        "  percentages and their reset times to:",
+        "       " + place["out_dir"],
+        "  The collector sends those to your Presto daemon. The mod reads no",
+        "  prompts, files or credentials, makes no network request and starts no",
+        "  process. Claude Code does not sandbox mods, so you can read all of it:",
+        "       " + os.path.join(place["plugin_dir"], "hooks", "register.js"),
+        "",
+        "To undo it at any time:  python presto_collector.py claude-mod remove",
+    ]
+    if environ.get(PLUGIN_DIRS_SETTING):
+        lines[9:9] = ["     Note: your environment already sets %s; the setting added here"
+                      % PLUGIN_DIRS_SETTING,
+                      "     may replace it for Claude Code. Check it still lists your other mods."]
+    return lines
+
+
+def install(state_dir, settings_path, now=None):
+    """Install or refresh the mod. Returns what was done; raises ModInstallError first if unsafe."""
+    place = locations(state_dir, settings_path)
+    data, existed = _load_settings(place["settings"])      # refuse before changing anything
+    env = data.get("env") if isinstance(data.get("env"), dict) else None
+    current = _entries(env.get(PLUGIN_DIRS_SETTING, "")) if env else []
+    listed = any(_same_folder(item, place["plugin_dir"]) for item in current)
+    result = {"plugin_dir": place["plugin_dir"], "settings": place["settings"], "backup": None,
+              "files_changed": False, "settings_changed": False}
+    for relative, text in mod_files(place["out_dir"]).items():
+        target = os.path.join(place["plugin_dir"], *relative.split("/"))
+        try:
+            with open(target, "r", encoding="utf-8", newline="") as handle:
+                same = handle.read() == text
+        except OSError:
+            same = False
+        if not same:
+            _write_atomically(target, text)
+            result["files_changed"] = True
+    os.makedirs(place["out_dir"], exist_ok=True)
+    if not listed:
+        result["backup"] = make_backup(place["settings"], now)
+        record = {"settings": place["settings"], "plugin_dir": place["plugin_dir"],
+                  "backup": result["backup"], "created_file": not existed,
+                  "created_env": env is None,
+                  "created_setting": env is None or PLUGIN_DIRS_SETTING not in env}
+        if env is None:
+            env = data["env"] = {}
+        env[PLUGIN_DIRS_SETTING] = os.pathsep.join(current + [place["plugin_dir"]])
+        _save_settings(place["settings"], data)
+        _write_atomically(place["record"], json.dumps(record, indent=2) + "\n")
+        result["settings_changed"] = True
+    return result
+
+
+def remove(state_dir, settings_path, now=None):
+    """Take the mod back out. Returns what was done; the backups and readings are kept."""
+    place = locations(state_dir, settings_path)
+    record = _read_record(place["record"])
+    data, existed = _load_settings(place["settings"])
+    result = {"settings": place["settings"], "backup": None, "settings_changed": False,
+              "files_removed": False}
+    env = data.get("env") if isinstance(data.get("env"), dict) else None
+    current = _entries(env.get(PLUGIN_DIRS_SETTING, "")) if env else []
+    kept = [item for item in current if not _same_folder(item, place["plugin_dir"])]
+    if len(kept) != len(current):
+        result["backup"] = make_backup(place["settings"], now)
+        if kept:
+            env[PLUGIN_DIRS_SETTING] = os.pathsep.join(kept)
+        else:
+            del env[PLUGIN_DIRS_SETTING]
+            if not env and record.get("created_env", True):
+                del data["env"]
+        if not data and record.get("created_file"):
+            os.remove(place["settings"])
+        else:
+            _save_settings(place["settings"], data)
+        result["settings_changed"] = True
+    if os.path.isdir(place["plugin_dir"]):
+        shutil.rmtree(place["plugin_dir"], ignore_errors=True)
+        result["files_removed"] = True
+    try:
+        os.remove(place["record"])
+    except OSError:
+        pass
+    return result
+
+
+def status(state_dir, settings_path, now=None):
+    """What is installed and what the mod has written lately, as ``(lines, healthy)``."""
+    place = locations(state_dir, settings_path)
+    lines, problems = [], 0
+    try:
+        data, _ = _load_settings(place["settings"])
+        env = data.get("env") if isinstance(data.get("env"), dict) else {}
+        listed = any(_same_folder(item, place["plugin_dir"])
+                     for item in _entries(env.get(PLUGIN_DIRS_SETTING, "")))
+    except ModInstallError as error:
+        lines.append("Claude settings: " + str(error))
+        listed, problems = False, problems + 1
+    else:
+        lines.append("Claude settings (%s): %s" % (
+            place["settings"], "lists the mod" if listed else "does not list the mod"))
+    expected = mod_files(place["out_dir"])
+    present = {}
+    for relative in expected:
+        try:
+            with open(os.path.join(place["plugin_dir"], *relative.split("/")), "r",
+                      encoding="utf-8", newline="") as handle:
+                present[relative] = handle.read()
+        except OSError:
+            present[relative] = None
+    if all(text is None for text in present.values()):
+        lines.append("Mod files (%s): not installed" % place["plugin_dir"])
+    elif present == expected:
+        lines.append("Mod files (%s): present and current" % place["plugin_dir"])
+    else:
+        lines.append("Mod files (%s): out of date or incomplete; run claude-mod install"
+                     % place["plugin_dir"])
+        problems += 1
+    if not listed and any(text is not None for text in present.values()):
+        problems += 1
+    outcome = ModReader(place["out_dir"]).refresh(now)
+    lines.append("Mod output (%s): %s" % (place["out_dir"], outcome["status"]))
+    lines.extend("  " + note for note in outcome["notes"])
+    backups = list_backups(place["settings"])
+    lines.append("Settings backups: %d%s" % (len(backups), " (newest %s)" % os.path.basename(backups[-1])
+                                              if backups else ""))
+    return lines, problems == 0

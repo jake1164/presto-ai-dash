@@ -55,6 +55,51 @@ def _read_time(value):
         raise ValueError("invalid stored timestamp: %r" % (value,)) from exc
 
 
+# Two reset times this close are one window: the provider's own figure drifts
+# by under a second between calls.
+RESET_DRIFT = timedelta(seconds=120)
+
+
+def _window_wins(new, old, made_at):
+    """Whether a pushed quota window should replace the stored one.
+
+    A window that resets later is a later window and a window that resets
+    earlier is an earlier one, whatever order the reports arrive in. Within one
+    window the reading made later wins, and a tie goes to the newer report.
+    """
+    if old is None:
+        return True
+    new_reset, old_reset = new.get("resets_at"), old.get("resets_at")
+    if new_reset and old_reset:
+        gap = _read_time(new_reset) - _read_time(old_reset)
+        if gap > RESET_DRIFT:
+            return True
+        if gap < -RESET_DRIFT:
+            return False
+    return made_at >= _read_time(old["observed_at"])
+
+
+def _cache_time(cache):
+    fetched = cache.get("fetched_at") if isinstance(cache, dict) else None
+    return _read_time(fetched) if fetched else None
+
+
+def _keep_newer_cache(target, previous):
+    """A delayed usage-cache push must not replace a cache fetched later.
+
+    ``target`` is the report about to be stored and ``previous`` the stored one.
+    A pushed cache with no fetch time (an unavailable one) never beats a stored
+    cache that has one.
+    """
+    key = "pushed_usage_cache"
+    old, new = previous.get(key), target.get(key)
+    if not old or not new:
+        return
+    old_time, new_time = _cache_time(old), _cache_time(new)
+    if old_time is not None and (new_time is None or new_time < old_time):
+        target[key] = old
+
+
 def _validated_alerts(value):
     if not isinstance(value, list):
         raise ValueError("alerts must be a list")
@@ -361,13 +406,18 @@ class Storage:
 
     def save_observation(self, instance_id, report, evidence, collector_host=None,
                          collector_version=None, progress=None, now=None, extras=None,
-                         base_report=None):
+                         base_report=None, observed_at=None):
         """Atomic account routing and freshness preservation across helper processes.
 
-        The daemon owns time: a window's observed_at becomes this receive time
-        unless its evidence hash matches the stored one, which keeps the old
-        timestamp, and collector_seen_at is this receive time too — never the
-        client's clock. A changed progress hash updates last_progress_at. A
+        The daemon owns time: collector_seen_at is this receive time, never the
+        client's clock. A window's observed_at is ``observed_at`` (when the
+        reading was made, as the caller judged it; the receive time when not
+        given) unless its evidence hash matches the stored one, which keeps the
+        old timestamp. Each window is merged on its own: a pushed window
+        replaces the stored one only if it is a later window or a later reading
+        of the same window (see ``_window_wins``), so a delayed report from
+        another computer cannot roll a reading back. A changed progress hash
+        updates last_progress_at, but never to an earlier time. A
         None report is a heartbeat: collector connectivity only, quota
         untouched. A heartbeat may carry ``extras``, readings that belong in the
         stored report (``base_report``, with every window unavailable, stands in
@@ -394,7 +444,9 @@ class Storage:
                         merged = deepcopy(base_report)
                         for window in merged["windows"]:
                             window["observed_at"] = observed
-                    merged.update(extras)
+                    incoming = dict(extras)
+                    _keep_newer_cache(incoming, merged)
+                    merged.update(incoming)
                     if previous is None:
                         self._conn.execute(
                             "INSERT INTO observations (instance_id, report, evidence,"
@@ -428,20 +480,39 @@ class Storage:
                 old_windows = ({window["id"]: window
                                 for window in json.loads(previous["report"])["windows"]}
                                if previous and previous["report"] else {})
-                for window in result["windows"]:
+                made = _stored_time(observed_at) if observed_at is not None else observed
+                made_at = _read_time(made)
+                incoming_evidence = evidence or {}
+                merged_evidence = {}
+                for index, window in enumerate(result["windows"]):
                     key = window["id"]
-                    if key in old_windows and old_evidence.get(key) == (evidence or {}).get(key):
-                        window["observed_at"] = old_windows[key]["observed_at"]
+                    old = old_windows.get(key)
+                    if old is not None and old_evidence.get(key) == incoming_evidence.get(key):
+                        window["observed_at"] = old["observed_at"]  # a redraw, not a new reading
                     else:
-                        window["observed_at"] = observed
+                        window["observed_at"] = made
+                    if _window_wins(window, old, made_at):
+                        source = incoming_evidence
+                    else:
+                        result["windows"][index] = old
+                        source = old_evidence
+                    if key in source:
+                        merged_evidence[key] = source[key]
+                evidence = merged_evidence
                 if previous and previous["report"]:
                     kept = json.loads(previous["report"])
+                    _keep_newer_cache(result, kept)
                     for key in self.PUSHED_KEYS:
                         if key in kept and key not in result:
                             result[key] = kept[key]
                 last_progress_at = previous["last_progress_at"] if previous else None
-                if progress is not None and progress != (previous["progress"] if previous else None):
-                    last_progress_at = observed
+                progress_hash = previous["progress"] if previous else None
+                if progress is not None and progress != progress_hash:
+                    # A delayed report from another computer keeps what is stored.
+                    if last_progress_at is None or made_at >= _read_time(last_progress_at):
+                        last_progress_at, progress_hash = made, progress
+                else:
+                    progress_hash = progress
                 self._conn.execute(
                     "INSERT INTO observations (instance_id, report, evidence, collector_seen_at,"
                     " collector_host, collector_version, last_progress_at, progress, last_activity_at)"
@@ -452,7 +523,7 @@ class Storage:
                     " collector_version=excluded.collector_version,"
                     " last_progress_at=excluded.last_progress_at, progress=excluded.progress",
                     (instance_id, json.dumps(result), json.dumps(evidence or {}),
-                     observed, collector_host, collector_version, last_progress_at, progress))
+                     observed, collector_host, collector_version, last_progress_at, progress_hash))
                 self._conn.commit()
                 return True
             except Exception:

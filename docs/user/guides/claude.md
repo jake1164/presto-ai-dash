@@ -158,8 +158,10 @@ Limits to know about:
   a phone appears at the next response in a session that has the mod, not
   before.
 - It reports the 5-hour and weekly windows only, not per-model weekly limits.
-- If the mod is installed but Claude Code has not loaded it, the card says
-  `Reload VS Code (Claude mod)` and the admin page says why.
+- If the mod is installed but Claude Code has not loaded it, the admin page says
+  `Reload VS Code (Claude mod)` and why, and the Presto shows the same words
+  while there is no reading yet. Once there is a reading, the Presto shows its
+  age (`stale 2h`) and the admin page carries the longer advice.
 
 ## The local activity logs
 

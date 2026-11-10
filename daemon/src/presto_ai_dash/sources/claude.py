@@ -26,6 +26,8 @@ NOTE_CACHE = ("Claude Code terminal export and its local usage cache; idle readi
               "become stale. The VS Code panel does not run the status line, so quota "
               "arrives from terminal sessions and from the usage cache Claude Code "
               "writes for its /usage dialog (opening /usage refreshes it).")
+NOTE_MOD = ("Claude Code mod: the quota is read after each Claude response, so "
+            "an idle session's reading becomes stale.")
 # A pushed activity summary older than this is no longer a reading: the
 # collector that sent it has stopped, and its token totals would stand still.
 PUSHED_ACTIVITY_SECONDS = 600
@@ -199,8 +201,11 @@ class ClaudeSource(Source):
         report["windows"] = windows
 
     @staticmethod
-    def _note(observation, cache):
+    def _note(observation, cache, windows=()):
         """Why the quota looks the way it does, in the current wording."""
+        if any(w.get("source") == SOURCE_MOD and w.get("state") == "available"
+               for w in windows):
+            return NOTE_MOD
         if cache is not None and cache.get("available"):
             return NOTE_CACHE
         if observation is None:
@@ -265,7 +270,7 @@ class ClaudeSource(Source):
             self._merge_cache(report, cache)
         # The note is the wording of today, not a copy frozen into the stored
         # reading when it was received (ingest writes one into every report).
-        report["note"] = self._note(observation, cache)
+        report["note"] = self._note(observation, cache, report["windows"])
         # Every report carries the collector trail (None before the first
         # push), so payload building can produce freshness hints (Phase 4).
         report["stale_after_seconds"] = self.config.get("stale_after_seconds", 900)

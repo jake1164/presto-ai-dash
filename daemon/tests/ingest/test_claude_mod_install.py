@@ -213,6 +213,16 @@ class RemoveTests(Base):
         self.remove()
         self.assertTrue(kept.exists())
 
+    def test_the_mods_own_folder_is_tidied_away_but_nothing_else_in_it(self):
+        self.install()
+        base = Path(self.place["record"]).parent
+        self.remove()
+        self.assertFalse(base.exists())
+        self.install()
+        (base / "something-else.txt").write_text("keep me")
+        self.remove()
+        self.assertTrue((base / "something-else.txt").exists())
+
     def test_removing_when_nothing_is_installed_changes_nothing(self):
         original = self.write_settings({"model": "sonnet"})
         done = self.remove()

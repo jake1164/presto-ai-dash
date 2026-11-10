@@ -604,6 +604,14 @@ class Problem(Exception):
     """Something to tell the user, in one plain sentence, without a stack trace."""
 
 
+class Rejected(Problem):
+    """The daemon refused a report as malformed (400); ``detail`` is the reason it gave."""
+
+    def __init__(self, message, detail):
+        Problem.__init__(self, message)
+        self.detail = detail
+
+
 class Account(object):
     """One configured account: its readers (kept between rounds) and its send state."""
 
@@ -614,6 +622,8 @@ class Account(object):
         self.activity_reader = None
         self.cache_reader = None
         self.mod_reader = None
+        # An older daemon refuses the mod's status as an unknown key; once it has, stop sending it.
+        self.mod_status_refused = False
         self.failures = 0
         self.skip_until = 0
         self.last_message = None
@@ -661,7 +671,7 @@ class Account(object):
         expected = os.path.exists(os.path.join(os.path.dirname(self.settings["mod_folder"]),
                                                "claude-mod", module.RECORD_NAME))
         state = module.daemon_state(result["status"], expected)
-        if state:
+        if state and not self.mod_status_refused:
             pieces["mod_status"] = {"state": state}
         if reading is None:
             notes.append("claude mod: " + "; ".join([result["status"]] + result["notes"]))
@@ -729,9 +739,15 @@ class Account(object):
             else:
                 pieces, notes = self._codex_pieces(host, now)
             envelope.update(pieces)
+            if self.mod_status_refused:
+                warning = ("the daemon is older than this collector and does not accept the "
+                           "Claude mod's status; update the daemon (quota is still sent)")
         except Problem as problem:
             warning = str(problem)
         return envelope, notes, warning
+
+
+_TOKEN_NOTED = set()
 
 
 def _read_token_checked(path):
@@ -740,9 +756,10 @@ def _read_token_checked(path):
     if not token:
         raise Problem("the token file %s is missing or empty; create a remote token for this "
                       "account in the daemon's admin page and save it there" % path)
-    if os.name != "nt":
+    if os.name != "nt" and path not in _TOKEN_NOTED:
         try:
             if os.stat(path).st_mode & 0o077:
+                _TOKEN_NOTED.add(path)  # once is enough: watch mode reads it every round
                 sys.stderr.write("note: %s can be read by other users; run chmod 600 on it\n"
                                  % path)
         except OSError:
@@ -772,8 +789,8 @@ def send(url, token, envelope, opener=None):
                 detail = _ascii(json.loads(error.read(2048).decode("utf-8")).get("error", ""))
             except (ValueError, UnicodeError, AttributeError):
                 detail = ""
-            raise Problem("the daemon rejected the report (400)%s"
-                          % (": " + detail if detail else "")) from None
+            raise Rejected("the daemon rejected the report (400)%s"
+                           % (": " + detail if detail else ""), detail) from None
         if 300 <= code < 400:
             raise Problem("the daemon redirected the request (%d); redirects are never "
                           "followed, because they would carry the token elsewhere" % code) from None
@@ -800,7 +817,13 @@ def run_round(config, accounts, now=None, out=None, opener=None, verbose=False):
             envelope, notes, warning = account.envelope(config["host"], now)
             token = _read_token_checked(account.settings["token_file"])
             send(config["url"], token, envelope, opener)
+            if account.mod_reader is not None:
+                account.mod_reader.acknowledge()  # delivered: do not offer that reading again
         except Problem as problem:
+            if (isinstance(problem, Rejected) and not account.mod_status_refused
+                    and "mod_status" in problem.detail):
+                # Sent without it next round: a retry now would meet the daemon's two-second throttle.
+                account.mod_status_refused = True
             account.failures += 1
             account.skip_until = now + min(MAX_BACKOFF_SECONDS,
                                            config["interval"] * 2 ** min(account.failures - 1, 4))
@@ -2570,12 +2593,22 @@ class ModReader(object):
 
     A file counts as a new reading only when its sequence number is higher than
     the last one seen for that session, never because it was touched or
-    rewritten, so a reading is dated by the response that produced it.
+    rewritten, so a reading is dated by the response that produced it. A reading
+    counts as seen only once ``acknowledge`` says it was delivered, so one that
+    could not be sent (the daemon was unreachable) is offered again next time
+    instead of being lost.
     """
 
     def __init__(self, folder):
         self.folder = folder
         self.seen = {}
+        self._pending = {}
+
+    def acknowledge(self):
+        """The reading last returned by ``refresh`` was delivered; do not offer it again."""
+        for instance, seq in self._pending.items():
+            self.seen[instance] = max(self.seen.get(instance, 0), seq)
+        self._pending = {}
 
     def _read(self, path):
         with open(path, "rb") as handle:
@@ -2651,8 +2684,13 @@ class ModReader(object):
                     and moment - timedelta(seconds=MAX_READING_AGE_SECONDS) <= observed
                     <= moment + timedelta(seconds=FUTURE_SECONDS)):
                 candidates.append(item)
+        # What is not a candidate needs no sending, so it is seen now. A candidate
+        # becomes seen when it has been delivered (acknowledge).
+        chosen = {id(item) for item in candidates}
+        self._pending = {item["instance"]: item["seq"] for item in candidates}
         for item in parsed:
-            self.seen[item["instance"]] = max(self.seen.get(item["instance"], 0), item["seq"])
+            if id(item) not in chosen:
+                self.seen[item["instance"]] = max(self.seen.get(item["instance"], 0), item["seq"])
         notes = []
         if unreadable:
             notes.append("%d mod file(s) could not be read and were ignored" % unreadable)
@@ -2919,6 +2957,10 @@ def remove(state_dir, settings_path, now=None):
         result["files_removed"] = True
     try:
         os.remove(place["record"])
+    except OSError:
+        pass
+    try:
+        os.rmdir(os.path.dirname(place["record"]))  # only succeeds when nothing else is in it
     except OSError:
         pass
     return result

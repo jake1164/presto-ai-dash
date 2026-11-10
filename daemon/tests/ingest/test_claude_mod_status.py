@@ -120,6 +120,23 @@ class LabelTests(SourceBase):
         self.assertEqual(windows["five_hour"]["source"], "terminal export")
         self.assertEqual(windows["five_hour"]["used_percent"], 45.0)
 
+    def note(self):
+        source = ClaudeSource({"settings_path": str(Path(self.temp.name) / "s.json")})
+        source.id = self.id
+        source.attach_storage(self.storage)
+        return source.collect().metrics["quota"]["note"]
+
+    def test_a_reading_from_the_mod_is_not_described_as_terminal_only(self):
+        self.push(watch_report(minutes_ago(1)))
+        note = self.note()
+        self.assertIn("mod", note)
+        self.assertNotIn("does not run the status line", note)
+        self.assertNotIn("terminal", note)
+
+    def test_a_status_line_reading_keeps_the_terminal_wording(self):
+        self.push(watch_report(minutes_ago(1), name="claude-statusline"))
+        self.assertIn("terminal export", self.note())
+
 
 def claude_mod_states():
     from presto_ai_dash.ingest_extras import MOD_STATES
@@ -209,6 +226,25 @@ class ProvenanceTests(unittest.TestCase):
         self.assertIsNone(claude_provenance(report_with(None, 5), {})["mod"])
 
 
+class CardTests(unittest.TestCase):
+    """The narrow detail card names the route of the newest reading."""
+
+    def trail(self, source):
+        from presto_ai_dash.dashboard import _trail_lines
+        report = report_with(None, 5)
+        for window in report["windows"]:
+            window["source"] = source
+        report["last_progress_at"] = None
+        return _trail_lines(report, datetime.now(timezone.utc))
+
+    def test_a_mod_reading_says_mod(self):
+        self.assertEqual(self.trail("claude mod")[0], "Quota via mod, 5 min old")
+
+    def test_the_other_routes_are_unchanged(self):
+        self.assertEqual(self.trail("terminal export")[0], "Quota via export, 5 min old")
+        self.assertEqual(self.trail("usage cache")[0], "Quota via cache, 5 min old")
+
+
 class CollectorStateTests(unittest.TestCase):
     def test_what_the_reader_says_becomes_a_state(self):
         table = {("reading", False): "working", ("waiting for a response", False): "idle",
@@ -265,7 +301,139 @@ class AccountTests(FolderBase):
         write_file(self.root / ".presto-ai-dash" / "claude-quota", seq=2, observed=when(30))
         account = self.mod_account()
         account.envelope("laptop", NOW)
+        account.mod_reader.acknowledge()
         self.assertEqual(account.envelope("laptop", NOW)[0]["mod_status"], {"state": "idle"})
+
+
+class OlderDaemonTests(FolderBase):
+    """A collector newer than its daemon: the daemon has never heard of mod_status."""
+
+    class Daemon:
+        """Stands in for a daemon from before the mod: it refuses the key it does not know."""
+
+        def __init__(self):
+            self.bodies = []
+
+        def open(self, request, timeout=None):
+            import io
+            import urllib.error
+            body = json.loads(request.data.decode("utf-8"))
+            self.bodies.append(body)
+            if "mod_status" in body:
+                raise urllib.error.HTTPError(
+                    request.full_url, 400, "Bad Request", {},
+                    io.BytesIO(b'{"error": "unknown top-level key: mod_status"}'))
+            return self
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self, size=-1):
+            return b""
+
+    def setUp(self):
+        super().setUp()
+        (self.root / "claude.token").write_text("token", encoding="utf-8")
+        write_file(self.root / "claude-quota", seq=2, observed=when(30))
+        self.account_settings = dict(
+            service="claude", name="claude", token_file=str(self.root / "claude.token"),
+            settings_path=str(self.profile / "settings.json"), activity=False, usage_cache=False,
+            usage_cache_path="", mod=True, mod_folder=str(self.root / "claude-quota"))
+        self.config = {"url": "http://old-daemon/api/v1/ingest", "host": "laptop", "interval": 60}
+        self.daemon = self.Daemon()
+        self.account_object = collector.Account(self.account_settings)
+
+    def round(self, now):
+        import io
+        out = io.StringIO()
+        sent = collector.run_round(self.config, [self.account_object], now=now, out=out,
+                                   opener=self.daemon)
+        return sent, out.getvalue()
+
+    def test_the_refusal_is_remembered_and_the_next_round_goes_without_the_key(self):
+        sent, output = self.round(NOW)
+        self.assertEqual(sent, 0)
+        self.assertIn("mod_status", output)
+        self.assertTrue(self.account_object.mod_status_refused)
+        sent, output = self.round(NOW + 1000)
+        self.assertEqual(sent, 1)
+        self.assertNotIn("mod_status", self.daemon.bodies[-1])
+        self.assertEqual(len(self.daemon.bodies[-1]["windows"]), 2)       # the quota still goes
+
+    def test_the_user_is_told_the_daemon_is_old_and_only_once(self):
+        self.round(NOW)
+        _, first = self.round(NOW + 1000)
+        _, second = self.round(NOW + 2000)
+        self.assertIn("older than this collector", first)
+        self.assertIn("update the daemon", first)
+        self.assertNotIn("older than this collector", second)
+
+    def test_other_refusals_do_not_switch_it_off(self):
+        import io
+        import urllib.error
+
+        class Refusing(self.Daemon):
+            def open(self, request, timeout=None):
+                raise urllib.error.HTTPError(request.full_url, 400, "Bad Request", {},
+                                             io.BytesIO(b'{"error": "unknown top-level key: other"}'))
+
+        self.daemon = Refusing()
+        self.round(NOW)
+        self.assertFalse(self.account_object.mod_status_refused)
+
+    def test_a_current_daemon_is_never_asked_to_do_without_it(self):
+        class Current(self.Daemon):
+            def open(self, request, timeout=None):
+                self.bodies.append(json.loads(request.data.decode("utf-8")))
+                return self
+
+        self.daemon = Current()
+        sent, _ = self.round(NOW)
+        self.assertEqual(sent, 1)
+        self.assertIn("mod_status", self.daemon.bodies[0])
+        self.assertFalse(self.account_object.mod_status_refused)
+
+
+class UnreachableDaemonTests(OlderDaemonTests):
+    """The daemon cannot be reached for a round: the reading is sent when it can be."""
+
+    class Flaky(OlderDaemonTests.Daemon):
+        def __init__(self, failures):
+            OlderDaemonTests.Daemon.__init__(self)
+            self.failures = failures
+
+        def open(self, request, timeout=None):
+            import urllib.error
+            self.bodies.append(json.loads(request.data.decode("utf-8")))
+            if self.failures:
+                self.failures -= 1
+                raise urllib.error.URLError("unreachable")
+            return self
+
+    def test_a_reading_that_could_not_be_sent_is_not_lost(self):
+        self.daemon = self.Flaky(failures=1)
+        sent, _ = self.round(NOW)
+        self.assertEqual(sent, 0)
+        sent, _ = self.round(NOW + 1000)
+        self.assertEqual(sent, 1)
+        self.assertEqual(len(self.daemon.bodies[-1]["windows"]), 2)
+        self.assertEqual(self.daemon.bodies[-1]["windows"], self.daemon.bodies[0]["windows"])
+
+    def test_once_delivered_it_is_not_sent_again(self):
+        self.daemon = self.Flaky(failures=0)
+        self.round(NOW)
+        self.round(NOW + 1000)
+        self.assertIn("windows", self.daemon.bodies[0])
+        self.assertNotIn("windows", self.daemon.bodies[1])           # a heartbeat, nothing new
+
+    # The older-daemon cases above are not repeated for this class.
+    test_the_refusal_is_remembered_and_the_next_round_goes_without_the_key = None
+    test_the_user_is_told_the_daemon_is_old_and_only_once = None
+    test_other_refusals_do_not_switch_it_off = None
+    test_a_current_daemon_is_never_asked_to_do_without_it = None
 
 
 class EndToEndTests(PushBase):

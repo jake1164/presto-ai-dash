@@ -32,7 +32,8 @@ On the computer where the panel runs, with the collector's `watch` going:
 3. Use Claude once, then run `python presto_collector.py claude-mod status`.
 
 The quota is then labelled `claude mod` and follows each response. If the card
-says `Reload VS Code (Claude mod)`, Claude Code has not loaded it yet. See
+says `Reload VS Code (Claude mod)` (or the admin page does), Claude Code has not
+loaded it yet. See
 [The Claude mod](../guides/claude.md#the-claude-mod-vs-code-panel).
 
 ### Use the usage cache

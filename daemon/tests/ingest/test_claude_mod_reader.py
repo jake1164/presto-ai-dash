@@ -143,11 +143,28 @@ class ReaderTests(unittest.TestCase):
         first = self.refresh()
         self.assertEqual(first["status"], "reading")
         self.assertEqual(first["reading"]["seq"], 2)
+        self.reader.acknowledge()
         self.assertEqual(self.refresh()["status"], "waiting for a response")
+
+    def test_a_reading_that_was_not_delivered_is_offered_again(self):
+        write_file(self.folder, seq=2, observed=when(20))
+        self.assertEqual(self.refresh()["status"], "reading")
+        again = self.refresh()                       # the send failed, nobody acknowledged
+        self.assertEqual(again["status"], "reading")
+        self.assertEqual(again["reading"]["seq"], 2)
+        self.reader.acknowledge()
+        self.assertIsNone(self.refresh()["reading"])
+
+    def test_a_newer_reading_replaces_one_that_was_never_delivered(self):
+        write_file(self.folder, seq=2, observed=when(60))
+        self.refresh()
+        write_file(self.folder, seq=3, observed=when(10), rate_limits=limits(base=when(60)))
+        self.assertEqual(self.refresh()["reading"]["seq"], 3)
 
     def test_a_file_that_is_only_touched_is_not_a_new_reading(self):
         path = write_file(self.folder, seq=2, observed=when(20))
         self.refresh()
+        self.reader.acknowledge()
         os.utime(path, (NOW + 5, NOW + 5))
         path.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")   # rewritten, same event
         self.assertIsNone(self.refresh()["reading"])
@@ -260,6 +277,7 @@ class AccountTests(FolderBase):
         account = self.mod_account()
         write_file(folder, seq=2, observed=when(45))
         first = self.envelope(account)[0]
+        account.mod_reader.acknowledge()               # run_round does this once the send worked
         self.assertNotIn("windows", self.envelope(account)[0])
         write_file(folder, seq=3, observed=when(5), rate_limits=limits(base=when(45)))
         third = self.envelope(account)[0]

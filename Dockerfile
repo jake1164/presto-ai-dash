@@ -12,7 +12,7 @@
 # same system libraries and the same packages every time. Dependabot proposes
 # a newer digest or version as a pull request.
 
-FROM python:3.15-alpine3.24@sha256:20a82dbc2783112ddb91d1534603f802d222a3e63e593cd002eb2ac534e70211 AS builder
+FROM python:3.15-alpine3.24@sha256:0f9552bb28711333da16915ec146f5e6bb44a7fdac9ced15dc17c2e0206346dd AS builder
 
 ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1
@@ -45,7 +45,7 @@ RUN python -m venv /opt/venv \
  && rm -rf /opt/venv/lib/python3.13/site-packages/pip* /opt/venv/bin/pip*
 
 
-FROM python:3.15-alpine3.24@sha256:20a82dbc2783112ddb91d1534603f802d222a3e63e593cd002eb2ac534e70211
+FROM python:3.15-alpine3.24@sha256:0f9552bb28711333da16915ec146f5e6bb44a7fdac9ced15dc17c2e0206346dd
 
 # The licence the project is distributed under, and the notices for what it
 # includes, travel with the image.
